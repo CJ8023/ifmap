@@ -78,6 +78,7 @@ public class DemoController {
 | `ifmap-json-jackson` | 8 | `JsonOps` 的 Jackson 实现（默认） |
 | `ifmap-json-fastjson` | 8 | `JsonOps` 的 fastjson 兼容实现（存量迁移过渡用） |
 | `ifmap-provider-jdbc` | 8 | 建表脚本（Liquibase 格式 SQL）、JDBC 仓储、执行日志清理/归档、日志分区运维手册（`db/optional/`） |
+| `ifmap-provider-remote` | 8 | `ConfigRepository` 的远端 HTTP 实现（配置不落库时用；`ConfigFetcher` SPI 注入 Feign/RestTemplate） |
 | `ifmap-spring-boot-starter` | 17 | Spring Boot 3 自动装配（引擎/仓储/策略收集/建表/日志清理） |
 | `ifmap-admin-spring-boot-starter` | 17 | 管理端 REST（配置 CRUD/校验/试跑/历史回滚/巡检）+ 零构建可视化页面，默认关闭 |
 | `ifmap-demo-pure-java` | 8 | 纯 Java 用法示例 |
@@ -97,6 +98,7 @@ public class DemoController {
 | [日志与合规](08-日志与合规.md) | 脱敏规则、截断、写日志降级、保留期清理、按月分区与冷热分离归档、合规自查清单 |
 | [参与贡献](09-参与贡献.md) | 开发环境、双 JDK 构建、测试与质量门禁、提交检查表 |
 | [迁移指南](10-迁移指南.md) | 存量迁移（表结构 / 规则策略对齐 / 影子运行 / 切换回滚） |
+| [远端配置源](11-远端配置源.md) | 配置在远端 HTTP 接口里怎么接（不迁表）、映射规则与容错、与存量接口的差异 |
 
 ## 许可
 
@@ -106,6 +108,6 @@ public class DemoController {
 ## 状态
 
 当前进度：核心 → 仓储 → Starter → 编排/策略 → 管理端 REST → 日志合规 → 开源工程化 → 迁移预热 →
-可视化页面 → 日志分区与冷热分离 **已交付**；Fastjson 实现、Feign 数据源、PostgreSQL/Oracle 方言、
-Micrometer 指标仍在计划中。
+可视化页面 → 日志分区与冷热分离 → Fastjson 实现 → 远端配置源与数据源分离 **已交付**；
+PostgreSQL/Oracle 方言、Micrometer 指标仍在计划中。
 每个模块的测试数与验证命令见仓库根目录 `README.md` 与 `CHANGELOG.md`。

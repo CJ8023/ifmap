@@ -297,6 +297,89 @@ public IfmapResult call(IfmapRequest request) {
 编排链路（前置接口递归 + 拓扑排序 + 判定 + 分支 + 回调）、`IfmapRequest`/`IfmapResult` 用法、
 dry-run 试跑、契约自检见 [`docs/06-执行编排与策略扩展.md`](06-执行编排与策略扩展.md)。
 
+### 3.5 配置库与日志库分离（不做多数据源框架）
+
+合规常常要求「执行日志单独一个库」：独立存储、独立保留期、独立权限。设计 Q10 的结论是
+**starter 不做多数据源框架**，因为接缝早就在了 —— 读配置走 `ConfigRepository`，写日志走
+`ExecutionLogSink`，两者是**两个独立 SPI**；而所有自动配置 bean 都是 `@ConditionalOnMissingBean`，
+宿主声明同类型 bean 就能接管其中一个。
+
+宿主侧全部代码（一个配置类，零新 API）：
+
+```java
+@Configuration
+class SplitLogDatasourceConfiguration {
+
+    // ---------- 主库（配置）：标 @Primary，自动配置里的 DataSource 注入都走它 ----------
+
+    @Bean
+    @Primary
+    @ConfigurationProperties("ifmap.datasource")
+    DataSourceProperties configDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean
+    @Primary
+    @ConfigurationProperties("ifmap.datasource.configuration")
+    DataSource configDataSource(@Qualifier("configDataSourceProperties") DataSourceProperties properties) {
+        return properties.initializeDataSourceBuilder().build();
+    }
+
+    // ---------- 日志库：只有它被显式注入到下面的 sink 里 ----------
+
+    @Bean
+    @ConfigurationProperties("ifmap.log.datasource")
+    DataSourceProperties logDataSourceProperties() {
+        return new DataSourceProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties("ifmap.log.datasource.configuration")
+    DataSource logDataSource(@Qualifier("logDataSourceProperties") DataSourceProperties properties) {
+        return properties.initializeDataSourceBuilder().build();
+    }
+
+    /** 覆盖默认 sink（默认是把日志写进 ConfigRepository 用的那个库）。 */
+    @Bean
+    ExecutionLogSink ifmapExecutionLogSink(@Qualifier("logDataSource") DataSource logDataSource) {
+        return new RepositoryExecutionLogSink(new JdbcConfigRepository(logDataSource));
+    }
+}
+```
+
+> 两个 `DataSource` bean **必须有一个 `@Primary`**（上面给了配置库），否则自动配置里按类型注入会报
+> `NoUniqueBeanDefinitionException`；`.configuration` 那两层的存在是为了让连接池参数也能配
+> （`ifmap.log.datasource.configuration.maximum-pool-size` 之类），这是 Spring Boot 官方
+> 「Configure Two DataSources」的写法。
+
+```yaml
+ifmap:
+  datasource:            # 主库：接口配置
+    url: jdbc:mysql://config-db:3306/ecc?useSSL=false
+    username: ecc
+    password: ***
+  log:
+    datasource:          # 日志库：执行日志（权限可只给 INSERT/SELECT/DELETE）
+      url: jdbc:mysql://log-db:3306/ecc_log?useSSL=false
+      username: ecc_log
+      password: ***
+```
+
+要做与不做的清单：
+
+| 事项 | 说明 |
+| --- | --- |
+| ✅ 日志库建表 | 自动建表只管主库（`DataSource` 注入走 `@Primary`）→ 日志库的表由宿主自己建：`JdbcExecutionLogCleaner` / 归档脚本用的还是同一份 `ifmap_execution_log` DDL（`docs/04` §1） |
+| ✅ 只引一个 `ifmap-spring-boot-starter` | 不需要第二份 starter、不需要 `dynamic-datasource` 之类的中间件 |
+| ✅ 写日志失败只降级 | 日志库连不上时业务照常成功，只打 `WARN`；**不会**回落到主库（否则「分离」就没有意义了） |
+| ✅ 只配置库分离也可以 | 反过来只覆盖 `ConfigRepository`（远端/只读库）同样成立，见 [`docs/11`](11-远端配置源.md) |
+| ❌ 不做跨库事务 | 配置读与日志写本来就不在一个事务里，引擎也没有把两者绑在一起的语义 |
+| ❌ 不做 `@DS` 注解 / 动态路由 | 各家都有自己的方案（`@DS`、自研路由、分库分表中间件），starter 强做只会打架 |
+
+> 这段能力由 `IfmapSplitDatasourceTest` 钉住：两个 H2 内存库分别当配置库与日志库，验证
+> 「配置只从主库读、日志只往日志库写（主库 0 行）、日志库不可用时业务照常成功且不回落主库」。
+
 ---
 
 ## 4. 宿主机自定义规则

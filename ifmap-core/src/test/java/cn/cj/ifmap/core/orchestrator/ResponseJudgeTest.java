@@ -52,6 +52,24 @@ class ResponseJudgeTest {
     }
 
     @Test
+    void pipeIsNotASeparator() {
+        // 文档（docs/04、docs/06 §7）明确 `0000|S` 是「一个候选值」而不是两个，
+        // 免得有人照着 "多值" 的印象写出永不命中的配置
+        assertFalse(judge.evaluate(config("$.code", "0000|S"), "{\"code\":\"0000\"}").isSuccess());
+        assertTrue(judge.evaluate(config("$.code", "0000|S"), "{\"code\":\"0000|S\"}").isSuccess());
+    }
+
+    @Test
+    void negationPrefixIsNotSupported() {
+        // 存量 ECC 的 getInterfaceDealFlag 把 `!0000` 解释为「不等于 0000 即成功」；
+        // ifmap 不做这个转换（docs/10 §7 第 12 条），所以这里只是普通候选值：
+        // 两条断言一起看，说明 `!0000` 既不等于 0000 也不等于 9999，只有字面相等才命中。
+        assertFalse(judge.evaluate(config("$.code", "!0000"), "{\"code\":\"0000\"}").isSuccess());
+        assertFalse(judge.evaluate(config("$.code", "!0000"), "{\"code\":\"9999\"}").isSuccess());
+        assertTrue(judge.evaluate(config("$.code", "!0000"), "{\"code\":\"!0000\"}").isSuccess());
+    }
+
+    @Test
     void numericAndBooleanValuesAreNormalisedToString() {
         assertTrue(judge.evaluate(config("$.code", "1"), "{\"code\":1}").isSuccess());
         assertTrue(judge.evaluate(config("$.ok", "true"), "{\"ok\":true}").isSuccess());

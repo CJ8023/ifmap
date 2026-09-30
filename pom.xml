@@ -39,6 +39,7 @@
     <module>ifmap-json-fastjson</module>
     <module>ifmap-json-tck</module>
     <module>ifmap-provider-jdbc</module>
+    <module>ifmap-provider-remote</module>
     <module>ifmap-demo-pure-java</module>
     <!-- Spring Boot 3 相关模块要求 JDK 17+，放在下面的 jdk17 剖面里 -->
   </modules>
@@ -92,6 +93,11 @@
       <dependency>
         <groupId>cn.cj</groupId>
         <artifactId>ifmap-json-fastjson</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-provider-remote</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

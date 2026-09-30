@@ -33,8 +33,8 @@ import java.util.Optional;
  * {@code "-1"}。实现方负责解析为库内类型，解析失败应抛
  * {@link cn.cj.ifmap.core.exception.IfmapConfigException}。</p>
  *
- * <p>实现：{@code JdbcConfigRepository}（provider-jdbc）/ {@code FeignConfigRepository}（provider-feign）
- * / {@code InMemoryConfigRepository}（provider-memory、单测）。</p>
+ * <p>实现：{@code JdbcConfigRepository}（provider-jdbc）/ {@code RemoteConfigRepository}（provider-remote，
+ * 配置在远端 HTTP 接口时用）；单测里用匿名实现或桩类。</p>
  *
  * @author caijun
  */

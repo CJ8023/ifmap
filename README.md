@@ -26,19 +26,21 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面 + W10 日志分区与冷热分离 + W11 fastjson 兼容实现）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面 + W10 日志分区与冷热分离 + W11 fastjson 兼容实现 + W12 远端配置源与数据源分离）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
-| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
+| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **406 个**单元/端到端测试全绿（core 155 + json-jackson 46 + **json-fastjson 53** + provider-jdbc 48 + starter 41 + admin 59 + demo-sb3 4；JDK 8 侧 302 个，Spring Boot 3 模块按剖面跳过） |
-| 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
+| 测试 | **436 个**单元/端到端测试全绿（core 157 + json-jackson 46 + json-fastjson 53 + provider-jdbc 48 + **provider-remote 25** + starter 44 + admin 59 + demo-sb3 4；JDK 8 侧 329 个，Spring Boot 3 模块按剖面跳过） |
+| 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**10 个模块 0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
-| 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：11 页），CI 独立 job 构建 |
+| 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：12 页），CI 独立 job 构建 |
 | 迁移预热 | 存量表迁移 SQL kit（加列/回填/改类型/改表名，含体检与核对脚本）、`JsonOps` 一致性 TCK、影子运行框架（双跑比对、不出网、只记录）、[`docs/10-迁移指南.md`](docs/10-迁移指南.md) |
 | 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
+| 配置来源可换 | 三选一、**引擎侧无感知**：JDBC（自带建表脚本）、**远端 HTTP**（`ifmap-provider-remote`，直连存量配置接口，**一行表都不用迁**，见 [`docs/11`](docs/11-远端配置源.md)）、自研（实现 `ConfigRepository` 即可） |
+| 配置库 / 日志库分离 | **不做多数据源框架**（设计 Q10）：读配置与写日志本来就是两个 SPI，宿主声明一个 `logDataSource` + 一个 `ExecutionLogSink` bean 即可（Spring Boot 官方双数据源写法，[`docs/05`](docs/05-SpringBoot集成.md) §3.5）；日志库不可用**不会**回落到配置库 |
 | 日志分区/冷热分离 | **可选手册**（默认不启用）：`db/optional/execution-log-partition/` 6 步脚本（体检 → 按月分区改造 → 每月加分区 → 校验 → 建冷表 → 归档回收）；归档器 `JdbcExecutionLogArchiver` **可重入**（先写冷表再删热表，中断可重跑）、**列清单写死并自检**（热表加列忘了同步会直接失败而不是静默少归档）；`DROP PARTITION` 秒级回收 |
 | Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` 与 5 类策略 bean |
 | 执行编排 | 编排器：租户解析 → 前置接口**递归**加载 → 拓扑排序 + 环检测 → 渲染 → 出网 → 判定 → 分支动作 → 脱敏落日志；支持 dry-run 试跑与部署前契约自检 |
@@ -47,11 +49,15 @@
 | 日志与合规 | 执行日志脱敏（值形态 + 字段名）+ 超长截断 + 写日志失败降级 + **保留期清理**（默认 90 天，分批删除防主从延迟；cron 可配，守护线程调度、不依赖 `@EnableScheduling`） |
 | License | Apache-2.0（`LICENSE` + `NOTICE`；贡献约定见 `CONTRIBUTING.md`） |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：Feign 数据源、PostgreSQL/Oracle 方言、Micrometer 指标。
+**尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：PostgreSQL/Oracle 方言、Micrometer 指标。
 
 > 迁移预热（W8）已交付：存量表迁移 SQL kit（`db/migration/ecc-to-ifmap/`，随 jar 发布、需手工执行）、
 > `JsonOps` TCK 一致性套件（`ifmap-json-tck`）、影子运行框架（`cn.cj.ifmap.core.shadow`）、
 > 公开迁移指南 [`docs/10-迁移指南.md`](docs/10-迁移指南.md)。
+>
+> **暂时不想迁表？** 存量配置若本来就是通过 HTTP 接口读的（ECC 即如此），用 `ifmap-provider-remote`
+> 把那几个接口接成 `ConfigRepository` 就能先跑起来：配置仍留在老服务里，ifmap 只读，模板与分支零改动
+> —— 见 [`docs/11-远端配置源.md`](docs/11-远端配置源.md)。
 
 ---
 
@@ -81,12 +87,13 @@ ifmap 逐条对齐修正：
 | `ifmap-json-jackson` | `JsonOps` 的 Jackson + JsonPath 实现（默认） | 8+ | jackson-databind、json-path |
 | `ifmap-json-fastjson` | `JsonOps` 的 fastjson 兼容实现（**仅供存量迁移过渡**，差异见 [`docs/05`](docs/05-SpringBoot集成.md) §3.2） | 8+ | fastjson 1.2.84 |
 | `ifmap-provider-jdbc` | `ConfigRepository` 的 JDBC 实现 + 4 张表建表脚本（Liquibase）+ 执行日志清理/归档器 + 日志分区运维手册（`db/optional/`） | 8+ | spring-jdbc |
+| `ifmap-provider-remote` | `ConfigRepository` 的**远端 HTTP** 实现：`ConfigFetcher` 函数式 SPI（宿主注入 Feign / RestTemplate）+ 容错映射。**零 Spring、Java 8**，不硬依赖 Spring Cloud Feign，见 [`docs/11`](docs/11-远端配置源.md) | 8+ | core |
 | `ifmap-spring-boot-starter` | Spring Boot 3 自动配置：建表、仓储（可选缓存）、引擎、规则自动收集 | 17+ | starter-jdbc、provider-jdbc、json-jackson、caffeine(可选) |
 | `ifmap-admin-spring-boot-starter` | 管理端 REST（配置 CRUD、校验、历史与回滚、分支维护、巡检）+ 零构建可视化页面（`{base-path}/ui/`）；`ifmap.admin.enabled=true` 才装配 | 17+ | starter、provider-jdbc、starter-web、autoconfigure |
 | `ifmap-demo-pure-java` | 纯 Java（非 Spring）可运行示例 | 8+ | core + json-jackson |
 | `ifmap-demo-spring-boot3` | Spring Boot 3 可运行示例（H2 内存库，`java -jar` 即跑通全链路） | 17+ | starter |
 
-依赖方向严格单向：`demo → json-jackson / json-fastjson → core`、`provider-jdbc → core`，**core 不反向依赖任何实现**。
+依赖方向严格单向：`demo → json-jackson / json-fastjson → core`、`provider-jdbc → core`、`provider-remote → core`，**core 不反向依赖任何实现**。
 
 `ifmap-provider-jdbc` 的 `spring-jdbc` 就地声明为 **5.3.x**（JDK 8 + Spring 5 兼容），只使用 Spring 5.3 / 6.2 共有的 `JdbcTemplate` API；
 Spring Boot 3 项目引 `ifmap-spring-boot-starter` 时会解析到 Boot 传递来的 **6.2.x**（starter 把 `spring-boot-starter-jdbc` 声明在 `ifmap-provider-jdbc` 之前）。
@@ -220,6 +227,7 @@ mvn -pl ifmap-core test                 # 只跑 core（不依赖 JSON 库）
 # 父 POM 用 <jdk>[17,)</jdk> 剖面自动装卸，JDK 8/11 上执行 mvn test 不会失败
 mvn -pl ifmap-spring-boot-starter -am test
 mvn -pl ifmap-admin-spring-boot-starter -am test   # 管理端 REST（含 H2 + 真 Tomcat 端到端）
+mvn -pl ifmap-provider-remote -am test             # 远端配置源（假 ConfigFetcher，不起 HTTP 服务）
 ```
 
 Windows 下手动指定 JDK 与本地仓库：
@@ -248,6 +256,7 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/08-日志与合规.md`](docs/08-日志与合规.md) | 日志与合规：落什么/不落什么、脱敏、截断、失败降级、保留期清理、**按月分区手册与冷热分离归档**、异常体系、合规自查清单 |
 | [`docs/09-参与贡献.md`](docs/09-参与贡献.md) | 参与贡献：开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁与 PR 检查表 |
 | [`docs/10-迁移指南.md`](docs/10-迁移指南.md) | 存量迁移指南（M1 表结构 / M2 规则策略对齐 / M3 影子运行 / M4 切换回滚）、共存方案、行为对齐清单、排错 |
+| [`docs/11-远端配置源.md`](docs/11-远端配置源.md) | 配置在远端 HTTP 接口时怎么接（`ConfigFetcher` SPI、Feign/RestTemplate 三种写法、映射规则、与存量接口差异） |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南入口（三条底线 + 指向 `docs/09`） |
 
 **内部文档（仅本地，已在 `.gitignore` 中排除）**

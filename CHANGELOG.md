@@ -5,6 +5,21 @@
 ## [Unreleased]
 
 ### Added
+- **W12 远端配置源 + 配置库/日志库分离（设计 Q10，本版本）**：
+  - **新模块 `ifmap-provider-remote`**：把 `ConfigRepository` 落到**远端 HTTP 接口**上 —— 存量系统已经有"配置中心接口"时（ECC 即如此）**一行表都不用迁**就能把引擎跑起来：配置仍留在老服务里，ifmap 只读，模板 / 分支 / 规则零改动
+  - **模块名刻意不叫设计稿里的 `provider-feign`**：不硬依赖 Spring Cloud OpenFeign（Feign 的坐标与默认实现随 Spring Cloud 大版本变过，硬依赖等于把版本矩阵强加给宿主；而宿主自己的 Feign/RestTemplate 里已经有鉴权、超时、重试、熔断）。改为定义**函数式 SPI `ConfigFetcher`**（`get(uri, query)` / `postJson(uri, body)`，返回响应体原文）由宿主注入 —— 适配代码 10~20 行，模块依赖只有 `ifmap-core`（Java 8、**零 Spring 依赖**）。文档给 Feign / RestTemplate / 纯 Java 三种接法
+  - **`ConfigFetcher` 的硬约定**（写进接口 javadoc）：返回响应体原文、查不到返回 `null`/空串、**非 2xx 与超时必须抛异常**（不许吞成空串 —— 否则"远端挂了"会表现成"没有配置"→ 业务静默不执行）、不在适配层做重试
+  - **`JsonConfigMapper`（容错映射，7 条规则）**：① 键名归一化（去 `_`/`-` + 小写）→ `interfaceNo` / `interface_no` / `INTERFACE-NO` 等价，远端**加字段**不需要同步改 ifmap；② 缺失字段**按 DDL 默认值补齐**（与 JDBC 仓储读出来的对象逐字段一致）；③ 必填判定 = **DDL 里 `NOT NULL` 且无 `DEFAULT` 的列**（配置 5 个 / 分支 2 个），缺失或空白抛异常并指明"第 N 条缺哪个字段"；④ 数字容忍 JSON 数字与数字串（远端 VO 的 `keyId` / `interfaceOrder` 常是 `String`），小数 / 超 `int`·`long` / 非法串抛异常；⑤ 时间容忍 ISO-8601 与 `yyyy-MM-dd HH:mm:ss[.SSS]`；⑥ **文本列只接受字符串/数字/布尔，对象或数组直接抛异常**（不允许 `{a=1}` 这种 Java `toString` 悄悄落库）；⑦ **`logic_branch_order` 缺失时按下标（从 1 起，已删除行也占位）补齐** —— 保住存量"按返回顺序生效"的语义（一律填 0 会退化成按主键兜底，顺序可能变）
+  - **响应体形状**：`null` / 空串 / 空白 / `"null"` / `"[]"` → 空列表；非数组 / 元素非对象 / `[null]` / 非法 JSON → `IfmapConfigException`（消息带响应体前 200 字符）
+  - **`RemoteConfigRepository` 的三个"不信任远端"兜底**：① 映射后再本地筛一遍（配置 `del_status=0 且 status=1`、分支 `del_status=0`），远端 SQL 条件被改动时行为不跟着漂；② 本地排序（`interface_order` / `logic_branch_order` 升序、同值按 `key_id`）与 JDBC 实现的 `ORDER BY` 逐字一致；③ **空白查询条件不拼进查询串**（远端若按 `busi_node=''` 过滤会查不到）。`findConfig` 用 `Integer.valueOf(order).equals(...)`（包装类型不比引用）
+  - **租户防串**：映射时**以调用方查询的租户为准**，远端报文里的 `tenantId` 键被忽略；空白 → 单租户 `-1`，非数字 → 抛异常（与 JDBC 仓储同口径）
+  - **`saveExecutionLog`**：`POST {baseUri}/insert_log`，**远端显式回 `false` 时抛异常**（不静默丢审计；引擎侧照旧只降级为 WARN，不影响业务结果）
+  - **Q10 的交付形态 = 不做多数据源框架**：接缝本来就是两个独立 SPI（`ConfigRepository` 读配置 / `ExecutionLogSink` 写日志），且所有自动配置 bean 都是 `@ConditionalOnMissingBean` —— 宿主写一个 `logDataSource` + 一个 `ifmapExecutionLogSink` bean 就完成分离（Spring Boot 官方"Configure Two DataSources"写法，`docs/05` §3.5）。不引 `dynamic-datasource`、不做 `@DS` 注解、**不做跨库事务**（两者本来就不在一个事务里）
+  - **反向断言**：日志库连不上/表都没建时业务照常成功，且**配置库的日志表仍为 0 行** —— 证明"分离"不会静默回落到配置库（否则"分离"名存实亡）
+  - **测试：新增 30 个** —— `ifmap-provider-remote` **25** 个（`JsonConfigMapperTest` 12：键名风格 / 默认值补齐 / 必填与消息 / 数字与时间 / 文本列拒对象 / 响应体形状 / 租户覆盖；`RemoteConfigRepositoryTest` 10：端点与查询参数、空白值不拼接、本地排序与筛选、远端 `false` 抛错、`baseUri` 归一、租户非法报错；`RemoteConfigRepositoryEngineTest` 3：**远端配置 → 模板渲染 → 出网 → 判定 → 分支动作 → 脱敏日志回写**全链路端到端）+ `IfmapSplitDatasourceTest` **3**（双 H2 库分离读写 / 日志库不可用不回落 / 单库场景不受影响）+ `ResponseJudgeTest` **+2**
+  - 测试总数：JDK 17 全 reactor **436 个**（core 157 / json-jackson 46 / json-fastjson 53 / provider-jdbc 48 / **provider-remote 25** / starter 44 / admin 59 / demo-sb3 4），JDK 8 侧 **329 个**；双 JDK `clean verify` 均 `BUILD SUCCESS`，**10 个模块 SpotBugs 全 0 缺陷**（含新模块），新模块字节码 `major version: 52`
+  - 文档：新增 [`docs/11-远端配置源.md`](docs/11-远端配置源.md)（SPI 约定 / 三种接法 / 映射规则 / 三个兜底 / 与存量接口的差异 / 自测）；[`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) 新增 §3.5「配置库与日志库分离」（双数据源示例 + 做/不做清单）；[`docs/04-接入与建表.md`](docs/04-接入与建表.md) §2.4「不建表：配置在远端 HTTP 接口里」与 [`docs/10-迁移指南.md`](docs/10-迁移指南.md) §3.1 增加"第三条路：干脆不迁表"；[`docs/08-日志与合规.md`](docs/08-日志与合规.md) 交叉引用（分库 / 写回远端）；README 特性表 +2 行、模块表 +1 行、文档表 +1 行
+
 - **W11 fastjson 兼容实现（设计 Q5 的"兼容模块"，v1.0）**（本版本）：
   - **新模块 `ifmap-json-fastjson`**：把 `JsonOps` 落到 **fastjson 1.2.84 + fastjson JSONPath** 上，让**存量用 fastjson 取值工具（如 ECC 的 `JsonParseUtils`）的项目可以零改动迁移**（模板里那些路径表达式照旧）。**定位是 compat-only**：新项目请用默认的 `ifmap-json-jackson`（不同 JsonPath 方言踩坑更少），模块 description 与文档都这么写
   - **版本选 1.2.84 而不是设计初稿写的 1.2.83**：`1.2.68~1.2.83` 在**默认配置下**存在可被利用的 AutoType RCE，1.2.84 是 backport 加固版；`pom.xml` 里把原因写进了注释，避免以后被人"顺手降版本"
@@ -70,6 +85,10 @@
   - 配置项：`ifmap.admin.*`（`enabled` / `base-path` / `history-limit` / `audit-max-configs`）
   - 文档：[`docs/07-管理端REST.md`](docs/07-管理端REST.md)
   - 测试：新增 **41 个**（`ConfigAdminServiceTest` 14 / `ConfigValidatorTest` 10 / `IfmapAdminWebEndpointTest` 5（H2 + 真 Tomcat + 真 HTTP）/ `IfmapAdminAutoConfigurationTest` 5 / `ConfigSnapshotMapperTest` 4 / `ConfigAuditorTest` 3）、starter +1（非 MySQL `json` 列降级）；JDK 17 全 reactor **245 个测试全绿**，JDK 8 侧 **170 个全绿**
+
+### Fixed（W12）
+- **`success_value` 的多值分隔符：文档写错，以实现为准回写**。文档（[`docs/04`](docs/04-接入与建表.md) 列说明、[`docs/06`](docs/06-执行编排与策略扩展.md) §7 示例、`001-create-ifmap-config.sql` 列注释）写作 `|`，而实现是 `ResponseJudge.MULTI_VALUE_SEPARATORS = {";", ","}`（**不含 `|`**）→ 全部改为 `,` / `;`。核实存量 ECC：`BankintConfigManager.SEG_STR = ","`，真实数据里 `|` 只出现在 JSONPath 的 `||` 里 —— `|` 是设计稿的臆测。**`0000|S` 是"一个候选值"而不是两个**（已用 `ResponseJudgeTest.pipeIsNotASeparator()` 钉住）
+- **如实文档化"取反"缺口（本轮不实现）**：存量 `success_value` 支持 `!值`（ECC `NON_STR = "!"`，语义"不等于该值即成功"），ifmap **不支持** → 在 [`docs/06`](docs/06-执行编排与策略扩展.md) §7 与 [`docs/10-迁移指南.md`](docs/10-迁移指南.md) §7 行为对齐清单（新增 row 12）写明"迁移前先扫 `success_value like '!%'` 改成等价写法"，并用 `ResponseJudgeTest.negationPrefixIsNotSupported()` 把缺口钉住 —— 防止以后被"顺手实现"成一半（`!0000` 现在只是一个永不命中的字面候选值，属已知语义差异而非静默错误）
 
 ### Fixed（W7）
 - `ConfigValidator.checkUniqueKey` 用 **`Integer == Integer`** 比较顺序号 → `Integer` 只缓存 `-128..127`，**顺序号 ≥ 128 时"唯一键冲突"静默漏判**（校验形同虚设，重复配置能被写入）。改为 null 安全的 `sameOrder()`（`equals`）；并补**在旧代码上确认会红**的回归测试 `uniqueKeyDetectsConflictBeyondIntegerCache`（顺序号 200）

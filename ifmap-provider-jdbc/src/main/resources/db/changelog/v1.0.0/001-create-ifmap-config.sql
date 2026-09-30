@@ -30,7 +30,7 @@ CREATE TABLE `${tablePrefix}config` (
   `request_param_template`    text                                     COMMENT '请求参数模板（DSL），可为空',
   `response_param_template`   longtext                                 COMMENT '响应参数模板（DSL），可为空',
   `result_flag`               varchar(512) NOT NULL DEFAULT ''          COMMENT '执行结果标志（JsonPath）',
-  `success_value`             varchar(512) NOT NULL DEFAULT ''          COMMENT '成功判断值，多值以 | 分隔（大小写不敏感）',
+  `success_value`             varchar(512) NOT NULL DEFAULT ''          COMMENT '成功判断值，多值以 , 或 ; 分隔（大小写不敏感）',
   `strategy_name`             varchar(128) NOT NULL DEFAULT ''          COMMENT '特殊处理策略标识（=Spring bean 名）',
   `status`                    tinyint(1)   NOT NULL DEFAULT 1           COMMENT '状态：1启用 0停用',
   `version`                   int          NOT NULL DEFAULT 0           COMMENT '乐观锁版本',

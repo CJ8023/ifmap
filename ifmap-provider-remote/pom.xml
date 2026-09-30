@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.cj</groupId>
+    <artifactId>ifmap-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>ifmap-provider-remote</artifactId>
+  <name>ifmap-provider-remote</name>
+  <description>配置仓储的远端实现：经函数式 ConfigFetcher 取配置/写日志（Feign、RestTemplate 等由宿主注入，本模块零 Spring 依赖）</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+    <!-- 测试里要一个真实 JsonOps：用默认的 Jackson 实现（被测代码只依赖 JsonOps 接口） -->
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-json-jackson</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

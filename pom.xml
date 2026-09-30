@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>cn.cj</groupId>
+  <artifactId>ifmap-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>ifmap-parent</name>
+  <description>ifmap - Interface Mapping Engine: configuration-driven interface message mapping (template DSL + pluggable rules)</description>
+  <url>https://github.com/CJ8023/ifmap</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>CJ8023</id>
+      <name>caijun</name>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/CJ8023/ifmap.git</connection>
+    <developerConnection>scm:git:git@github.com:CJ8023/ifmap.git</developerConnection>
+    <url>https://github.com/CJ8023/ifmap</url>
+    <tag>HEAD</tag>
+  </scm>
+
+  <modules>
+    <module>ifmap-core</module>
+    <module>ifmap-json-jackson</module>
+    <module>ifmap-provider-jdbc</module>
+    <module>ifmap-demo-pure-java</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <maven.compiler.release>8</maven.compiler.release>
+
+    <slf4j.version>2.0.17</slf4j.version>
+    <jackson.version>2.18.3</jackson.version>
+    <json-path.version>2.10.0</json-path.version>
+    <junit.version>5.12.2</junit.version>
+    <!-- provider-jdbc 用 spring-jdbc 的 JdbcTemplate（Q4 决策）：默认 5.3.x 兼容 JDK8 + Spring5；
+         Spring Boot 3 项目中请覆盖为 6.2.x（spring-jdbc 6 与 Spring 6 同族，无 javax 依赖冲突） -->
+    <spring-jdbc.version>5.3.39</spring-jdbc.version>
+    <h2.version>1.4.200</h2.version>
+
+    <plugin.clean.version>3.4.1</plugin.clean.version>
+    <plugin.resources.version>3.3.1</plugin.resources.version>
+    <plugin.compiler.version>3.13.0</plugin.compiler.version>
+    <plugin.surefire.version>3.5.6</plugin.surefire.version>
+    <plugin.jar.version>3.4.2</plugin.jar.version>
+    <plugin.install.version>3.1.4</plugin.install.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-json-jackson</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-provider-jdbc</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-jdbc</artifactId>
+        <version>${spring-jdbc.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <version>${h2.version}</version>
+        <scope>test</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.jayway.jsonpath</groupId>
+        <artifactId>json-path</artifactId>
+        <version>${json-path.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>${plugin.clean.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${plugin.resources.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${plugin.compiler.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${plugin.surefire.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${plugin.jar.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>${plugin.install.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

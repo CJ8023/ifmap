@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.cj</groupId>
+    <artifactId>ifmap-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>ifmap-demo-pure-java</artifactId>
+  <name>ifmap-demo-pure-java</name>
+  <description>ifmap 纯 Java（非 Spring）可运行示例</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-json-jackson</artifactId>
+    </dependency>
+    <!-- 日志实现由宿主提供；本 demo 不绑定，运行时可能出现 SLF4J 的「No providers were found」提示，属正常现象 -->
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>cn.cj.ifmap.demo.IfmapQuickStart</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

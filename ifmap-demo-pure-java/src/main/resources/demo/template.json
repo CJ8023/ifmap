@@ -1,0 +1,29 @@
+{
+  "bizNode": "GP81",
+  "orderNo": "$.orderNo",
+  "seqNo": "$.seqNo",
+  "dueDate": "@FUN(dateFormat,$.dueDate,yyyyMMdd)",
+  "monthEnd": "@FUN(dateEndOfMonth,$.dueDate,yyyy-MM-dd)",
+  "dueDateAddWorkday": "@FUN(workdayAdd,$.dueDate,3,yyyyMMdd)",
+  "totalAmount": "@FUN(numSum,$.amounts,2,HALF_UP)",
+  "amountList": "@FUN(numFormat,$.amounts,CENT_TO_YUAN)",
+  "invoiceTypeName": "@FUN(dictVal,$.invoiceType,01:增值税专用发票;02:增值税普通发票,其他)",
+  "invoiceTypeNames": "@FUN(dictValArray,$.invoiceTypes,01:专票;02:普票;09:其他)",
+  "applicantName": "@FUN(strDefault,$.applicant.name,未知)",
+  "maskedIdCard": "@FUN(strMask,$.applicant.idCard,ID_CARD)",
+  "maskedMobile": "@FUN(strMask,$.applicant.mobile,MOBILE)",
+  "contact": "@FUN(concat,$.applicant.name,-,$.applicant.mobile)",
+  "singleInvoiceTypeList@array": "$.invoiceType",
+  "itemCount": "$.items.length()",
+  "invoiceItems@array": {
+    "code": "$.items[*].sku",
+    "qty": "$.items[*].qty",
+    "amount": "$.items[*].price"
+  },
+  "items@array@$.items": {
+    "sku": "$.sku",
+    "qty": "@FUN(numOffset,$.qty,0)",
+    "amount": "@FUN(numRound,$.price,2)"
+  },
+  "remark": "$.remark"
+}

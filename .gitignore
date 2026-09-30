@@ -1,0 +1,35 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+nbproject/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# 内部设计与审计文档（含客户工商数据、银行合作细节、内部表结构，不进公开仓）
+# 需要公开时请先脱敏，并删除本节排除规则
+docs/ifmap-整体设计_v1.md
+docs/ifmap-内置规则审计与优化_v1.md
+docs/bankintconfig模块优化方案_v1.md
+docs/audit_report.md
+docs/tools/

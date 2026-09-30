@@ -1,0 +1,19 @@
+# ifmap 建表脚本主入口（Liquibase）
+#
+# 使用方式（Spring Boot 3）：
+#   spring.liquibase.change-log=classpath:db/changelog/db.changelog-master.yaml
+#   spring.liquibase.parameters.tablePrefix=ifmap_      # 默认 ifmap_；复用存量表时填 bankint_
+#
+# 纯 Java / 不用 Liquibase 时：把 v1.0.0/*.sql 里的 ${tablePrefix} 全局替换为实际前缀后手工执行。
+databaseChangeLog:
+  - property:
+      name: tablePrefix
+      value: ifmap_
+  - include:
+      file: db/changelog/v1.0.0/001-create-ifmap-config.sql
+  - include:
+      file: db/changelog/v1.0.0/002-create-logic-branch.sql
+  - include:
+      file: db/changelog/v1.0.0/003-create-execution-log.sql
+  - include:
+      file: db/changelog/v1.0.0/004-create-config-history.sql

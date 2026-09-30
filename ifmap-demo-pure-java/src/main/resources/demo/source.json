@@ -1,0 +1,17 @@
+{
+  "orderNo": "PO20260101001",
+  "dueDate": "2026/03/31",
+  "amounts": [100.5, 200.25, "99.99"],
+  "invoiceType": "01",
+  "invoiceTypes": ["01", "02", "09"],
+  "applicant": {
+    "name": "张三",
+    "idCard": "320123199001011234",
+    "mobile": "13800138000"
+  },
+  "items": [
+    { "sku": "SKU-A1", "qty": "2", "price": "100.50" },
+    { "sku": "SKU-B2", "qty": "3", "price": "66.66" }
+  ],
+  "remark": null
+}

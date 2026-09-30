@@ -26,14 +26,14 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面 + W10 日志分区与冷热分离）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面 + W10 日志分区与冷热分离 + W11 fastjson 兼容实现）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
-| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
+| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **353 个**单元/端到端测试全绿（core 155 + json-jackson 46 + provider-jdbc 48 + starter 41 + admin 59 + demo-sb3 4；JDK 8 侧 249 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **406 个**单元/端到端测试全绿（core 155 + json-jackson 46 + **json-fastjson 53** + provider-jdbc 48 + starter 41 + admin 59 + demo-sb3 4；JDK 8 侧 302 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
 | 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：11 页），CI 独立 job 构建 |
@@ -47,7 +47,7 @@
 | 日志与合规 | 执行日志脱敏（值形态 + 字段名）+ 超长截断 + 写日志失败降级 + **保留期清理**（默认 90 天，分批删除防主从延迟；cron 可配，守护线程调度、不依赖 `@EnableScheduling`） |
 | License | Apache-2.0（`LICENSE` + `NOTICE`；贡献约定见 `CONTRIBUTING.md`） |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：Fastjson 实现、Feign 数据源、PostgreSQL/Oracle 方言、Micrometer 指标。
+**尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：Feign 数据源、PostgreSQL/Oracle 方言、Micrometer 指标。
 
 > 迁移预热（W8）已交付：存量表迁移 SQL kit（`db/migration/ecc-to-ifmap/`，随 jar 发布、需手工执行）、
 > `JsonOps` TCK 一致性套件（`ifmap-json-tck`）、影子运行框架（`cn.cj.ifmap.core.shadow`）、
@@ -79,13 +79,14 @@ ifmap 逐条对齐修正：
 | `ifmap-parent` | 父 POM，统一版本与插件版本 | — | — |
 | `ifmap-core` | 模板 DSL、规则注册表、内置规则、SPI。**零 Spring、零 JSON 库** | 8+ | 仅 `slf4j-api` |
 | `ifmap-json-jackson` | `JsonOps` 的 Jackson + JsonPath 实现（默认） | 8+ | jackson-databind、json-path |
+| `ifmap-json-fastjson` | `JsonOps` 的 fastjson 兼容实现（**仅供存量迁移过渡**，差异见 [`docs/05`](docs/05-SpringBoot集成.md) §3.2） | 8+ | fastjson 1.2.84 |
 | `ifmap-provider-jdbc` | `ConfigRepository` 的 JDBC 实现 + 4 张表建表脚本（Liquibase）+ 执行日志清理/归档器 + 日志分区运维手册（`db/optional/`） | 8+ | spring-jdbc |
 | `ifmap-spring-boot-starter` | Spring Boot 3 自动配置：建表、仓储（可选缓存）、引擎、规则自动收集 | 17+ | starter-jdbc、provider-jdbc、json-jackson、caffeine(可选) |
 | `ifmap-admin-spring-boot-starter` | 管理端 REST（配置 CRUD、校验、历史与回滚、分支维护、巡检）+ 零构建可视化页面（`{base-path}/ui/`）；`ifmap.admin.enabled=true` 才装配 | 17+ | starter、provider-jdbc、starter-web、autoconfigure |
 | `ifmap-demo-pure-java` | 纯 Java（非 Spring）可运行示例 | 8+ | core + json-jackson |
 | `ifmap-demo-spring-boot3` | Spring Boot 3 可运行示例（H2 内存库，`java -jar` 即跑通全链路） | 17+ | starter |
 
-依赖方向严格单向：`demo → json-jackson → core`、`provider-jdbc → core`，**core 不反向依赖任何实现**。
+依赖方向严格单向：`demo → json-jackson / json-fastjson → core`、`provider-jdbc → core`，**core 不反向依赖任何实现**。
 
 `ifmap-provider-jdbc` 的 `spring-jdbc` 就地声明为 **5.3.x**（JDK 8 + Spring 5 兼容），只使用 Spring 5.3 / 6.2 共有的 `JdbcTemplate` API；
 Spring Boot 3 项目引 `ifmap-spring-boot-starter` 时会解析到 Boot 传递来的 **6.2.x**（starter 把 `spring-boot-starter-jdbc` 声明在 `ifmap-provider-jdbc` 之前）。

@@ -36,6 +36,7 @@
   <modules>
     <module>ifmap-core</module>
     <module>ifmap-json-jackson</module>
+    <module>ifmap-json-fastjson</module>
     <module>ifmap-json-tck</module>
     <module>ifmap-provider-jdbc</module>
     <module>ifmap-demo-pure-java</module>
@@ -50,6 +51,10 @@
     <slf4j.version>2.0.17</slf4j.version>
     <jackson.version>2.18.3</jackson.version>
     <json-path.version>2.10.0</json-path.version>
+    <!-- fastjson 只被 ifmap-json-fastjson（兼容模块）依赖，starter 不引它。
+         版本必须是 1.2.84：1.2.68~1.2.83 在默认配置下存在可被利用的 AutoType 反序列化 RCE，
+         1.2.84 是官方 backport 的加固版（详见 docs/05-SpringBoot集成.md 的“换 JSON 实现”一节）。 -->
+    <fastjson.version>1.2.84</fastjson.version>
     <junit.version>5.12.2</junit.version>
     <!-- provider-jdbc 用 spring-jdbc 的 JdbcTemplate（Q4 决策）：默认 5.3.x 兼容 JDK8 + Spring5。
          注意：该版本**只声明在 ifmap-provider-jdbc 模块内**，不放进本文件的 dependencyManagement
@@ -82,6 +87,11 @@
       <dependency>
         <groupId>cn.cj</groupId>
         <artifactId>ifmap-json-jackson</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-json-fastjson</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -122,6 +132,11 @@
         <groupId>com.jayway.jsonpath</groupId>
         <artifactId>json-path</artifactId>
         <version>${json-path.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.alibaba</groupId>
+        <artifactId>fastjson</artifactId>
+        <version>${fastjson.version}</version>
       </dependency>
 
       <dependency>

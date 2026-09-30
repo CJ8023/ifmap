@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.cj</groupId>
+    <artifactId>ifmap-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>ifmap-json-fastjson</artifactId>
+  <name>ifmap-json-fastjson</name>
+  <description>ifmap 的 JsonOps 兼容实现：fastjson + JSONPath（仅供存量迁移过渡，新项目请用 ifmap-json-jackson）</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.alibaba</groupId>
+      <artifactId>fastjson</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-json-tck</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -139,7 +139,7 @@ ifmap:
 |---|---|
 | 必填列非空 | `interfaceNo` / `interfaceCode` / `interfaceName` / `busiNode` / `bankCode` |
 | 模板是合法 JSON | `request_param_template` / `response_param_template` |
-| `$.path` 路径合法 | `JsonOps.isValidPath`（JsonPath 编译期就能拦住 `$.a[`） |
+| `$.path` 路径合法 | `JsonOps.isValidPath` —— Jackson 实现只做 JsonPath 编译，**拦不住 `$.a[`**；`ifmap-json-fastjson` 的实现额外要求引号外括号配对，能拦住（差异见 [`docs/05`](05-SpringBoot集成.md) §3.2） |
 | `@FUN` 规则存在且参数可匹配重载 | `ContractValidator`（引擎在位时）；引擎缺席时**至少校验模板 JSON 合法**（历史脏数据真实存在，不能静默放过） |
 | `strategy_name` 已注册 | `SpecialDealStrategyRegistry` |
 | `front_interface_no` 前置链可解析 | 不能自指、不能成环（护栏 64 层） |

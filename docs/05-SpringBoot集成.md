@@ -118,7 +118,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmapTableNameResolver` | `TableNameResolver` | 前缀校验 + 四张表名 |
 | `ifmapConfigRepository` | `ConfigRepository` | `JdbcConfigRepository`，缓存开启时包一层 `CachingConfigRepository` |
 | `ifmapConfigWriter` | `JdbcConfigWriter` | 管理端写：新增 / 乐观锁更新 / 软删除 |
-| `ifmapEngine` | `IfmapEngine` | 内置规则 18 个 + `JacksonJsonOps` + 空值策略 |
+| `ifmapEngine` | `IfmapEngine` | 内置规则 18 个 + classpath 上的 `JsonOps` 实现（默认 Jackson）+ 空值策略 |
 | `ifmapIdGenerator` | `IdGenerator` | 雪花（默认）或数据库自增 |
 | `ifmapRuleRegistry` | `RuleRegistry` | 预注册内置规则，再自动收集宿主机 `@IfmapRule` |
 | `ifmapRuleRegistrar` | `BeanPostProcessor` | 扫描宿主机 bean，把 `@IfmapRule` 方法注册进注册表 |
@@ -172,7 +172,64 @@ public class MyIfmapConfig {
 }
 ```
 
-### 3.2 缓存实现：Caffeine 可选
+### 3.2 JSON 实现：默认 Jackson，兼容 fastjson
+
+`ifmap-core` 只定义接口 `JsonOps`，具体实现来自 starter 或宿主：
+
+| 场景 | 做法 |
+| --- | --- |
+| 新项目（推荐） | 用 starter 默认的 `ifmap-json-jackson`（Jackson + jayway JsonPath） |
+| 存量已用 fastjson（兼容过渡） | 引 `ifmap-json-fastjson`，并**自己声明一个 `JsonOps` bean**（见下） |
+| 其它（fastjson2 / Gson…） | 实现 `JsonOps`，继承 `ifmap-json-tck` 的 TCK 基类跑一遍即可 |
+
+```java
+@Configuration
+public class MyJsonConfig {
+
+    @Bean   // @ConditionalOnMissingBean：宿主声明即接管，starter 里的 Jackson 实现让位
+    public JsonOps jsonOps() {
+        return new FastjsonJsonOps();   // cn.cj.ifmap.json.fastjson
+    }
+}
+```
+
+```xml
+<dependency>
+  <groupId>cn.cj</groupId>
+  <artifactId>ifmap-json-fastjson</artifactId>
+  <version>${ifmap.version}</version>
+</dependency>
+```
+
+> **为什么必须自己声明 bean**：starter 的 `ifmapJsonOps` 带 `@ConditionalOnClass(JacksonJsonOps.class)`。
+> 如果既把 `ifmap-json-jackson` 从 classpath 摘掉、又不声明 bean，`ifmapEngine(JsonOps)` 会**找不到依赖而启动失败**。
+> 启动失败好过静默换成另一套取值语义 —— 这是有意的。
+>
+> **两个实现都在 classpath 上也不会打架**：starter 的 bean 优先，SPI 只作兜底；而 `JsonOpsHolder.get()`
+> 发现**多个** SPI 实现时直接报错（提示用 `JsonOpsHolder.set(...)` 指定），绝不静默挑一个。
+
+#### fastjson 兼容模块的已知差异
+
+`ifmap-json-fastjson` 用 fastjson **1.2.84**（**不用 1.2.68~1.2.83：默认配置下存在可被利用的 AutoType RCE**）。
+它跑通了与 Jackson 实现**同一套 24 条 TCK 契约**，但两套 JsonPath 方言无法完全抹平，
+以下差异是**已知且被测试钉住**的：
+
+| 差异 | Jackson（jayway） | fastjson | 影响与规避 |
+| --- | --- | --- | --- |
+| 对象根上的通配 `$[*].sku` | `["S1"]` | 空列表（`$[*]` 作用在对象上返回对象本身） | **模板别用对象根通配**，写具体字段或 `$.field[*]` |
+| `parse` / `isJson` 宽松度 | 严格 JSON | 单引号、无引号键名、尾部逗号都算合法 | 保存前校验比 Jackson 宽松；要严格就用 Jackson |
+| `$..x` + `leafToNull` | 缺失位补 `null` | 不补（父集合无界，各家顺序不同） | 递归下降路径别依赖「列表等长」 |
+| 含 `@type` 的报文 | 当普通字段解析 | **抛异常**（1.2.84 加固后它返回 null，实现转成显式异常） | 有意的安全行为；确实要读该字段请用 Jackson |
+| `isValidPath` | 只做 JsonPath 编译（`$.a[` **能过**） | 额外要求引号外括号配对（`$.a[` 直接判非法） | fastjson 侧更严，保存配置时更早拦住错路径 |
+| `toJson` 的 POJO / `Date` 形态 | Jackson 的日期与字段命名 | fastjson 的默认形态 | 快照/日志以**纯 JSON 结构（Map/List/标量）** 为准 |
+
+**取值语义（返回什么类型、什么时候 `null`、什么时候空列表、数字不隐式转字符串）已由 TCK 统一**：
+模板 DSL 的端到端用例（`TemplateEngineTest`）在两个实现上各跑一遍。上面 6 条之外若出现不一致，
+属于实现 bug，两边测试都会红。
+
+---
+
+### 3.3 缓存实现：Caffeine 可选
 
 | 条件 | 使用的实现 | 位置 |
 | --- | --- | --- |
@@ -184,7 +241,7 @@ public class MyIfmapConfig {
 
 ---
 
-### 3.3 编排器与策略：写个 bean 就行（W4）
+### 3.4 编排器与策略：写个 bean 就行（W4）
 
 ```java
 // 1) 特殊处理策略：key = bean 名，配置里 strategy_name 直接写 czbApplyStrategy

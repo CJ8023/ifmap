@@ -254,6 +254,24 @@ public class IfmapProperties {
         /** 这些字段<b>整体</b>替换为 {@code ***}，连长度都不落库。 */
         private List<String> excludeFields = new ArrayList<String>();
 
+        /** 是否开启<b>定时清理</b>执行日志（设计 §6.4 方案 A）；关掉后清理器 bean 仍在，可手工调用。 */
+        private boolean cleanEnabled = true;
+
+        /** 执行日志保留天数（早于 {@code now - retentionDays} 的日志会被删除），必须 &ge; 1。 */
+        private int retentionDays = 90;
+
+        /** 每批删除行数（一条 DELETE 即一个事务，批太大 → 大事务 + 主从延迟）。 */
+        private int cleanBatchSize = 1000;
+
+        /** 单次任务最多执行多少批（护栏：没删完的留给下个周期）。 */
+        private int cleanMaxBatches = 1000;
+
+        /** 批间停顿毫秒数（给从库追 binlog 留时间）。 */
+        private long cleanBatchSleepMillis = 50L;
+
+        /** 定时清理的 cron（Spring 6 段式，默认每天 03:30）。 */
+        private String cleanCron = "0 30 3 * * ?";
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -284,6 +302,54 @@ public class IfmapProperties {
 
         public void setExcludeFields(List<String> excludeFields) {
             this.excludeFields = excludeFields;
+        }
+
+        public boolean isCleanEnabled() {
+            return cleanEnabled;
+        }
+
+        public void setCleanEnabled(boolean cleanEnabled) {
+            this.cleanEnabled = cleanEnabled;
+        }
+
+        public int getRetentionDays() {
+            return retentionDays;
+        }
+
+        public void setRetentionDays(int retentionDays) {
+            this.retentionDays = retentionDays;
+        }
+
+        public int getCleanBatchSize() {
+            return cleanBatchSize;
+        }
+
+        public void setCleanBatchSize(int cleanBatchSize) {
+            this.cleanBatchSize = cleanBatchSize;
+        }
+
+        public int getCleanMaxBatches() {
+            return cleanMaxBatches;
+        }
+
+        public void setCleanMaxBatches(int cleanMaxBatches) {
+            this.cleanMaxBatches = cleanMaxBatches;
+        }
+
+        public long getCleanBatchSleepMillis() {
+            return cleanBatchSleepMillis;
+        }
+
+        public void setCleanBatchSleepMillis(long cleanBatchSleepMillis) {
+            this.cleanBatchSleepMillis = cleanBatchSleepMillis;
+        }
+
+        public String getCleanCron() {
+            return cleanCron;
+        }
+
+        public void setCleanCron(String cleanCron) {
+            this.cleanCron = cleanCron;
         }
     }
 }

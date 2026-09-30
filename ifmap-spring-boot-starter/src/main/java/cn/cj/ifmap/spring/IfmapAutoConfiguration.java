@@ -27,6 +27,7 @@ import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
+import cn.cj.ifmap.jdbc.JdbcExecutionLogCleaner;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
 import cn.cj.ifmap.json.jackson.JacksonJsonOps;
@@ -263,6 +264,52 @@ public class IfmapAutoConfiguration {
         public IfmapSchemaInitializer ifmapSchemaInitializer(DataSource dataSource, TableNameResolver tables,
                                                              ResourceLoader resourceLoader) {
             return new IfmapSchemaInitializer(dataSource, tables, resourceLoader);
+        }
+    }
+
+    /** 执行日志保留期清理器（设计 §6.4 方案 A）：bean 常驻，定时任务可选。 */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnClass(JdbcTemplate.class)
+    static class LogCleanConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public JdbcExecutionLogCleaner ifmapExecutionLogCleaner(DataSource dataSource, TableNameResolver tables) {
+            return new JdbcExecutionLogCleaner(new JdbcTemplate(dataSource), tables);
+        }
+    }
+
+    /**
+     * 定时清理执行日志。
+     *
+     * <p>三重条件：写了执行日志（{@code ifmap.log.enabled}）→ 开了定时清理（{@code ifmap.log.clean-enabled}）
+     * → 有 JDBC 数据源（默认全开，见设计 §6.4 ADR-10：开源产品装完即用，不该要求先建分区）。</p>
+     *
+     * <p><b>刻意不用 {@code @EnableScheduling}</b>：自动配置打开宿主的全局调度设施属于越界，而且 Spring 在无
+     * TaskScheduler bean 时会创建<b>非守护</b>线程，导致非 Web / 批处理应用 {@code main()} 返回后 JVM 不退出
+     * （本仓库 demo 实测过）。这里用自带守护线程的 {@link IfmapLogCleanScheduler} 驱动，应用该退出就退出。</p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnClass(JdbcTemplate.class)
+    @ConditionalOnProperty(prefix = "ifmap.log", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "ifmap.log", name = "clean-enabled", havingValue = "true",
+            matchIfMissing = true)
+    static class LogCleanSchedulingConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public IfmapLogCleanTask ifmapLogCleanTask(JdbcExecutionLogCleaner cleaner, IfmapProperties properties) {
+            IfmapProperties.Log log = properties.getLog();
+            return new IfmapLogCleanTask(cleaner, log.getRetentionDays(), log.getCleanBatchSize(),
+                    log.getCleanMaxBatches(), log.getCleanBatchSleepMillis());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        public IfmapLogCleanScheduler ifmapLogCleanScheduler(IfmapLogCleanTask task, IfmapProperties properties) {
+            return new IfmapLogCleanScheduler(task, properties.getLog().getCleanCron());
         }
     }
 

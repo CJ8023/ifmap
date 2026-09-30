@@ -5,6 +5,14 @@
 ## [Unreleased]
 
 ### Added
+- **W6 日志与合规**（本版本）：
+  - `ifmap-provider-jdbc`：新增 `JdbcExecutionLogCleaner` —— 按保留期**分批**删除过期执行日志（设计 §6.4 方案 A / ADR-10）。先 `SELECT key_id ... LIMIT n` 再 `DELETE ... WHERE key_id IN (...)`：`DELETE ... LIMIT` 是 MySQL 方言、`DELETE ... IN (SELECT 同表)` 在 MySQL 上报 1093，两步走 MySQL/H2 都合法（单测因此能用 H2 跑真实生产 DDL）。带**批间停顿**（给从库追 binlog）、**`maxBatches` 护栏**（没删完留给下个周期并 WARN）、**中断安全**（被中断即停止本轮并保留中断标记）、**表名前缀生效**（复用 `bankint_execution_log` 也认）
+  - `ifmap-spring-boot-starter`：新增 `IfmapLogCleanTask`（`cleanNow()` 可手工触发；清理异常只 WARN 返回 `-1`，**不让后台任务异常影响业务**）与 `IfmapLogCleanScheduler`（`CronExpression` 驱动，默认每天 03:30）。**不用 `@EnableScheduling`**：自动配置不该打开宿主的全局调度设施，且 Spring 无 TaskScheduler 时建的是**非守护**线程 → 非 Web/批处理应用 `main()` 返回后 JVM 不退出（demo 实测卡死；改守护线程后 `java -jar` exit=0）
+  - 自动装配：新增 `LogCleanConfiguration`（清理器 bean，只要求 `DataSource`，关掉定时任务后仍可手工调用）与 `LogCleanSchedulingConfiguration`（任务 + 调度器，受 `ifmap.log.enabled` 与 `ifmap.log.clean-enabled` 双重开关门控）
+  - 配置项：`ifmap.log.clean-enabled=true` / `retention-days=90` / `clean-batch-size=1000` / `clean-max-batches=1000` / `clean-batch-sleep-millis=50` / `clean-cron=0 30 3 * * ?`；**保留期 &le; 0 直接拒绝执行**（防配成 0 退化为"删全表"）
+  - 文档：[`docs/08-日志与合规.md`](docs/08-日志与合规.md)（落什么/不落什么、脱敏、截断、失败降级、保留期清理与分区方案对比、异常体系、10 条合规自查清单、排错表）；`docs/06` 补交叉引用
+  - 测试：新增 **19 个**（provider-jdbc `JdbcExecutionLogCleanerTest` 8（保留期边界、按批续删、`maxBatches` 封顶、`retentionDays<=0` 拒绝、表前缀、中断即停）+ starter `IfmapLogCleanTaskTest` 11（装配三态、配置绑定、非法 cron 启动期失败、**每秒 cron 真触发清理**、**调度线程是守护线程**、真实清理、失败降级、`retention-days=0` 不删数据、宿主覆盖））；JDK 17 全 reactor **264 个测试全绿**，JDK 8 侧 **178 个全绿**
+
 - **W5 管理端 REST**（本版本）：
   - 新模块 `ifmap-admin-spring-boot-starter`：把"改资方接口配置"从**改库 + 发版**变成**页面点点 + 留痕 + 可回滚**（设计 §8）。**默认关闭**（`ifmap.admin.enabled=true` 才装配）+ 三重门控（Web + `JdbcTemplate` + `DataSource`）；**不内置鉴权**，需宿主自行把前缀挂到网关/`SecurityFilterChain`
   - 配置端点：分页列表 / 详情 / 新增 / 修改（乐观锁）/ 逻辑删除 / 启停 / **保存前校验**（`POST /configs/validate`，不过则 422 + `errors`/`warnings` 明细）/ **试跑**（`POST /configs/dry-run`，与线上同一条链路，只把出网换成假应答）/ 变更历史 / **一键回滚**
@@ -18,6 +26,9 @@
   - 配置项：`ifmap.admin.*`（`enabled` / `base-path` / `history-limit` / `audit-max-configs`）
   - 文档：[`docs/07-管理端REST.md`](docs/07-管理端REST.md)
   - 测试：新增 **41 个**（`ConfigAdminServiceTest` 14 / `ConfigValidatorTest` 10 / `IfmapAdminWebEndpointTest` 5（H2 + 真 Tomcat + 真 HTTP）/ `IfmapAdminAutoConfigurationTest` 5 / `ConfigSnapshotMapperTest` 4 / `ConfigAuditorTest` 3）、starter +1（非 MySQL `json` 列降级）；JDK 17 全 reactor **245 个测试全绿**，JDK 8 侧 **170 个全绿**
+
+### Changed（W6）
+- provider-jdbc 测试基座 `TestSchema` 与生产 `IfmapSchemaInitializer` 对齐：非 MySQL 方言下把 `json` 列降级为 `text`（断言式改写，预期列数不符即失败）—— 测试库若保留 H2 的 `JSON` 类型，测的就不是生产语义
 
 ### Fixed（W5）
 - `JdbcConfigWriter.insert/update(LogicBranchConfig)` 把 `logic_branch_flag` / `method_flag` 当必填 → 但 DDL 里 `logic_branch_flag` 是 `NOT NULL DEFAULT ''`、`method_flag` 允许为空（**空 = 默认兜底分支**），真实数据会被拒 → 只校验 `interfaceNo` + `logicBranchName`，其余统一 `null → ""` 落库

@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 测试用建表：读**生产 DDL**（{@code db/changelog/v1.0.0/*.sql}）并做最小确定性变换后在 H2(MySQL 模式) 执行。
@@ -19,6 +21,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 因此"用 H2 验证仓储 SQL 与约束"仍然有效；MySQL 专属选项本身由发布侧在真库验证。</p>
  *
  * <p>变换是确定性断言式的：若某个 DDL 文件不再匹配预期的表尾模式，测试会失败而不是"静默跳过校验"。</p>
+ *
+ * <p>另一处变换与生产 {@code IfmapSchemaInitializer} 保持一致：非 MySQL 方言下把 {@code json} 列
+ * 降级为 {@code text}。原因是 <b>H2 1.4.200 的 {@code JSON} 类型与 MySQL 的 {@code json} 语义不等价</b> ——
+ * JDBC 写字符串会被包成 "JSON 字符串值"（读回来是 {@code "{\"a\":1}"}）。测试库若保留 {@code json}，
+ * 测的就不是生产语义了。</p>
  *
  * @author caijun
  */
@@ -86,6 +93,41 @@ final class TestSchema {
             throw new IllegalStateException("DDL 表尾 COMMENT 未以 \"';\" 结束");
         }
         String stripped = s.substring(0, idx) + ")" + s.substring(commentEnd + 2);
-        return stripped.replaceAll("(?m)^--.*$", "").trim().replaceAll(";$", "");
+        String noJson = downgradeJsonColumns(stripped);
+        return noJson.replaceAll("(?m)^--.*$", "").trim().replaceAll(";$", "");
+    }
+
+    /**
+     * 把列定义里的 {@code json} 改成 {@code text}（与生产 {@code IfmapSchemaInitializer} 同口径）。
+     *
+     * <p>只匹配"反引号列名 + json"这种列定义位置，注释里出现的 json 不受影响，且改写是断言式的
+     * （匹配数必须与预期一致，否则测试失败）。</p>
+     */
+    static String downgradeJsonColumns(String ddl) {
+        Pattern pattern = Pattern.compile("(?i)(`[A-Za-z0-9_]+`[ \t]+)json(?=[ \t,])");
+        Matcher matcher = pattern.matcher(ddl);
+        int count = 0;
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            count++;
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(1) + "text"));
+        }
+        matcher.appendTail(sb);
+        if (count != expectedJsonColumns(ddl)) {
+            throw new IllegalStateException("json 列降级数量与预期不符：实际 " + count
+                    + " / 预期 " + expectedJsonColumns(ddl));
+        }
+        return sb.toString();
+    }
+
+    /** 各 DDL 文件里 json 列的预期个数（001/002 无，003 有 request_param，004 有 snapshot/diff）。 */
+    private static int expectedJsonColumns(String ddl) {
+        if (ddl.contains("config_history")) {
+            return 2;
+        }
+        if (ddl.contains("execution_log")) {
+            return 1;
+        }
+        return 0;
     }
 }

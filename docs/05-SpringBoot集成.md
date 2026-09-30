@@ -333,8 +333,10 @@ ifmap:
 | `/configs/dry-run` | 试跑（与线上同一条链路，只把出网换成假应答） |
 | `/branches` | 逻辑分支维护 |
 | `/rules`、`/actions`、`/strategies`、`/audit` | 规则 / 动作 / 策略清单与全量巡检（Markdown 报告） |
+| `/enums` | 宿主机字典（可选 SPI `IfmapEnumProvider`），页面用它渲染下拉；没注册返回 `{}` |
+| `/ui/` | 自带的零构建可视化页面（无 CDN、无前端框架、无构建链，内网离线可用） |
 
-完整说明见 [`docs/07-管理端REST.md`](07-管理端REST.md)。
+完整说明见 [`docs/07-管理端REST.md`](07-管理端REST.md)（含 §11 可视化页面与字典 SPI 的注册示例）。
 
 ---
 

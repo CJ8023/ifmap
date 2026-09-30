@@ -15,6 +15,8 @@
  */
 package cn.cj.ifmap.ittest;
 
+import cn.cj.ifmap.admin.spi.EnumOption;
+import cn.cj.ifmap.admin.spi.IfmapEnumProvider;
 import cn.cj.ifmap.core.model.BankCall;
 import cn.cj.ifmap.core.spi.BankServiceGateway;
 import cn.cj.ifmap.core.strategy.IfmapAction;
@@ -22,6 +24,9 @@ import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * Web 端到端测试用的宿主应用（真实启动 Tomcat + 真实 HTTP 前缀）。
@@ -49,6 +54,18 @@ public class AdminTestApplication {
     @Bean
     public SubmitAction adminTestSubmitAction() {
         return new SubmitAction();
+    }
+
+    /**
+     * 宿主机字典（可选 SPI 的"有"这一支）：页面拿它把 bankCode 之类的字段渲染成下拉。
+     *
+     * <p>注意字典的语义完全由宿主机决定：ifmap 不建字典表、也不解释枚举含义（设计 Q8）。</p>
+     */
+    @Bean
+    public IfmapEnumProvider adminTestEnumProvider() {
+        return () -> Map.of(
+                "bankCode", List.of(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")),
+                "status", List.of(EnumOption.of("1", "启用"), EnumOption.of("0", "停用")));
     }
 
     /** 试跑必须走 mock 应答；此网关一旦被调用就说明"不出网"保障失效了。 */

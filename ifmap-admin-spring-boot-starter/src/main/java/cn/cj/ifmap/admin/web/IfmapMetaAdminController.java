@@ -17,6 +17,8 @@ package cn.cj.ifmap.admin.web;
 
 import cn.cj.ifmap.admin.AuditReport;
 import cn.cj.ifmap.admin.ConfigAdminService;
+import cn.cj.ifmap.admin.IfmapEnumCatalog;
+import cn.cj.ifmap.admin.spi.EnumOption;
 import cn.cj.ifmap.core.rule.RuleDescriptor;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
@@ -53,12 +55,15 @@ public class IfmapMetaAdminController {
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
     private final CallbackRegistry callbacks;
+    private final IfmapEnumCatalog enums;
 
     public IfmapMetaAdminController(ConfigAdminService service, RuleRegistry rules,
                                     SpecialDealStrategyRegistry specialDeals,
                                     FullParamStrategyRegistry fullParams,
                                     LogicBranchStrategyRegistry logicBranches,
-                                    ActionRegistry actions, CallbackRegistry callbacks) {
+                                    ActionRegistry actions, CallbackRegistry callbacks,
+                                    IfmapEnumCatalog enums) {
+        this.enums = enums == null ? IfmapEnumCatalog.empty() : enums;
         this.service = service;
         this.rules = rules;
         this.specialDeals = specialDeals;
@@ -90,6 +95,17 @@ public class IfmapMetaAdminController {
         result.put("actions", actions.keys());
         result.put("callbacks", callbacks.keys());
         return result;
+    }
+
+    /**
+     * 宿主机字典（可选 SPI，设计 Q8）：页面用它把 {@code bankCode} 之类的字段渲染成下拉。
+     *
+     * <p>没注册 {@code IfmapEnumProvider} 时返回 {@code {}}（而不是 404）：页面只有一条
+     * "没有枚举"的普通分支，不用区分两种失败。</p>
+     */
+    @GetMapping("/enums")
+    public Map<String, List<EnumOption>> enums() {
+        return enums.options();
     }
 
     /** 全量巡检（可带 markdown=true 取 Markdown 报告）。 */

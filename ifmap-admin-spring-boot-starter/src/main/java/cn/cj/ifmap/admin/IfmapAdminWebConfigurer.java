@@ -16,7 +16,9 @@
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.admin.web.IfmapConfigAdminController;
+import org.springframework.http.CacheControl;
 import org.springframework.web.servlet.config.annotation.PathMatchConfigurer;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.util.pattern.PathPatternParser;
 import org.springframework.web.method.HandlerTypePredicate;
@@ -30,6 +32,9 @@ import org.springframework.web.method.HandlerTypePredicate;
  * @author caijun
  */
 public class IfmapAdminWebConfigurer implements WebMvcConfigurer {
+
+    /** 静态页面的 classpath 位置（打包进 jar，不依赖外部 CDN 或宿主机静态资源目录）。 */
+    static final String UI_LOCATION = "classpath:/META-INF/ifmap-admin-ui/";
 
     private final String basePath;
 
@@ -46,6 +51,20 @@ public class IfmapAdminWebConfigurer implements WebMvcConfigurer {
                 HandlerTypePredicate.forBasePackageClass(IfmapConfigAdminController.class));
         // 保持 Spring Boot 3 的 PathPattern 解析器（更严格、更快）；此处显式声明以免被宿主覆盖成 AntPathMatcher
         configurer.setPatternParser(new PathPatternParser());
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        // 只挂 /ui/**，前缀与 Controller 一致；关缓存是为了让升级 ifmap 后页面立刻是新的
+        // （管理端本来就是低频访问，不需要缓存优化，反而最怕"看到的是上个版本的页面"）
+        registry.addResourceHandler(uiPathPattern())
+                .addResourceLocations(UI_LOCATION)
+                .setCacheControl(CacheControl.noCache());
+    }
+
+    /** 静态资源路径：{@code {base-path}/ui/**}（前缀为空时退化成 {@code /ui/**}）。 */
+    String uiPathPattern() {
+        return (basePath == null ? "" : basePath) + "/ui/**";
     }
 
     String basePath() {

@@ -15,9 +15,11 @@
  */
 package cn.cj.ifmap.admin;
 
+import cn.cj.ifmap.admin.spi.IfmapEnumProvider;
 import cn.cj.ifmap.admin.web.IfmapBranchAdminController;
 import cn.cj.ifmap.admin.web.IfmapConfigAdminController;
 import cn.cj.ifmap.admin.web.IfmapMetaAdminController;
+import cn.cj.ifmap.admin.web.IfmapUiController;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
@@ -145,6 +147,25 @@ public class IfmapAdminAutoConfiguration {
         return new IfmapAdminWebConfigurer(properties.normalizedBasePath());
     }
 
+    /**
+     * 宿主机字典的包装（可选 SPI，不注册就是空目录）。
+     *
+     * <p>用 {@link ObjectProvider} 取而不是 {@code @ConditionalOnBean}：page 需要的是
+     * "有则用、无则空"，而不是两个不同的 bean 定义。</p>
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider) {
+        return new IfmapEnumCatalog(enumProviderProvider.getIfAvailable());
+    }
+
+    /** 可视化页面入口（静态页 + 302）。 */
+    @Bean
+    @ConditionalOnMissingBean
+    public IfmapUiController ifmapUiController(IfmapAdminProperties properties) {
+        return new IfmapUiController(properties.normalizedBasePath());
+    }
+
     @Bean
     @ConditionalOnMissingBean
     public IfmapConfigAdminController ifmapConfigAdminController(ConfigAdminService service) {
@@ -164,9 +185,10 @@ public class IfmapAdminAutoConfiguration {
                                                              FullParamStrategyRegistry fullParams,
                                                              LogicBranchStrategyRegistry logicBranches,
                                                              ActionRegistry actions,
-                                                             CallbackRegistry callbacks) {
+                                                             CallbackRegistry callbacks,
+                                                             IfmapEnumCatalog enums) {
         return new IfmapMetaAdminController(service, rules, specialDeals, fullParams, logicBranches, actions,
-                callbacks);
+                callbacks, enums);
     }
 
     @Bean

@@ -70,6 +70,10 @@ class IfmapAdminAutoConfigurationTest {
             assertThat(context).hasSingleBean(IfmapMetaAdminController.class);
             assertThat(context).hasSingleBean(IfmapAdminExceptionHandler.class);
             assertThat(context).hasSingleBean(IfmapAdminWebConfigurer.class);
+            assertThat(context).hasSingleBean(cn.cj.ifmap.admin.web.IfmapUiController.class);
+            // 没有宿主机字典时也必须有目录 bean（端点返回 {} 而不是 404）
+            assertThat(context).hasSingleBean(IfmapEnumCatalog.class);
+            assertThat(context.getBean(IfmapEnumCatalog.class).isPresent()).isFalse();
             assertThat(context).hasSingleBean(AdminConfigRepository.class);
             assertThat(context).hasSingleBean(JdbcConfigHistoryRepository.class);
             // 管理端自己的仓储是"裸 JDBC"视图；同时不能污染引擎侧的 ConfigRepository 唯一性
@@ -103,6 +107,36 @@ class IfmapAdminAutoConfigurationTest {
                         "spring.datasource.username=sa",
                         "spring.datasource.password=")
                 .run(context -> assertThat(context).doesNotHaveBean(ConfigAdminService.class));
+    }
+
+    @Test
+    @DisplayName("没有宿主机字典时 /enums 返回空字典（200 + {}，不是 404 —— 页面只有一条「没有字典」分支）")
+    void enumsIsEmptyWithoutProvider() {
+        runner.withPropertyValues("ifmap.admin.enabled=true").run(context -> assertThat(
+                context.getBean(IfmapMetaAdminController.class).enums()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("宿主机注册 IfmapEnumProvider → 枚举目录有内容（/enums 才不是空字典）")
+    void enumProviderIsPickedUp() {
+        runner.withPropertyValues("ifmap.admin.enabled=true")
+                .withUserConfiguration(EnumProviderConfiguration.class)
+                .run(context -> {
+                    IfmapEnumCatalog catalog = context.getBean(IfmapEnumCatalog.class);
+                    assertThat(catalog.isPresent()).isTrue();
+                    assertThat(catalog.options()).containsOnlyKeys("bankCode");
+                    assertThat(catalog.options().get("bankCode").get(0).getLabel()).isEqualTo("招商银行");
+                });
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class EnumProviderConfiguration {
+
+        @Bean
+        cn.cj.ifmap.admin.spi.IfmapEnumProvider hostEnumProvider() {
+            return () -> java.util.Collections.singletonMap("bankCode",
+                    java.util.Collections.singletonList(cn.cj.ifmap.admin.spi.EnumOption.of("CMB", "招商银行")));
+        }
     }
 
     @Test

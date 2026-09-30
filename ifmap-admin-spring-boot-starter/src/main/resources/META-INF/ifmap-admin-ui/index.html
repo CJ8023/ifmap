@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!--
+  ifmap 管理端可视化页面（设计 §8.1 v1.1）。
+
+  约束：单页、零外部依赖（不引 CDN / 不引前端框架 / 不引构建链）——
+  ifmap 是给运维与实施在内网环境用的，页面必须能离线打开，也不能给宿主机引入前端工程负担。
+
+  鉴权不在本页：页面只调用同源的 /ifmap/admin/** 端点，出入口由宿主机（网关 / Spring Security）把住，
+  详见 docs/07-管理端REST.md「可视化页面」。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ifmap 配置管理</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <strong class="brand">ifmap</strong>
+  <span class="muted">配置管理</span>
+  <span class="muted" id="base-path-label"></span>
+  <span class="grow"></span>
+  <label class="inline">操作人
+    <input id="operator" size="14" placeholder="工号 / 邮箱" autocomplete="off">
+  </label>
+  <span class="muted tip">写入请求会带上它落审计字段</span>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button type="button" class="tab-btn active" data-tab="configs">配置</button>
+  <button type="button" class="tab-btn" data-tab="branches">逻辑分支</button>
+  <button type="button" class="tab-btn" data-tab="audit">巡检</button>
+  <button type="button" class="tab-btn" data-tab="meta">规则与字典</button>
+</nav>
+
+<main>
+  <!-- ============================ 配置 ============================ -->
+  <section id="tab-configs" class="tab-panel">
+    <form id="config-filter" class="row card">
+      <input id="f-tenantId" placeholder="租户ID" size="10">
+      <input id="f-interfaceNo" placeholder="接口编号" size="14">
+      <input id="f-busiNode" placeholder="业务节点" size="12">
+      <input id="f-bankCode" placeholder="银行代码" size="12">
+      <select id="f-status">
+        <option value="">状态：全部</option>
+        <option value="1">状态：启用</option>
+        <option value="0">状态：停用</option>
+      </select>
+      <label class="inline"><input type="checkbox" id="f-includeDeleted"> 含已删除</label>
+      <button type="submit" class="primary">查询</button>
+      <span class="grow"></span>
+      <button type="button" id="btn-config-new">新建配置</button>
+    </form>
+
+    <div id="config-list" class="card">加载中…</div>
+    <div id="config-pager" class="row pager"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 id="editor-title">配置详情</h2>
+        <span class="muted" id="editor-meta">未选择</span>
+      </div>
+      <div id="editor-fields" class="fields"></div>
+      <div class="row">
+        <label class="inline grow">变更原因
+          <input id="editor-reason" class="grow" placeholder="会写进变更历史（建议必填）">
+        </label>
+      </div>
+      <div class="row">
+        <button type="button" id="btn-editor-validate">保存前校验</button>
+        <button type="button" id="btn-editor-dryrun">试跑（不出网）</button>
+        <button type="button" id="btn-editor-history">变更历史</button>
+        <button type="button" id="btn-editor-status">启用 / 停用</button>
+        <button type="button" class="danger" id="btn-editor-delete">逻辑删除</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-editor-save">保存</button>
+      </div>
+      <div id="editor-messages" class="messages"></div>
+      <div class="sub">
+        <h3>试跑入参</h3>
+        <div class="row">
+          <input id="dry-tenantId" placeholder="租户ID" size="10">
+          <input id="dry-interfaceNo" placeholder="接口编号" size="14">
+          <input id="dry-busiNode" placeholder="业务节点" size="12">
+          <input id="dry-bizId" placeholder="业务主键" size="14">
+        </div>
+        <label class="block">样例参数（JSON，会作为 @FUN 的取值来源）
+          <textarea id="dry-params" rows="4" placeholder='{"applyNo":"A001"}'></textarea>
+        </label>
+        <label class="block">假应答（银行返回报文，不会真的外呼）
+          <textarea id="dry-mock" rows="4" placeholder='{"code":"0000","data":{}}'></textarea>
+        </label>
+      </div>
+      <div id="history-box" class="sub"></div>
+    </div>
+  </section>
+
+  <!-- ========================== 逻辑分支 ========================== -->
+  <section id="tab-branches" class="tab-panel hidden">
+    <form id="branch-filter" class="row card">
+      <input id="b-tenantId" placeholder="租户ID" size="10">
+      <input id="b-interfaceNo" placeholder="接口编号" size="14">
+      <label class="inline"><input type="checkbox" id="b-includeDeleted"> 含已删除</label>
+      <button type="submit" class="primary">查询</button>
+      <span class="grow"></span>
+      <button type="button" id="btn-branch-new">新建分支</button>
+    </form>
+
+    <div id="branch-list" class="card">加载中…</div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 id="branch-editor-title">分支详情</h2>
+        <span class="muted" id="branch-meta">未选择</span>
+      </div>
+      <p class="muted tip">
+        <code>logic_branch_flag</code> 留空 = <b>兜底分支</b>（每接口最多 1 条，只在常规分支都没命中时执行）；
+        <code>method_flag</code> 留空 = 该分支<b>不执行动作</b>。两者是正交的两件事。
+      </p>
+      <div id="branch-fields" class="fields"></div>
+      <div class="row">
+        <label class="inline grow">变更原因
+          <input id="branch-reason" class="grow" placeholder="会写进变更历史">
+        </label>
+      </div>
+      <div class="row">
+        <button type="button" class="danger" id="btn-branch-delete">逻辑删除</button>
+        <span class="grow"></span>
+        <button type="button" class="primary" id="btn-branch-save">保存</button>
+      </div>
+      <div id="branch-messages" class="messages"></div>
+    </div>
+  </section>
+
+  <!-- ============================ 巡检 ============================ -->
+  <section id="tab-audit" class="tab-panel hidden">
+    <div class="row card">
+      <input id="a-tenantId" placeholder="租户ID（留空=跨租户全量）" size="18">
+      <input id="a-busiNode" placeholder="业务节点" size="12">
+      <button type="button" class="primary" id="btn-audit-run">运行巡检</button>
+      <span class="grow"></span>
+      <button type="button" id="btn-audit-copy">复制 Markdown 报告</button>
+    </div>
+    <div id="audit-box" class="card muted">
+      巡检检查：<code>@FUN</code> 是否已注册、strategy_name 契约、死分支、重复兜底分支、唯一键重复。
+    </div>
+  </section>
+
+  <!-- ========================== 规则与字典 ========================== -->
+  <section id="tab-meta" class="tab-panel hidden">
+    <div class="card">
+      <h2>已注册规则（模板 DSL 里 <code>@FUN</code> 可用清单）</h2>
+      <div id="meta-rules">加载中…</div>
+    </div>
+    <div class="card">
+      <h2>已注册动作（<code>method_flag</code> 取值）</h2>
+      <div id="meta-actions">加载中…</div>
+    </div>
+    <div class="card">
+      <h2>已注册策略 / 回调</h2>
+      <div id="meta-strategies">加载中…</div>
+    </div>
+    <div class="card">
+      <h2>宿主机字典（可选 SPI）</h2>
+      <div id="meta-enums">加载中…</div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

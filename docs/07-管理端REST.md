@@ -37,6 +37,8 @@ ifmap:
 
 三重门控，误开不了（任一不满足就不装配）：`ifmap.admin.enabled=true` → classpath 有 Web 与 `JdbcTemplate` → 有 `DataSource`。
 
+打开后除 REST 端点，还附带一个**零构建可视化页面**：浏览器打开 `{base-path}/ui/`（默认前缀下即 `http://<host>:<port>/ifmap/admin/ui/`）。原生 HTML/CSS/JS，**无 CDN、无前端框架、无构建链**，内网离线可直接用；详见 §11。
+
 ### 2.1 配置项
 
 | 配置项 | 默认 | 说明 |
@@ -92,6 +94,7 @@ ifmap:
 | GET | `/actions` | 已注册动作（`method_flag` 取值） |
 | GET | `/strategies` | 已注册策略：`specialDeals` / `fullParams` / `logicBranches` / `actions` / `callbacks` |
 | GET | `/audit?tenantId=&busiNode=&markdown=` | 全量巡检，`markdown=true` 返回可贴工单的报告 |
+| GET | `/enums` | 宿主机注册的**字典**（可选 SPI，见 §11.3）；没注册就返回 `{}`（不是 404） |
 
 **这些端点由服务端提供，前端不要硬编码**：`@FUN` 规则、`method_flag` 动作、`strategy_name` 都是宿主机代码决定的，硬编码必然和宿主漂移。
 
@@ -99,10 +102,10 @@ ifmap:
 
 | 请求头 | 必填 | 用途 |
 |---|---|---|
-| `X-Ifmap-Operator` | 否 | 操作人 → `add_user_id` / 日志 `by xxx` |
-| `X-Ifmap-Request-Id` | 否 | 请求号 → `add_request_id`（与调用链日志对齐） |
+| `X-Operator-Id` | 否 | 操作人 → `add_user_id` / 日志 `by xxx` |
+| `X-Request-Id` | 否 | 请求号 → `add_request_id`（与调用链日志对齐） |
 
-不传也能用（落空串），但**上线请让网关强制带上**，否则留痕只有时间没有人。
+不传也能用（落空串），但**上线请让网关强制带上**，否则留痕只有时间没有人。头名常量在 `IfmapAdminHeaders`，页面发的是同一对头（`IfmapAdminWebEndpointTest` 里断言操作人确实落到了历史记录的 `operatorId`）。
 
 ## 4. 状态码与错误体
 
@@ -203,6 +206,8 @@ POST /ifmap/admin/configs/dry-run
 | `history` 里 `snapshot` 是带转义的一整串 | 历史快照列在 MySQL 上是 `json` 类型；**H2 1.4.200 的 `JSON` 类型不能用**（JDBC 写字符串会被包成 JSON 字符串字面量），所以 starter 在非 MySQL 方言下把 `json` 列建为 `text` |
 | 回滚报「历史快照不是 JSON 对象」 | 快照列被手动改过（不是对象），或历史来自旧版本；用 `/audit` 找脏数据 |
 | 校验一直 422 说规则不存在 | 自定义规则没被收集：确认 `@IfmapRule` 方法所在 bean 被 Spring 管理（starter 的 `IfmapRuleRegistrar` 只扫 bean，不扫静态类） |
+| 打开 `/ui/` 是空白页 / 资源 404 | 静态资源挂在 `{base-path}/ui/**`；前面有 Nginx / 网关反向代理时**必须把 `{base-path}` 整段转发**（页面靠当前 URL 反推前缀，前缀被截断就调不到接口）；另看浏览器控制台报错 |
+| 页面上字典下拉是空的（其它都正常） | 宿主机没注册 `IfmapEnumProvider`（可选 SPI）→ `/enums` 返回 `{}`，页面退化成普通输入框，功能不受影响（§11.3） |
 
 ## 10. 最小可运行示例
 
@@ -212,13 +217,76 @@ POST /ifmap/admin/configs/dry-run
 |---|---|
 | `ConfigAdminServiceTest` | 14 个用例：CRUD / 乐观锁 / 回滚 / 分支 / 试跑 / 校验 |
 | `IfmapAdminWebEndpointTest` | 5 个用例：前缀、状态码语义、审计链、分支 + 试跑 |
-| `ConfigValidatorTest` | 10 个用例：§5 校验清单逐条正反例 |
+| `ConfigValidatorTest` | 11 个用例：§5 校验清单逐条正反例 |
 | `ConfigAuditorTest` | 3 个用例：巡检报告（含 Markdown） |
-| `IfmapAdminAutoConfigurationTest` | 5 个用例：三重门控（默认关闭） |
+| `IfmapAdminAutoConfigurationTest` | 7 个用例：三重门控（默认关闭）、字典 bean 两态 |
 | `ConfigSnapshotMapperTest` | 4 个用例：快照与差异序列化 |
+| `IfmapAdminUiEndpointTest` | 4 个用例：真 Tomcat 下 `/ui` 302、`index.html`/`app.js`/`app.css` 可取、静态资源不越界、`/enums` 带出宿主机字典 |
+| `IfmapAdminUiScriptTest` | 5 个用例：页面脚本的**静态契约**（路径白名单、不硬编码前缀、`el('id')` 与 HTML 对得上、无外链、`node --check`） |
+| `IfmapEnumCatalogTest` | 6 个用例：字典目录（无 provider / 脏数据 / 防御性拷贝） |
 
 跑法：
 
 ```bash
 mvn -pl ifmap-admin-spring-boot-starter -am clean test
 ```
+
+## 11. 可视化页面（v1.1）
+
+REST 是给机器和 curl 用的，运营同学要的是能点的页面。所以随 starter 一起打包了一个**零构建**的管理页面：
+
+```
+{ifmap.admin.base-path}/ui/          默认前缀下 = http://<host>:<port>/ifmap/admin/ui/
+```
+
+（`/ui` 会自动 302 到 `/ui/index.html`，手敲地址不用记文件名。）
+
+### 11.1 页面上能做什么
+
+| 页签 | 能力 |
+|---|---|
+| 配置 | 分页查询（租户 / 接口 / 节点 / 资方 / 状态 / 含已删）、新建、编辑、**保存前校验**、**试跑**、启停、逻辑删除、变更历史、一键回滚 |
+| 逻辑分支 | 按接口查分支（含兜底分支标记）、新建 / 编辑 / 删除（`logic_branch_flag` 留空即兜底分支） |
+| 巡检 | 全量巡检结果分条展示，一键**复制 Markdown 报告**（直接贴工单） |
+| 规则与字典 | 已注册规则（`@FUN` 可用项）、动作（`method_flag`）、策略、宿主机字典——**全部由服务端 `/rules`、`/actions`、`/strategies`、`/enums` 提供，页面不硬编码** |
+
+页面顶部的「操作人」会存进浏览器 `localStorage`，之后每个写请求都自动带 `X-Operator-Id` / `X-Request-Id`（§3.4），所以"谁改的"照样留痕。
+
+### 11.2 为什么不用前端框架 / 不引 CDN
+
+| 约束 | 原因 |
+|---|---|
+| 零 CDN | 这套东西部署在**内网**，外网 CDN 拿不到会白屏（打包时也不能保证能联网） |
+| 零前端框架、零构建链 | 加了 React/Vue 就多一条 Node 构建链要维护、要发版；页面本身就是一堆表单与表格，原生 JS 够用（`app.js` 约 900 行） |
+| 资源**不缓存**（`Cache-Control: no-cache`） | 升级 ifmap 后刷新必须立刻是新版页面，避免"页面是旧的、接口是新的"这种最难查的错 |
+
+### 11.3 字典 SPI：`IfmapEnumProvider`（可选，不强制）
+
+ifmap **不建字典表**（设计 Q8）：码值含义是宿主机业务，引擎只负责把值填进模板。想让页面把某字段渲染成下拉，宿主机注册一个 bean 即可：
+
+```java
+@Bean
+public IfmapEnumProvider bankEnums() {
+    return () -> Map.of(
+            "bankCode", List.of(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")),
+            "status",   List.of(EnumOption.of("1", "启用"), EnumOption.of("0", "停用")));
+}
+```
+
+| 约定 | 说明 |
+|---|---|
+| key | **模板里的字段名**（元素 `data-field`），如 `bankCode`；页面按名字取，取不到就是普通输入框 |
+| 返回 | `Map<String, List<EnumOption>>`；`EnumOption.value` 必填（空值直接 `IllegalArgumentException`），`label` 可省（省了用 `value`） |
+| 没注册 | `/enums` 返回 `200 {}`（**不是 404**）：页面只有"没有字典"这一条正常分支，少一个 SPI 不会让页面报错 |
+| 脏数据 | `null` key / `null` 列表 / `null` 项会被跳过，坏一项不影响其它字段 |
+
+### 11.4 页面自己怎么测（手写 JS 的护栏）
+
+编译期管不到的错，用测试管：
+
+| 测试 | 钉住的东西 |
+|---|---|
+| `IfmapAdminUiScriptTest` | ① `app.js` 里出现的每个接口路径都在白名单内（写错一个字母 = 空白页面，编译期发现不了）；② **不许硬编码 `/ifmap/admin`**（前缀可配，写死就整页 404）；③ `el('xxx')` 引用的元素必须在 `index.html` 里存在（否则交互静默失效）；④ 页面无任何外链（内网可用）；⑤ 有 `node` 时跑 `node --check`（没有则跳过，不让构建挂） |
+| `IfmapAdminUiEndpointTest` | 真 Tomcat 下发 HTTP：`/ui` 302、三个静态资源 200 且类型正确、静态资源**不越界**（`/ui/../` 与 `META-INF/...` 都 404）、`/enums` 真的带出宿主字典 |
+
+> 页面只是 REST 的消费者：**关掉它不影响任何端点**，去掉静态资源也不影响引擎（引擎侧本就不依赖管理端）。

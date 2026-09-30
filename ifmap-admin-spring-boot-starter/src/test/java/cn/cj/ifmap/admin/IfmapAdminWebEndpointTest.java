@@ -151,6 +151,9 @@ class IfmapAdminWebEndpointTest {
         assertEquals(2, history.getBody().size());
         assertEquals("UPDATE", history.getBody().get(0).get("changeType"));
         assertEquals("HTTP 创建", history.getBody().get(1).get("changeReason"));
+        // 审计头真的落库了（页面/调用方带 X-Operator-Id 才有“谁改的”）
+        assertEquals("http-tester", history.getBody().get(1).get("operatorId"));
+        assertEquals("req-http-1", history.getBody().get(1).get("requestId"));
 
         long createHistoryId = ((Number) history.getBody().get(1).get("keyId")).longValue();
         ResponseEntity<Map<String, Object>> rolled = rest.exchange(BASE + "/configs/" + keyId + "/rollback",

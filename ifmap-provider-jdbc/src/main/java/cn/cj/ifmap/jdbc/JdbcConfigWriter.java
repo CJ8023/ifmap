@@ -1,6 +1,7 @@
 package cn.cj.ifmap.jdbc;
 
 import cn.cj.ifmap.core.config.IfmapConfig;
+import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.spi.IdGenerator;
 import cn.cj.ifmap.core.spi.SnowflakeIdGenerator;
@@ -98,6 +99,40 @@ public class JdbcConfigWriter {
     }
 
     /**
+     * 新增逻辑分支，返回主键。
+     *
+     * <p>自动补齐：{@code keyId}、{@code delStatus = 0}、{@code deletedSeq = 0}、
+     * {@code tenantId}（为空时 -1）、{@code logicBranchOrder}（为空时 0）。</p>
+     */
+    public long insert(LogicBranchConfig branch) {
+        if (branch == null) {
+            throw new IfmapConfigException("逻辑分支不能为空");
+        }
+        Long id = branch.getKeyId() != null ? branch.getKeyId() : idGenerator.nextId();
+        if (id == null) {
+            throw new IfmapConfigException("新增逻辑分支缺少主键：请提供 keyId，或注入会生成 ID 的 IdGenerator");
+        }
+        JdbcValues.require(branch.getInterfaceNo(), "interfaceNo");
+        JdbcValues.require(branch.getLogicBranchFlag(), "logicBranchFlag");
+        JdbcValues.require(branch.getMethodFlag(), "methodFlag");
+        String sql = "INSERT INTO `" + tables.logicBranchTable() + "`"
+                + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`logic_branch_flag`,"
+                + "`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
+                + " VALUES (?,?,?,?,?,?,?,?,?,0,0)";
+        jdbc.update(sql, id,
+                JdbcValues.orDefault(branch.getTenantId(), -1L),
+                branch.getInterfaceNo(), JdbcValues.orEmpty(branch.getMethodFlag()),
+                JdbcValues.orEmpty(branch.getLogicBranchName()), JdbcValues.orEmpty(branch.getLogicBranchFlag()),
+                JdbcValues.orEmpty(branch.getLogicBranchValue()),
+                JdbcValues.orDefault(branch.getLogicBranchOrder(), 0),
+                JdbcValues.orEmpty(branch.getRemark()));
+        branch.setKeyId(id);
+        branch.setDelStatus(0);
+        branch.setDeletedSeq(0L);
+        return id;
+    }
+
+    /**
      * 按乐观锁更新配置。仅更新业务列，不触碰 {@code del_status} / {@code deleted_seq} / {@code add_*}。
      *
      * @return {@code true} 更新成功；{@code false} 表示版本已被他人修改（{@code version} 不匹配）
@@ -153,8 +188,7 @@ public class JdbcConfigWriter {
     }
 
     /** 按主键查询（管理端编辑页需要看到停用/已删除行，故不加 {@code del_status} 过滤）。 */
-    public Optional<IfmapConfig> findByKeyId(long keyId) {
-        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
+    public Optional<IfmapConfig> findByKeyId(long keyId) {        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
                 + " WHERE `key_id` = ?";
         List<IfmapConfig> list = jdbc.query(sql, IfmapRowMappers.config(), keyId);
         return list.isEmpty() ? Optional.<IfmapConfig>empty() : Optional.of(list.get(0));

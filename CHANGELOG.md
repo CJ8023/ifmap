@@ -5,6 +5,32 @@
 ## [Unreleased]
 
 ### Added
+- **W4 执行编排与策略 SPI**（本版本）：
+  - `ifmap-core`：**编排器 `IfmapOrchestrator`** —— 租户解析 → 配置加载（**递归前置接口** `front_interface_no`，深度护栏 64 + 环检测）→ 拓扑排序（`interface_order`）→ 组包 → 渲染 → 特殊处理 → 出网 → 判定 → 分支动作 → 落执行日志；`stopOnFailure` 控制失败即停；第四参数 `mockResponse` 支持 **dry-run 试跑（不出网）**
+  - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`BankCall`
+  - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `strategy_name`）、`FullParamStrategy`（`bank|busi` 查找顺序：精确 → `bank|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
+  - `ifmap-core`：注解 `@IfmapAction` / `@FullParam` / `@LogicBranch` / `@IfmapCallback` + `CallbackRegistry` / `ActionRegistry` / 三个策略注册表（含冲突与别名诊断）
+  - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `BankServiceGateway` / `ConditionValueResolver`
+  - `ifmap-core`：**合规脱敏** `DefaultLogMasker`（手机 / 证件 / 卡号按值形态保留 6+4 或 3+4、姓名字段按字段名、`excludeFields` 整体 `***`、幂等、非 JSON 安全）+ `Logs.truncate`（超出阈值尾部打标 `...truncated`）
+  - `ifmap-core`：**判定器 `ResponseJudge`**（`result_flag` 为空 = 成功；`success_value` 多值 `;`/`,`、忽略大小写；响应非 JSON 只判失败不抛异常）
+  - `ifmap-core`：**契约自检 `ContractValidator` / `ContractReport`**（模板 JSON 合法性 + `@FUN` 规则名存在 + 参数个数/类型可匹配重载，输出可直接贴工单的 Markdown）
+  - `ifmap-core`：异常 `IfmapStrategyException` / `IfmapRemoteException`
+  - `ifmap-core`：`util/Annotations.find`（沿父类链 + 接口链查注解，**CGLIB 代理安全**）
+  - `ifmap-spring-boot-starter`：`IfmapStrategyRegistrar`（`BeanPostProcessor`）**自动收集 5 类策略 bean**；实现策略接口却**缺注解 → 启动期快速失败**（报错含 bean 名 + 类名）
+  - `ifmap-spring-boot-starter`：编排相关 bean（`TenantResolver` / `LogMasker` / `ClockProvider` / 5 个注册表 / `ContractValidator` / `ExecutionLogSink` / `IfmapOrchestrator`），全部 `@ConditionalOnMissingBean`；`OrchestrationConfiguration` 用 `@ConditionalOnBean(ConfigRepository.class)` 门控（无数据源时不装配编排器）
+  - `ifmap-spring-boot-starter`：配置项 `ifmap.tenant-header` / `ifmap.default-tenant-id` / `ifmap.orchestrator.*`（3 个开关）/ `ifmap.log.*`（`enabled` / `truncate-threshold` / `mask-fields` / `exclude-fields`）
+  - `ifmap-provider-jdbc`：`JdbcConfigWriter.insert(LogicBranchConfig)`
+  - 文档：[`docs/06-执行编排与策略扩展.md`](docs/06-执行编排与策略扩展.md)；`docs/05` 增补 §3.3 与配置项
+  - 测试：core **52 → 123（+71）**、provider-jdbc 25（+1）、starter **21 → 29（+8）**、demo-sb3 4（编排端到端）；JDK 17 全 reactor **203 个测试全绿**，JDK 8 侧 **170 个全绿**
+
+### Fixed（W4）
+- `DefaultLogMasker` 的默认字段集误含 `mobile` / `phone` / `telephone`，会把手机号按姓名规则脱敏成 `1**********` → 默认只保留姓名类字段，手机/证件/卡号统一走值形态识别
+- `DefaultLogMasker(maskFields, excludeFields)` 传空集合时会**把默认脱敏整体关掉**（原始姓名落库）→ 空/null 一律回退内置默认（要关闭请自定义 `LogMasker` bean）
+- 编排器原先**不递归加载** `front_interface_no` 前置链（仓储按单一 `interface_no` 查询，前置接口是另一个接口号）→ 改为广度递归收集 + 深度护栏
+- 策略注册表用 `getClass().getAnnotation(...)` 查注解，**Spring CGLIB 代理类取不到类注解** → 统一改为 `Annotations.find`（父类链 + 接口链）
+- `ContractValidator` 漏检「模板不是合法 JSON」→ 补检并报「模板非法：不是合法 JSON 文本」
+
+### Added
 - **W3 Spring Boot Starter**（本版本）：
   - `ifmap-spring-boot-starter`：Spring Boot 3 自动配置（`IfmapAutoConfiguration`），引入依赖 + 几行 yml 即完成建表 / 仓储 / 引擎 / 规则收集
   - `ifmap-spring-boot-starter`：配置项 `ifmap.*`（`enabled` / `table-prefix` / `id-strategy` / `worker-id` / `null-policy` / `ddl.auto` / `cache.*`），全部有默认值

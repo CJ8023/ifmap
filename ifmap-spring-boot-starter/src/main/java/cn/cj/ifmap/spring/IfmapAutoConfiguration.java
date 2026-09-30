@@ -6,10 +6,26 @@ import cn.cj.ifmap.core.cache.ConfigCache;
 import cn.cj.ifmap.core.cache.InMemoryConfigCache;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.json.JsonOps;
+import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.rule.builtin.BuiltinRules;
+import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.ClockProvider;
+import cn.cj.ifmap.core.spi.DefaultLogMasker;
+import cn.cj.ifmap.core.spi.ExecutionLogSink;
+import cn.cj.ifmap.core.spi.HeaderTenantResolver;
 import cn.cj.ifmap.core.spi.IdGenerator;
+import cn.cj.ifmap.core.spi.LogMasker;
+import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
 import cn.cj.ifmap.core.spi.SnowflakeIdGenerator;
+import cn.cj.ifmap.core.spi.SystemClockProvider;
+import cn.cj.ifmap.core.spi.TenantResolver;
+import cn.cj.ifmap.core.strategy.ActionRegistry;
+import cn.cj.ifmap.core.strategy.CallbackRegistry;
+import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
+import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
@@ -29,6 +45,7 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.util.LinkedHashSet;
 
 /**
  * ifmap 自动配置：引入本 starter 且 classpath 有 DataSource 即自动装配
@@ -66,6 +83,12 @@ public class IfmapAutoConfiguration {
         return new IfmapRuleRegistrar();
     }
 
+    /** 必须是 static：BeanPostProcessor 需要早于普通 bean 实例化。 */
+    @Bean
+    public static IfmapStrategyRegistrar ifmapStrategyRegistrar() {
+        return new IfmapStrategyRegistrar();
+    }
+
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnClass(JacksonJsonOps.class)
@@ -95,8 +118,119 @@ public class IfmapAutoConfiguration {
         return workerId == null ? SnowflakeIdGenerator.shared() : new SnowflakeIdGenerator(workerId);
     }
 
-    /** 缓存：classpath 有 Caffeine 用 Caffeine，否则退回 core 的零依赖实现。 */
+    @Bean
+    @ConditionalOnMissingBean
+    public TenantResolver ifmapTenantResolver(IfmapProperties properties) {
+        return new HeaderTenantResolver(properties.getTenantHeader(), properties.getDefaultTenantId());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public LogMasker ifmapLogMasker(IfmapProperties properties) {
+        IfmapProperties.Log log = properties.getLog();
+        return new DefaultLogMasker(new LinkedHashSet<String>(log.getMaskFields()),
+                new LinkedHashSet<String>(log.getExcludeFields()));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ClockProvider ifmapClockProvider() {
+        return new SystemClockProvider();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public SpecialDealStrategyRegistry ifmapSpecialDealStrategyRegistry() {
+        return new SpecialDealStrategyRegistry();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public FullParamStrategyRegistry ifmapFullParamStrategyRegistry() {
+        return new FullParamStrategyRegistry();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public LogicBranchStrategyRegistry ifmapLogicBranchStrategyRegistry() {
+        return new LogicBranchStrategyRegistry();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ActionRegistry ifmapActionRegistry(IfmapProperties properties) {
+        ActionRegistry registry = new ActionRegistry();
+        registry.setFailOnMissingAction(properties.getOrchestrator().isFailOnMissingAction());
+        return registry;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public CallbackRegistry ifmapCallbackRegistry() {
+        return new CallbackRegistry();
+    }
+
+    /** 部署前契约自检（由管理端调用，不在启动时扫库）。 */
+    @Bean
+    @ConditionalOnMissingBean
+    public ContractValidator ifmapContractValidator(IfmapEngine engine) {
+        return new ContractValidator(engine);
+    }
+
+    /** 执行编排（需要 ConfigRepository；无 DataSource 时不装配）。 */
     @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(ConfigRepository.class)
+    static class OrchestrationConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "ifmap.log", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public ExecutionLogSink ifmapExecutionLogSink(ConfigRepository repository) {
+            return new RepositoryExecutionLogSink(repository);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        public IfmapOrchestrator ifmapOrchestrator(IfmapEngine engine, JsonOps jsonOps,
+                                                   ConfigRepository repository,
+                                                   TenantResolver tenantResolver,
+                                                   SpecialDealStrategyRegistry specialDeals,
+                                                   FullParamStrategyRegistry fullParams,
+                                                   LogicBranchStrategyRegistry logicBranches,
+                                                   ActionRegistry actions,
+                                                   CallbackRegistry callbacks,
+                                                   ObjectProvider<BankServiceGateway> gatewayProvider,
+                                                   ObjectProvider<ExecutionLogSink> logSinkProvider,
+                                                   LogMasker logMasker,
+                                                   ClockProvider clock,
+                                                   IfmapProperties properties) {
+            IfmapProperties.Orchestrator options = properties.getOrchestrator();
+            return IfmapOrchestrator.builder()
+                    .engine(engine)
+                    .jsonOps(jsonOps)
+                    .repository(repository)
+                    .tenantResolver(tenantResolver)
+                    .specialDeals(specialDeals)
+                    .fullParams(fullParams)
+                    .logicBranches(logicBranches)
+                    .actions(actions)
+                    .callbacks(callbacks)
+                    .gateway(gatewayProvider.getIfAvailable())
+                    .logSink(logSinkProvider.getIfAvailable())
+                    .logMasker(logMasker)
+                    .clock(clock)
+                    .stopOnFailure(options.isStopOnFailure())
+                    .failOnMissingStrategy(options.isFailOnMissingStrategy())
+                    .truncateThreshold(toThreshold(properties.getLog().getTruncateThreshold()))
+                    .build();
+        }
+
+        private static int toThreshold(long value) {
+            return value <= 0L ? Integer.MAX_VALUE : (int) Math.min(value, (long) Integer.MAX_VALUE);
+        }
+    }
+
+    /** 缓存：classpath 有 Caffeine 用 Caffeine，否则退回 core 的零依赖实现。 */    @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(prefix = "ifmap.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
     static class CacheConfiguration {
 

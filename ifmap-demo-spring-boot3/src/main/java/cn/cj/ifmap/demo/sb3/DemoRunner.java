@@ -4,6 +4,9 @@ import cn.cj.ifmap.core.IfmapEngine;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
+import cn.cj.ifmap.core.model.IfmapRequest;
+import cn.cj.ifmap.core.model.IfmapResult;
+import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +18,7 @@ import java.util.List;
 
 /**
  * 演示「引入 starter 之后的完整用法」：
- * 写配置 → 从库里查配置 → 引擎按配置模板渲染报文。
+ * 写配置 → 从库里查配置 → 引擎按配置模板渲染报文 → 编排器出网 + 判定 + 分支动作 + 落日志。
  *
  * @author caijun
  */
@@ -32,17 +35,23 @@ public class DemoRunner implements ApplicationRunner {
             + "\"orgNo\":\"@FUN(bankOrgNo,$.orgCode)\","
             + "\"applyNo\":\"$.applyNo\","
             + "\"applyDate\":\"@FUN(dateFormat,$.applyTime,yyyyMMdd)\","
-            + "\"acctName\":\"@FUN(strMask,$.acctName,NAME)\""
+            + "\"acctName\":\"@FUN(strMask,$.acctName,NAME)\","
+            + "\"channelCode\":\"$.channelCode\""
             + "}";
+
+    private static final String RESPONSE_TEMPLATE = "{\"applyNo\":\"$.data.applyNo\"}";
 
     private final ConfigRepository repository;
     private final JdbcConfigWriter writer;
     private final IfmapEngine engine;
+    private final IfmapOrchestrator orchestrator;
 
-    public DemoRunner(ConfigRepository repository, JdbcConfigWriter writer, IfmapEngine engine) {
+    public DemoRunner(ConfigRepository repository, JdbcConfigWriter writer, IfmapEngine engine,
+                      IfmapOrchestrator orchestrator) {
         this.repository = repository;
         this.writer = writer;
         this.engine = engine;
+        this.orchestrator = orchestrator;
     }
 
     @Override
@@ -62,7 +71,22 @@ public class DemoRunner implements ApplicationRunner {
                 + "\"acctName\":\"张三\""
                 + "}";
         String rendered = engine.render(configs.get(0).getRequestParamTemplate(), source);
-        log.info("渲染结果：{}", rendered);
+        log.info("仅渲染（不经编排）结果：{}", rendered);
+
+        // W4：走完整编排 —— 特殊处理策略 → 组包策略 → 渲染 → 出网 → 判定 → 分支动作 → 落执行日志
+        IfmapRequest request = IfmapRequest.builder()
+                .tenantId(TENANT)
+                .bizId("BIZ-20250101-0001")
+                .operatorId("demo")
+                .requestId("REQ-1")
+                .put("orgCode", "12")
+                .put("applyNo", "AP20250101001")
+                .put("applyTime", "2025-03-08 10:20:30")
+                .put("acctName", "张三")
+                .build();
+        IfmapResult result = orchestrator.execute(request, INTERFACE_NO, BUSI_NODE);
+        log.info("编排结果：success={}, data={}, 命中分支={}, 耗时={}ms",
+                result.isSuccess(), result.getData(), result.getMatchedBranch(), result.getElapsedMs());
     }
 
     /** 幂等写入演示配置（重复启动不会插重）。 */
@@ -80,11 +104,24 @@ public class DemoRunner implements ApplicationRunner {
         config.setBankName("招商银行");
         config.setInterfaceOrder(Integer.valueOf(1));
         config.setRequestParamTemplate(REQUEST_TEMPLATE);
+        config.setResponseParamTemplate(RESPONSE_TEMPLATE);
         config.setResultFlag("$.resultCode");
         config.setSuccessValue("0000");
-        config.setStrategyName("cmbApplyStrategy");
+        // 按 bean 名指定特殊处理策略（DemoStrategy 的 bean 名 = demoStrategy）
+        config.setStrategyName("demoStrategy");
         config.setStatus(Integer.valueOf(1));
         long keyId = writer.insert(config);
         log.info("已写入演示配置 keyId={}", keyId);
+
+        LogicBranchConfig branch = new LogicBranchConfig();
+        branch.setTenantId(Long.valueOf(TENANT));
+        branch.setInterfaceNo(INTERFACE_NO);
+        branch.setMethodFlag("submit");
+        branch.setLogicBranchName("成功分支");
+        branch.setLogicBranchFlag("submit");
+        branch.setLogicBranchValue("0000");
+        branch.setLogicBranchOrder(Integer.valueOf(1));
+        long branchId = writer.insert(branch);
+        log.info("已写入演示逻辑分支 keyId={}（flag=submit / value=0000 / 动作=submit）", branchId);
     }
 }

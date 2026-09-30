@@ -93,8 +93,21 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmap.cache.enabled` | `true` | 逻辑分支查询缓存。`false` 时每次查库 |
 | `ifmap.cache.maximum-size` | `1000` | 缓存条目上限（超出按 LRU 淘汰） |
 | `ifmap.cache.ttl` | `60s` | 条目存活时间，`0` 表示永不过期 |
+| `ifmap.tenant-header` | `X-Tenant-Id` | 取租户的请求头名（上下文显式给了 `tenantId` 时不看头） |
+| `ifmap.default-tenant-id` | `-1` | 上下文与请求头都取不到时的兜底租户 |
+| `ifmap.orchestrator.stop-on-failure` | `true` | 多条配置中一条判定失败即停止后续执行 |
+| `ifmap.orchestrator.fail-on-missing-strategy` | `true` | `strategy_name` 找不到策略时快速失败（`false` 则 WARN 跳过） |
+| `ifmap.orchestrator.fail-on-missing-action` | `true` | `method_flag` 找不到动作时快速失败（`false` 则 WARN 跳过） |
+| `ifmap.log.enabled` | `true` | 是否装配执行日志落库（`ExecutionLogSink`） |
+| `ifmap.log.truncate-threshold` | `65536` | 单条报文落库最大长度，超出尾部替换为 `...truncated` |
+| `ifmap.log.mask-fields` | 空（= 内置姓名类字段） | 按**字段名**脱敏的字段列表 |
+| `ifmap.log.exclude-fields` | 空 | 这些字段**整体**替换为 `***` |
 
 `duration` 支持 `60s` / `5m` / `1h` / `PT30S` 等 Spring 写法。
+
+> `ifmap.log.mask-fields` 留空 = 用内置默认（`acctName` / `accountName` / `certName` / `userName` /
+> `realName` / `legalName` / `legalPerson` / `contactName`）。想**完全关闭**按字段名脱敏请自定义 `LogMasker` bean
+> —— 留空不代表关闭，否则姓名会原样落库。
 
 ---
 
@@ -110,6 +123,18 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmapRuleRegistry` | `RuleRegistry` | 预注册内置规则，再自动收集宿主机 `@IfmapRule` |
 | `ifmapRuleRegistrar` | `BeanPostProcessor` | 扫描宿主机 bean，把 `@IfmapRule` 方法注册进注册表 |
 | `ifmapSchemaInitializer` | `IfmapSchemaInitializer` | `ifmap.ddl.auto=true` 时装配，读生产 DDL 建表 |
+| `ifmapTenantResolver` | `TenantResolver` | `HeaderTenantResolver`（读 `ifmap.tenant-header`） |
+| `ifmapLogMasker` | `LogMasker` | `DefaultLogMasker`（值形态 + 字段名两种脱敏） |
+| `ifmapClockProvider` | `ClockProvider` | `SystemClockProvider`（测试可换假时钟） |
+| `ifmapSpecialDealStrategyRegistry` | `SpecialDealStrategyRegistry` | 特殊处理策略注册表（key = bean 名） |
+| `ifmapFullParamStrategyRegistry` | `FullParamStrategyRegistry` | 组包策略注册表（key = `bank|busi`） |
+| `ifmapLogicBranchStrategyRegistry` | `LogicBranchStrategyRegistry` | 分支条件策略注册表（key = 分支 flag） |
+| `ifmapActionRegistry` | `ActionRegistry` | 分支动作注册表（key = `method_flag`） |
+| `ifmapCallbackRegistry` | `CallbackRegistry` | 回调处理器注册表（key = 接口号） |
+| `ifmapContractValidator` | `ContractValidator` | 部署前契约自检（模板 JSON + `@FUN` 规则名/参数） |
+| `ifmapStrategyRegistrar` | `BeanPostProcessor` | 扫描宿主机 bean，自动注册 5 类策略（缺注解即启动失败） |
+| `ifmapExecutionLogSink` | `ExecutionLogSink` | 执行日志落库（`ifmap.log.enabled=true` 时装配） |
+| `ifmapOrchestrator` | `IfmapOrchestrator` | 编排器。**需要 `ConfigRepository`**，无 `DataSource` 时不装配 |
 
 **装配顺序**：`IfmapAutoConfiguration` 在 `DataSourceAutoConfiguration` 之后执行；`IfmapSchemaInitializer` 是
 `InitializingBean`，仓储 bean 通过 `ObjectProvider<IfmapSchemaInitializer>` 强制其先生成，保证「建表 → 用表」。
@@ -156,6 +181,64 @@ public class MyIfmapConfig {
 | `ifmap.cache.enabled=false` | 不装配缓存，仓储直连数据库 | — |
 
 两种实现都遵循同一语义：**loader 返回 null 不缓存、抛异常不缓存**；缓存 key 含 `tenantId`，避免跨租户串配置。
+
+---
+
+### 3.3 编排器与策略：写个 bean 就行（W4）
+
+```java
+// 1) 特殊处理策略：key = bean 名，配置里 strategy_name 直接写 czbApplyStrategy
+@Component
+public class CzbApplyStrategy implements SpecialDealStrategy {
+    @Override
+    public Map<String, Object> apply(StrategyContext context) {
+        return Collections.singletonMap("channelCode", "ECC");
+    }
+}
+
+// 2) 组包策略：注解声明 (bankCode, busiNode)，支持 * 通配
+@Component
+@FullParam(bankCode = "CMB", busiNode = "*")
+public class CmbFullParam implements FullParamStrategy {
+    @Override
+    public Map<String, Object> assemble(StrategyContext context) {
+        Map<String, Object> full = new LinkedHashMap<>();
+        full.put("bankCode", "CMB");
+        return full;
+    }
+}
+
+// 3) 分支动作：注解值 = ifmap_logic_branch_config.method_flag
+@Component
+@IfmapAction("submit")
+public class SubmitAction implements IfmapActionHandler {
+    @Override
+    public void execute(StrategyContext context) { /* 写业务表 / 发消息 */ }
+}
+```
+
+然后注入编排器直接调用：
+
+```java
+@Autowired
+private IfmapOrchestrator orchestrator;
+
+public IfmapResult call(IfmapRequest request) {
+    return orchestrator.execute(request, "BIZ_APPLY", "apply");
+}
+```
+
+| 要点 | 说明 |
+| --- | --- |
+| 自动收集 | 5 类策略 bean（`SpecialDealStrategy` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler` / `IfmapCallbackHandler`）由 `ifmapStrategyRegistrar` 启动期注册 |
+| 启动期快速失败 | 实现了策略接口但**缺注解**（`@FullParam` / `@LogicBranch` / `@IfmapAction` / `@IfmapCallback`）→ 启动即报错并指出 bean 名 + 类名 |
+| 代理安全 | 注解查找会沿父类链与接口链进行，AOP 代理过的 bean 同样识别 |
+| 编排器不装配？ | 编排器依赖 `ConfigRepository`，而仓储依赖 `DataSource`。**没有 `DataSource` 时编排器不装配**，但注册表/解析器/脱敏器照常 |
+| 失败行为可调 | `ifmap.orchestrator.*` 三个开关控制「失败即停」与「缺失策略/动作是否快速失败」 |
+| 日志与脱敏 | `ifmap.log.*` 控制落库、截断阈值、脱敏字段（详见 [`docs/06`](06-执行编排与策略扩展.md) §6） |
+
+编排链路（前置接口递归 + 拓扑排序 + 判定 + 分支 + 回调）、`IfmapRequest`/`IfmapResult` 用法、
+dry-run 试跑、契约自检见 [`docs/06-执行编排与策略扩展.md`](06-执行编排与策略扩展.md)。
 
 ---
 
@@ -249,18 +332,25 @@ starter 与手工装配**可以混用**：宿主想要哪个 bean 就自己声�
 | 启动报 `ifmap 表前缀非法` | `ifmap.table-prefix` 含非法字符 / 超长 / 数字开头 |
 | 表建了但查不到配置 | 检查 `del_status=0` 与 `status=1`（仓储只返回这两类），见 `docs/04` §3 |
 | 自定义规则不生效 | 规则类的 bean 没被 Spring 管到；日志会打印 `ifmap 已注册宿主机规则 bean：[...]，类 [...]`，看不到即未扫到 |
-| 想看装配了什么 | `--debug` 启动，或看 `IfmapRuleRegistrar` / `IfmapSchemaInitializer` 的 INFO 日志 |
+| 启动报策略 bean 缺注解 | 实现了 `SpecialDealStrategy`/`FullParamStrategy`/`LogicBranchStrategy`/`IfmapActionHandler`/`IfmapCallbackHandler` 就必须带对应注解（`SpecialDealStrategy` 例外，它按 bean 名注册），报错信息里有 bean 名与类名 |
+| 启动期契约自检有违规 | 用 `ContractValidator.validate(configs).toMarkdown()` 打印明细；常见原因是模板不是合法 JSON、`@FUN` 规则名拼错（如 `farmatDate`） |
+| `IfmapOrchestrator` 注入不到 | 编排器需要 `ConfigRepository`（即需要 `DataSource`）。无数据源时它不装配；也可自行 `IfmapOrchestrator.builder()` 声明 bean |
+| 想看装配了什么 | `--debug` 启动，或看 `IfmapRuleRegistrar` / `IfmapStrategyRegistrar` / `IfmapSchemaInitializer` 的 INFO 日志 |
 
 ---
 
 ## 8. 自测
 
 ```bash
-# starter 单测（含 H2 上真实执行生产 DDL）
-mvn -pl ifmap-spring-boot-starter -am test
+# starter 单测（含 H2 上真实执行生产 DDL、策略自动收集、编排器端到端）
+mvn -pl ifmap-spring-boot-starter -am test        # 29 个测试
 
-# 示例工程端到端（Spring 上下文 + H2 + 真实建表 + 真实仓储 + 真实引擎）
-mvn -pl ifmap-demo-spring-boot3 -am test
+# 示例工程端到端（Spring 上下文 + H2 + 真实建表 + 真实仓储 + 真实引擎 + 真实编排）
+mvn -pl ifmap-demo-spring-boot3 -am test          # 4 个测试
+
+# 示例工程实跑（会打印「仅渲染」与「编排结果」两行日志）
+mvn -pl ifmap-demo-spring-boot3 -am -DskipTests package
+java -jar ifmap-demo-spring-boot3/target/ifmap-demo-spring-boot3-0.1.0-SNAPSHOT.jar
 ```
 
 > Spring Boot 3 模块要求 JDK 17+。父 POM 用 `<jdk>[17,)</jdk>` 剖面自动装卸这两个模块，

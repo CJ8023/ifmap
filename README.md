@@ -21,19 +21,20 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Spring Boot Starter）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **124 个**单元/端到端测试全绿（core 52 + json-jackson 22 + provider-jdbc 25 + starter 21 + demo-sb3 4） |
+| 测试 | **203 个**单元/端到端测试全绿（core 123 + json-jackson 22 + provider-jdbc 25 + starter 29 + demo-sb3 4；JDK 8 侧 170 个，Spring Boot 3 两模块按剖面跳过） |
 | 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
-| Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` |
+| Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` 与 5 类策略 bean |
+| 执行编排 | 编排器：租户解析 → 前置接口**递归**加载 → 拓扑排序 + 环检测 → 渲染 → 出网 → 判定 → 分支动作 → 脱敏落日志；支持 dry-run 试跑与部署前契约自检 |
 | License | Apache-2.0 |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W4~W8 计划）：Feign 数据源、管理端 REST、Fastjson 实现、多租户 `TenantResolver`。
+**尚未落地**（见 `docs/` 与整体设计文档 W5~W8 计划）：管理端 REST、执行日志保留期清理、Fastjson 实现、Feign 数据源、文档站。
 
 ---
 
@@ -121,8 +122,18 @@ ifmap:
     auto: true              # 启动自动建表（表已存在则跳过）
 ```
 
-之后直接 `@Autowired IfmapEngine engine;` / `@Autowired ConfigRepository repository;` 即可，
-宿主机自定义规则只要是个 Spring bean（方法带 `@IfmapRule`）就会被自动收集。详见 [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md)。
+之后直接 `@Autowired IfmapEngine engine;` / `@Autowired ConfigRepository repository;` / `@Autowired IfmapOrchestrator orchestrator;` 即可：
+
+- 自定义规则只要是个 Spring bean（方法带 `@IfmapRule`）就会被自动收集；
+- 自定义策略只要是个 Spring bean（`SpecialDealStrategy` / `@FullParam` 的 `FullParamStrategy` / `@LogicBranch` / `@IfmapAction`）就会被自动注册，**缺注解启动即失败**。
+
+```java
+IfmapResult result = orchestrator.execute(
+        IfmapRequest.builder().tenantId("1001").bizId("B-1").put("orgCode", "12").build(),
+        "BIZ_APPLY", "apply");
+```
+
+详见 [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) 与 [`docs/06-执行编排与策略扩展.md`](docs/06-执行编排与策略扩展.md)。
 
 ---
 
@@ -211,7 +222,8 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/02-模板DSL语法.md`](docs/02-模板DSL语法.md) | DSL 全量语法、语义细则、与存量引擎的差异对照 |
 | [`docs/03-规则清单与扩展.md`](docs/03-规则清单与扩展.md) | 18 个内置规则详解、自定义规则、覆盖与重载规则 |
 | [`docs/04-接入与建表.md`](docs/04-接入与建表.md) | 建表脚本与 Liquibase、JDBC 仓储接入、软删除与乐观锁语义、ID 策略、排错 |
-| [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) | Spring Boot 3 starter：配置项、自动装配、覆盖机制、缓存、自定义规则、建表与方言自适应、排错 |
+| [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) | Spring Boot 3 starter：配置项、自动装配、覆盖机制、缓存、自定义规则、策略自动收集、建表与方言自适应、排错 |
+| [`docs/06-执行编排与策略扩展.md`](docs/06-执行编排与策略扩展.md) | 编排器执行顺序、三类策略 SPI、动作与回调、判定、脱敏与截断、契约自检、异常体系 |
 
 **内部文档（仅本地，已在 `.gitignore` 中排除）**
 

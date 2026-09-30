@@ -1,0 +1,265 @@
+-- Copyright 2026 caijun
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- =============================================================================
+-- 步骤 0/6：迁移前体检（只读，不修改任何数据）
+-- 执行顺序与每一步的算法/锁语义见同目录 README.md。
+--
+-- 表前缀：本套脚本以 `bankint_` 为例（ifmap 前身工程的存量前缀）。
+--         其它存量部署请先替换前缀：sed -i 's/bankint_/yourprefix_/g' *.sql
+--
+-- ⚠️ 存量的建表 DDL 不在 ifmap 仓库里（配置表由存量服务创建），
+--    因此本脚本一律以 information_schema 里的**实际**定义为准做体检，
+--    而不是照抄设计文档里的假设。第 3 步的输出请贴到变更评审单，
+--    以它为基线去核对 03-modify-and-index.sql 里的列宽/类型是否与现状一致。
+-- =============================================================================
+
+SET SESSION time_zone = '+08:00';   -- 时间列按会话时区解释；后续每一步都要保持一致
+SET SESSION lock_wait_timeout = 10; -- 后面几步的 DDL 等锁上限（默认 1 年，遇长事务会一直挂着）
+
+-- ---------------------------------------------------------------------------
+-- 1) 环境与关键参数
+-- ---------------------------------------------------------------------------
+SELECT VERSION() AS mysql_version, DATABASE() AS db_name,
+       @@time_zone AS session_tz, @@sql_mode AS sql_mode,
+       @@lock_wait_timeout AS lock_wait_timeout;
+
+SHOW VARIABLES LIKE 'innodb_large_prefix';            -- 仅 5.7 有该变量；8.0 已移除（返回空行属正常）
+SHOW VARIABLES LIKE 'innodb_default_row_format';      -- DYNAMIC = 索引前缀上限 3072 字节
+SHOW VARIABLES LIKE 'innodb_online_alter_log_max_size';
+
+-- ---------------------------------------------------------------------------
+-- 2) 表是否存在、体量、行格式（决定后面走"低峰 COPY"还是"gh-ost"）
+-- ---------------------------------------------------------------------------
+SELECT TABLE_NAME, ENGINE, ROW_FORMAT, TABLE_ROWS, AVG_ROW_LENGTH,
+       ROUND(DATA_LENGTH / 1024 / 1024, 1) AS data_mb,
+       ROUND(INDEX_LENGTH / 1024 / 1024, 1) AS index_mb
+  FROM information_schema.TABLES
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
+ ORDER BY TABLE_NAME;
+-- 期望 3 行。0 行 = 库名/前缀不对，先确认再继续。
+-- ROW_FORMAT=COMPACT 的老表请留意第 4 条的 1071 风险（03 脚本里已带 ROW_FORMAT=DYNAMIC 兜底）。
+
+-- ---------------------------------------------------------------------------
+-- 3) 列定义全量清单（迁移基线，务必留档）
+-- ---------------------------------------------------------------------------
+SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE,
+       COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT
+  FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
+ ORDER BY TABLE_NAME, ORDINAL_POSITION;
+-- 与目标 DDL 的列数对比：config 25 → 28（+3）、logic_branch 15 → 17（+2）、execution_log 16 → 17（+1）
+
+-- ---------------------------------------------------------------------------
+-- 4) 现有索引（确认没有同名 uk_ifmap_* / idx_ifmap_* 冲突）
+-- ---------------------------------------------------------------------------
+SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
+  FROM information_schema.STATISTICS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
+ ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX;
+
+-- ---------------------------------------------------------------------------
+-- 5) 基线快照（迁移后用 05-verify.sql 复核，两处必须完全一致）
+--    配置表小：直接 COUNT + SUM 精确核对；
+--    日志表可能很大：用 COUNT(主键) + MIN/MAX（走索引），别在高峰期做全表 SUM。
+-- ---------------------------------------------------------------------------
+SELECT 'config' AS tbl, COUNT(*) AS rows_cnt, COALESCE(SUM(key_id), 0) AS sum_key_id,
+       COALESCE(MIN(key_id), 0) AS min_key_id, COALESCE(MAX(key_id), 0) AS max_key_id
+  FROM bankint_config
+UNION ALL
+SELECT 'logic_branch', COUNT(*), COALESCE(SUM(key_id), 0), COALESCE(MIN(key_id), 0), COALESCE(MAX(key_id), 0)
+  FROM bankint_logic_branch_config;
+
+SELECT 'execution_log' AS tbl, COUNT(*) AS rows_cnt,
+       COALESCE(MIN(key_id), 0) AS min_key_id, COALESCE(MAX(key_id), 0) AS max_key_id
+  FROM bankint_execution_log;
+
+-- ---------------------------------------------------------------------------
+-- 6) ★ P0 唯一键冲突预检（不通过就不要往下走，否则 03 加唯一键会直接 1062 失败）
+--
+--    目标唯一键：
+--      config       (tenant_id, interface_no, busi_node, interface_order, deleted_seq)
+--      logic_branch (tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)
+--
+--    ⚠️ interface_order 会从 char(2) 变成 smallint：'02' 与 '2' 迁移后**是同一个值**，
+--       所以这里必须按 CAST(... AS UNSIGNED) 分组，按字符串分组会漏掉这处冲突。
+--    ⚠️ deleted_seq 回填规则是「未删除=0，已删除=key_id」，所以只有"同一组里有 ≥2 条
+--       del_status=0"才会真的撞唯一键；已删除行各自唯一，不用处理。
+-- ---------------------------------------------------------------------------
+
+-- 6.1 config：未删除行冲突（**期望 0 行**）
+SELECT tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED) AS order_num,
+       COUNT(*) AS dup_cnt,
+       GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids,
+       GROUP_CONCAT(interface_order ORDER BY interface_order) AS raw_order_values
+  FROM bankint_config
+ WHERE del_status = 0
+ GROUP BY tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED)
+HAVING COUNT(*) > 1;
+
+-- 6.2 config：已删除行（理论上不挡唯一键，用于发现"删了又建"的历史；可仅记录）
+SELECT tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED) AS order_num,
+       COUNT(*) AS dup_cnt, GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids
+  FROM bankint_config
+ WHERE del_status = 1
+ GROUP BY tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED)
+HAVING COUNT(*) > 1;
+
+-- 6.3 logic_branch：未删除行冲突（**期望 0 行**）
+SELECT tenant_id, interface_no, COALESCE(method_flag, '<NULL>') AS method_flag,
+       logic_branch_name, COUNT(*) AS dup_cnt,
+       GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids
+  FROM bankint_logic_branch_config
+ WHERE del_status = 0
+ GROUP BY tenant_id, interface_no, method_flag, logic_branch_name
+HAVING COUNT(*) > 1;
+-- 注意 method_flag 为 NULL 的组：MySQL 唯一键不约束 NULL，理论上可放行；
+-- 但要确认这些接口的兜底分支不超过 1 条（见第 10.3 条）。
+
+-- 6.4 处理建议（由人工决定，脚本不自动改数据）：
+--     · 同组多条 → 改 interface_order（例如 10 / 20 / 30）分批拉开；
+--     · 确认多余的配置无效 → del_status=1（同时把 deleted_seq 置为 key_id，见 02-backfill.sql）；
+--     · 处理完重跑 6.1 / 6.3，直到返回 0 行。
+
+-- ---------------------------------------------------------------------------
+-- 7) interface_order 能否安全转 smallint（P0）
+-- ---------------------------------------------------------------------------
+-- 7.1 格式体检：必须是纯数字且长度 ≤ 4（smallint 上限 32767）→ **期望 0 行**
+SELECT key_id, CONCAT('[', interface_order, ']') AS raw_value,
+       CHAR_LENGTH(TRIM(interface_order)) AS trimmed_len
+  FROM bankint_config
+ WHERE TRIM(interface_order) NOT REGEXP '^[0-9]+$'
+    OR CHAR_LENGTH(TRIM(interface_order)) > 4
+ ORDER BY key_id;
+-- 非数字 / 空值 → 按 0 处理（执行：UPDATE bankint_config SET interface_order = 0 WHERE ...）；
+-- 长度 > 4 → 人工确认（顺序号不该有 5 位）。
+
+-- 7.2 值分布：人工过一眼有没有 '2' 与 '02' 并存（迁移后会合并成同一个值）
+SELECT CONCAT('[', interface_order, ']') AS raw_value, COUNT(*) AS cnt
+  FROM bankint_config GROUP BY interface_order ORDER BY interface_order;
+
+-- ---------------------------------------------------------------------------
+-- 8) 列长度与 NULL（P0：超长 → 1406；目标 NOT NULL 但有 NULL → 1048/1138）
+-- ---------------------------------------------------------------------------
+-- 8.1 长度体检（每张表只扫一次；列名后缀 = 该列的迁移目标上限，逐个比对）
+-- config（小表）
+SELECT MAX(CHAR_LENGTH(interface_name))     AS interface_name_128,
+       MAX(CHAR_LENGTH(bank_name))          AS bank_name_128,
+       MAX(CHAR_LENGTH(interface_code))     AS interface_code_64,
+       MAX(CHAR_LENGTH(project_code))       AS project_code_64,
+       MAX(CHAR_LENGTH(front_interface_no)) AS front_interface_no_64,
+       MAX(CHAR_LENGTH(financing_mode))     AS financing_mode_32,
+       MAX(CHAR_LENGTH(busi_node))          AS busi_node_32,
+       MAX(CHAR_LENGTH(strategy_name))      AS strategy_name_128,
+       MAX(CHAR_LENGTH(result_flag))        AS result_flag_512,
+       MAX(CHAR_LENGTH(success_value))      AS success_value_512,
+       MAX(CHAR_LENGTH(remark))             AS remark_512
+  FROM bankint_config;
+-- logic_branch（小表）
+SELECT MAX(CHAR_LENGTH(logic_branch_name))  AS logic_branch_name_128,
+       MAX(CHAR_LENGTH(logic_branch_flag))  AS logic_branch_flag_512,
+       MAX(CHAR_LENGTH(logic_branch_value)) AS logic_branch_value_512,
+       MAX(CHAR_LENGTH(method_flag))        AS method_flag_64,
+       MAX(CHAR_LENGTH(remark))             AS remark_512
+  FROM bankint_logic_branch_config;
+-- execution_log（大表：低峰执行）
+SELECT MAX(CHAR_LENGTH(response_param))   AS response_param_max_16777215,
+       MAX(CHAR_LENGTH(execution_result)) AS execution_result_16,
+       MAX(CHAR_LENGTH(remark))           AS remark_512
+  FROM bankint_execution_log;
+-- 超过上限时：先清理/截断数据，或放宽目标列宽（需同步改 db/changelog/v1.0.0/*.sql 与目标一致性检查）。
+
+-- 8.2 NULL 体检：目标为 NOT NULL 的列（**期望全 0**；每张表只扫一次）
+SELECT SUM(interface_name IS NULL)    AS interface_name,
+       SUM(interface_code IS NULL)    AS interface_code,
+       SUM(busi_node IS NULL)         AS busi_node,
+       SUM(bank_code IS NULL)         AS bank_code,
+       SUM(interface_order IS NULL)   AS interface_order,
+       SUM(result_flag IS NULL)       AS result_flag,
+       SUM(success_value IS NULL)     AS success_value,
+       SUM(strategy_name IS NULL)     AS strategy_name,
+       SUM(remark IS NULL)            AS remark,
+       SUM(add_user_id IS NULL)       AS add_user_id,
+       SUM(modify_user_id IS NULL)    AS modify_user_id,
+       SUM(add_request_id IS NULL)    AS add_request_id,
+       SUM(modify_request_id IS NULL) AS modify_request_id,
+       SUM(add_time IS NULL)          AS add_time,
+       SUM(modify_time IS NULL)       AS modify_time
+  FROM bankint_config;
+
+SELECT SUM(interface_no IS NULL)      AS interface_no,
+       SUM(logic_branch_name IS NULL) AS logic_branch_name,
+       SUM(del_status IS NULL)        AS del_status,
+       SUM(add_time IS NULL)          AS add_time,
+       SUM(modify_time IS NULL)       AS modify_time
+  FROM bankint_logic_branch_config;
+
+SELECT SUM(interface_no IS NULL)   AS interface_no,
+       SUM(biz_id IS NULL)         AS biz_id,
+       SUM(execution_time IS NULL) AS execution_time,
+       SUM(remark IS NULL)         AS remark,
+       SUM(add_time IS NULL)       AS add_time,
+       SUM(modify_time IS NULL)    AS modify_time
+  FROM bankint_execution_log;
+-- 处理：按业务语义补默认值（字符串 → ''、时间 → '1970-01-01 00:00:00'、数字 → 0）。
+-- 不用处理的列：logic_branch_flag / logic_branch_value —— 它们为 NULL 恰恰表达"兜底分支"，
+-- 03 的 MODIFY（NOT NULL DEFAULT ''）会把 NULL 归一成空串，语义不变（引擎把空串与 NULL 同等对待），
+-- 详见第 10.3 条。
+
+-- ---------------------------------------------------------------------------
+-- 10) 数据形态体检（不阻塞迁移，但强烈建议看一眼）
+-- ---------------------------------------------------------------------------
+-- 10.1 busi_node 尾随空格：char(10) → varchar(32) 转换会**自动去掉尾随空格**，
+--      值"看起来变了"；比较语义不变（目标排序规则 utf8mb4_general_ci 是 PAD SPACE）。
+SELECT DISTINCT CONCAT('[', busi_node, ']') AS padded_value
+  FROM bankint_config WHERE busi_node <> TRIM(busi_node);
+
+-- 10.2 模板必须能通过 ifmap 的契约校验（非法 JSON 会被 admin 端拒绝保存）
+SELECT key_id, interface_no, 'request_param_template' AS col FROM bankint_config
+ WHERE request_param_template IS NOT NULL AND JSON_VALID(request_param_template) = 0
+UNION ALL
+SELECT key_id, interface_no, 'response_param_template' FROM bankint_config
+ WHERE response_param_template IS NOT NULL AND JSON_VALID(response_param_template) = 0;
+-- 期望 0 行。有行 = 存量脏数据，迁移后在 admin 端保存同一接口会被拒（需人工修 JSON）。
+
+-- 10.3 ★ 兜底分支：有几个、分别属于哪个接口（**每个接口期望 ≤ 1 条**）
+SELECT tenant_id, interface_no, COUNT(*) AS fallback_cnt,
+       GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids
+  FROM bankint_logic_branch_config
+ WHERE del_status = 0
+   AND (logic_branch_flag IS NULL OR logic_branch_flag = '')
+   AND (logic_branch_value IS NULL OR logic_branch_value = '')
+ GROUP BY tenant_id, interface_no
+ ORDER BY fallback_cnt DESC, interface_no;
+-- 语义对齐（重要）：ifmap 引擎与存量一致 ——
+--   · `logic_branch_flag` 为空 = **兜底分支**（不参与常规匹配，仅当所有常规分支都未命中时生效）；
+--   · `method_flag` 为空 = **该分支不执行任何动作**（与"兜底"是两件事）。
+-- 迁移后兜底分支的优先级由 logic_branch_order 决定（02-backfill.sql 会给它一个大值）。
+
+-- 10.4 execution_result 取值分布（char(2) → varchar(16)，值本身不变）
+SELECT execution_result, COUNT(*) AS cnt
+  FROM bankint_execution_log GROUP BY execution_result ORDER BY cnt DESC;
+
+-- 10.5 日志表 request_param 是否都是合法 JSON（若现状是 text 而非 json 列）
+SELECT COUNT(*) AS invalid_json_cnt
+  FROM bankint_execution_log
+ WHERE request_param IS NOT NULL AND JSON_VALID(request_param) = 0;
+
+-- ---------------------------------------------------------------------------
+-- 体检结论：上面所有标注「期望 0」/「期望 ≤ 1」的查询都通过后，才可以执行
+-- 01-add-columns.sql。任何一条不通过都必须先处理数据，不要"先跑起来再说"。
+-- ---------------------------------------------------------------------------

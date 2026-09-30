@@ -5,7 +5,13 @@
 ## [Unreleased]
 
 ### Added
-- **W7 开源工程化**（本版本）：
+- **W8 迁移预热**（本版本）：
+  - **存量表迁移 SQL kit**（`ifmap-provider-jdbc/src/main/resources/db/migration/ecc-to-ifmap/`，7 个文件）：`README.md`（执行手册：三条路径、每步算法/锁语义、大表 gh-ost 命令、回滚、排错表、checklist、行为对齐清单、免责声明）+ `00-precheck.sql`（只读体检：唯一键冲突按 `CAST(interface_order AS UNSIGNED)` 分组、非数字顺序号、NULL→NOT NULL 列、长度超限、零值时间、时区、基线快照）/ `01-add-columns.sql`（纯 `ADD COLUMN`，`ALGORITHM=INPLACE, LOCK=NONE`）/ `02-backfill.sql`（软删唯一化 + 分支顺序自连接回填）/ `03-modify-and-index.sql`（类型变更 `ALGORITHM=COPY, LOCK=SHARED` + 唯一键/索引；日志大表按体量走 gh-ost；索引单独在线 `INPLACE, LOCK=NONE`）/ `04-rename-tables.sql`（切换时刻的 `RENAME TABLE` + 回滚）/ `05-verify.sql`（列数 28/17/17、索引 9 条、回填完整性、行数 + `SUM(key_id)` 指纹、时间抽样、分支顺序、查询冒烟）。**随 jar 发布、不会被 Liquibase/Flyway 自动执行**（不在 changelog 主入口目录，文件名也不符合 Flyway 规范）；库中表名以 `bankint_` 前缀书写，其它前缀用 `sed -i 's/bankint_/yourprefix_/g' *.sql` 全局替换
+  - **`ifmap-json-tck` 模块**（新）：`JsonOpsConformanceTestBase`（**24 个契约用例**）+ `JdkNativeValues`（递归断言返回值只含 JDK 原生类型）。任何 `JsonOps` 实现继承基类即得全套一致性检查（含“路径不存在 → null”与“过滤器/通配不命中 → 空列表”的语义区分、数字-字符串不隐式转换、上下文可复用、非法路径抛 `IfmapConfigException`）；`JacksonJsonOpsConformanceTest` 为 Jackson 实现的空壳继承 —— 换 JSON 库只需覆写一个方法
+  - **影子运行框架**（`cn.cj.ifmap.core.shadow`，12 个类）：`ShadowRunner` + `ShadowRequest`/`ShadowTarget`/`ShadowEngine`/`ShadowExtractor`/`ShadowOutcome`/`ShadowComparer`/`ShadowFieldDiff`/`ShadowDiffSink`/`LoggingShadowDiffSink`/`ShadowRunResult`/`ShadowOptions`。同一笔业务双跑，**主链路结果原样返回、异常原样上抛**；影子链路异常与差异出口异常**只记录不外泄**；`legacyRawResponse` 回填存量原始响应后影子**不再对资方出网**（单测用“出网计数为 0”钉住）；支持采样率、`ignoreKeys`、数字宽容比对、字符串去空格、差异条数上限；差异出货前统一走 `LogMasker` 脱敏。引擎侧抽象为 `ShadowEngine`（而非直接依赖 `final` 的 `IfmapOrchestrator`）以便单测替换与迁移期换实现
+  - **公开迁移指南** [`docs/10-迁移指南.md`](docs/10-迁移指南.md)：M0 摸底 → M1 表结构 → M2 规则/策略对齐 → M3 影子运行 → M4 切换与回滚；共存三路径（前缀指向 / `RENAME` / 新表搬迁，并说明为什么不能用视图兜底）；M2 的“配置字符串 → 注册点”对照表与启动期自检动作；影子跑退出条件（连续 7 天零差异）与假差异排查顺序；10 条行为对齐清单与排错速查
+  - 测试：新增 **53 个**（core `ShadowRunnerTest` 22 + `ShadowEngineIntegrationTest` 5 + `IfmapOrchestratorTest` 兜底分支 2 + json-jackson `JacksonJsonOpsConformanceTest` 24（TCK 契约套件））；JDK 17 全 reactor **321 个全绿**（core 155 / json-jackson 46 / provider-jdbc 33 / starter 41 / admin 42 / demo-sb3 4），JDK 8 侧 **234 个全绿**；两轮 `clean verify` 都是 `BUILD SUCCESS`，SpotBugs 仍为 **0 缺陷**
+- **W7 开源工程化**（同版本，前一批）：
   - `NOTICE`（版权 + 第三方组件许可说明）；`CONTRIBUTING.md`（贡献入口）与 [`docs/09-参与贡献.md`](docs/09-参与贡献.md)（开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁、PR 检查表）
   - **许可头全量落地**：166 个 `*.java` + 5 个 `*.sql` 全部带 Apache-2.0 许可头（Liquibase changelog 的 `--liquibase formatted sql` 仍保持在首行，许可头插在它之后）
   - **`LicenseHeaderTest`（core 测试，3 例）**：`mvn test` 即校验「LICENSE/NOTICE 存在且非空」「每个 `.java` 都以许可头开始」「SQL 也带许可头且 changelog 标记行未被顶掉」。用测试而不是 `license-maven-plugin`，是为了"零新增构建期依赖也能拦住漏加"，且 JDK 8 矩阵同样会跑到
@@ -43,12 +49,17 @@
 - `InMemoryConfigCache` 匿名 `LinkedHashMap` 子类里 `size()` 的实际调用对象有歧义（外层类也有 `size()`）→ 显式写 `super.size()`
 - `ApiError.ok` 是恒为 `false` 的实例字段（SpotBugs `SS_SHOULD_BE_STATIC`）→ 删掉字段，`isOk()` 直接返回 `false`，JSON 里仍有 `"ok": false`
 
+### Fixed（W8）
+- `IfmapOrchestrator` 的**兜底分支从不生效**：`logic_branch_flag` 为空的分支在常规匹配里被判 `false` 并打 WARN，导致“存量用空标志表达兜底分支”的配置迁移后**命中不到任何分支 → 业务回调静默不执行**（最危险的一类静默差异）→ 改为**两趟匹配**：先按 `logic_branch_order` 升序找首个常规分支命中，全部未命中才执行兜底分支（**兜底分支排在前面也不会抢命中**，因此免疫人工配错顺序）；存量配置**数据零改动**即可行为一致（TDD：先写 2 个用例红，再改引擎转绿）
+- 兜底分支的**文档/注释口径**统一为两个正交维度：`logic_branch_flag` 空 = **兜底分支**（最后生效），`method_flag` 空 = **该分支不执行动作**；修正 `LogicBranchConfig` javadoc（5 处）、`002-create-logic-branch.sql` 列注释、`docs/07` 与 `CHANGELOG` 相应描述
+- `LicenseHeaderTest` 的 Liquibase 标记规则过宽（`^\d{3}-.*\.sql$` 会误拦 `db/migration/` 下的迁移脚本，逼着给非 changelog 脚本加假标记）→ 收敛为“路径含 `db/changelog/` 且文件名形如 `NNN-*.sql`”
+
 ### Changed（W6）
 - provider-jdbc 测试基座 `TestSchema` 与生产 `IfmapSchemaInitializer` 对齐：非 MySQL 方言下把 `json` 列降级为 `text`（断言式改写，预期列数不符即失败）—— 测试库若保留 H2 的 `JSON` 类型，测的就不是生产语义
 
 ### Fixed（W5）
-- `JdbcConfigWriter.insert/update(LogicBranchConfig)` 把 `logic_branch_flag` / `method_flag` 当必填 → 但 DDL 里 `logic_branch_flag` 是 `NOT NULL DEFAULT ''`、`method_flag` 允许为空（**空 = 默认兜底分支**），真实数据会被拒 → 只校验 `interfaceNo` + `logicBranchName`，其余统一 `null → ""` 落库
-- `ConfigValidator.validateBranch` 要求 `method_flag` 必填 → 默认兜底分支合法为空，改为只校验 `interfaceNo` + `logicBranchName`；并补「**默认兜底分支最多 1 条**」的**单条**校验（引擎取首个命中者，第二条永远不生效，属"配了但没用"的静默陷阱）
+- `JdbcConfigWriter.insert/update(LogicBranchConfig)` 把 `logic_branch_flag` / `method_flag` 当必填 → 但 DDL 里 `logic_branch_flag` 是 `NOT NULL DEFAULT ''`、`method_flag` 允许为空（**空 = 该分支不执行动作**，与「兜底分支」不是一回事，后者看 `logic_branch_flag`），真实数据会被拒 → 只校验 `interfaceNo` + `logicBranchName`，其余统一 `null → ""` 落库
+- `ConfigValidator.validateBranch` 要求 `method_flag` 必填 → `method_flag` 合法为空，改为只校验 `interfaceNo` + `logicBranchName`；并补「**兜底分支最多 1 条**」的**单条**校验（引擎取首个命中者，第二条永远不生效，属"配了但没用"的静默陷阱）
 - `ConfigValidator.checkTemplateContract` 在没有 `ContractValidator`（无引擎）时**完全跳过模板检查** → 改为至少做 JSON 语法兜底校验：历史脏数据（手改 SQL / 旧版本写入的非法 JSON）不能静默放过
 - `JdbcConfigRepository.whereClause` **总是**过滤 `tenant_id = ?`（`null` → `-1`）→ 全量巡检实际只看 `-1` 租户、结果恒为 0 条；新增 `ConfigQuery.allTenants`，巡检按行取各自租户
 - `GET /configs/{keyId}` 不存在时抛的是 `IfmapConfigException`（400），但 Controller 注释写的是 404/409 → 统一为「**200 + `ok=false`** 表示业务没做成（乐观锁冲突等），400 表示用错接口/目标不存在，422 表示校验未通过」并写进文档

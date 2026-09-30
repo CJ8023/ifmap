@@ -9,31 +9,24 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
-  <artifactId>ifmap-json-jackson</artifactId>
-  <name>ifmap-json-jackson</name>
-  <description>ifmap 的 JsonOps 实现：Jackson 序列化 + JsonPath 路径求值（SPI 自动发现）</description>
+  <artifactId>ifmap-json-tck</artifactId>
+  <name>ifmap-json-tck</name>
+  <description>JsonOps 一致性测试套件（TCK）：写自己的 JSON 实现时继承 JsonOpsConformanceTestBase 自证合规</description>
 
   <dependencies>
     <dependency>
       <groupId>cn.cj</groupId>
       <artifactId>ifmap-core</artifactId>
     </dependency>
-    <dependency>
-      <groupId>com.fasterxml.jackson.core</groupId>
-      <artifactId>jackson-databind</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.jayway.jsonpath</groupId>
-      <artifactId>json-path</artifactId>
-    </dependency>
+    <!--
+      JUnit 用 compile 作用域（不是 test）：本模块的产物就是"给别人的测试用的基类"，
+      基类要编译进 jar，所以不能是 test 作用域（父 POM 的 dependencyManagement 里给的是 test）。
+      消费方以 <scope>test</scope> 引入本模块时，会连带把 JUnit 以 test 作用域带进来。
+    -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>cn.cj</groupId>
-      <artifactId>ifmap-json-tck</artifactId>
-      <scope>test</scope>
+      <scope>compile</scope>
     </dependency>
   </dependencies>
 </project>

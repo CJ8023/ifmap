@@ -105,9 +105,10 @@ class LicenseHeaderTest {
             if (!head.contains(COPYRIGHT) || !head.contains(MARK_LICENSE)) {
                 offenders.add(relative(file));
             }
-            // Liquibase 要求 `--liquibase formatted sql` 出现在任何 changeset 之前
-            if (file.getFileName().toString().matches("^\\d{3}-.*\\.sql$")
-                    && !text.startsWith("--liquibase formatted sql")) {
+            // Liquibase 要求 `--liquibase formatted sql` 出现在任何 changeset 之前。
+            // 该规则只对 changelog 脚本成立：db/migration/ 下的迁移 kit 是给运维手动执行的普通脚本，
+            // 不是 changelog（加个假标记反而误导人）。
+            if (isLiquibaseChangelog(file) && !text.startsWith("--liquibase formatted sql")) {
                 badMarker.add(relative(file));
             }
         }
@@ -117,6 +118,13 @@ class LicenseHeaderTest {
     }
 
     // ------------------------------------------------------------------ 工具
+
+    /** 是否是 Liquibase changelog 脚本：只认 {@code db/changelog/} 下的 {@code NNN-*.sql}。 */
+    private static boolean isLiquibaseChangelog(Path file) {
+        String rel = repoRoot().relativize(file).toString().replace('\\', '/');
+        return rel.contains("/db/changelog/")
+                && file.getFileName().toString().matches("^\\d{3}-.*\\.sql$");
+    }
 
     /** 从当前工作目录向上找仓库根（含 ifmap-parent 的 pom.xml 且有 ifmap-core 子目录）。 */
     static Path repoRoot() {

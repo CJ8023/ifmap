@@ -82,7 +82,7 @@ ifmap:
 | PUT | `/branches/{keyId}` | 修改分支 |
 | DELETE | `/branches/{keyId}` | 逻辑删除分支 |
 
-分支**不写历史**（设计 §6.5 决策）：分支表没有 `version` 列，且分支属于接口配置的一部分，改分支的"留痕"由接口配置的 `UPDATE` 历史承载。分支唯一键是 `(tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)`，所以「同接口 + 同方法 + 同名」不允许重复；`method_flag` 可为空（默认兜底分支）。
+分支**不写历史**（设计 §6.5 决策）：分支表没有 `version` 列，且分支属于接口配置的一部分，改分支的"留痕"由接口配置的 `UPDATE` 历史承载。分支唯一键是 `(tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)`，所以「同接口 + 同方法 + 同名」不允许重复；`method_flag` 可为空（空 = 该分支**不执行动作**）；**“兜底分支”是另一个维度**：`logic_branch_flag` 为空才是兜底分支（不参与常规匹配，只在常规分支全部未命中时生效，每个接口最多 1 条）。
 
 ### 3.3 元数据（配置页的下拉与即时校验用）
 

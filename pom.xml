@@ -36,6 +36,7 @@
   <modules>
     <module>ifmap-core</module>
     <module>ifmap-json-jackson</module>
+    <module>ifmap-json-tck</module>
     <module>ifmap-provider-jdbc</module>
     <module>ifmap-demo-pure-java</module>
     <!-- Spring Boot 3 相关模块要求 JDK 17+，放在下面的 jdk17 剖面里 -->
@@ -81,6 +82,11 @@
       <dependency>
         <groupId>cn.cj</groupId>
         <artifactId>ifmap-json-jackson</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.cj</groupId>
+        <artifactId>ifmap-json-tck</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

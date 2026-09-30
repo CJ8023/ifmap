@@ -64,7 +64,7 @@ import java.util.Set;
  *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 特殊处理 SpecialDealStrategy
  *   → 出网调用 BankServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
  *   → 响应模板解析 → 结果判定 result_flag + success_value
- *   → 逻辑分支（logic_branch_order 升序，首个命中）→ ActionRegistry 执行动作
+ *   → 逻辑分支（logic_branch_order 升序，首个命中；兜底分支最后）→ ActionRegistry 执行动作
  *   → 执行日志（脱敏 + 截断后落库）
  * </pre>
  *
@@ -290,7 +290,14 @@ public final class IfmapOrchestrator {
         return Collections.emptyMap();
     }
 
-    /** 逻辑分支：按 {@code logic_branch_order} 升序取首个命中者，执行其动作。 */
+    /**
+     * 逻辑分支：按 {@code logic_branch_order} 升序取首个命中者，执行其动作。
+     *
+     * <p><b>兜底分支</b>（{@code logic_branch_flag} 为空，存量用"flag、value 皆空"表达）
+     * 不参与常规匹配，只有所有常规分支都未命中时才生效；即使它排在前面也不会抢常规
+     * 分支的命中。存量 ECC 的兜底分支正是这个语义（先正常匹配、失败再取 blank flag 的那条），
+     * 所以迁移过来的配置行为不变。</p>
+     */
     private String applyBranch(IfmapRequest request, String tenantId, IfmapConfig config,
                                StrategyContext context, String response, Judgement judgement) {
         List<LogicBranchConfig> branches = repository.queryLogicBranches(tenantId, config.getInterfaceNo());
@@ -298,35 +305,50 @@ public final class IfmapOrchestrator {
             LOG.debug("ifmap 接口 {} 无逻辑分支配置", config.getInterfaceNo());
             return null;
         }
+        LogicBranchConfig catchAll = null;
         for (LogicBranchConfig branch : branches) {
             if (branch == null) {
+                continue;
+            }
+            if (trimToNull(branch.getLogicBranchFlag()) == null) {
+                // 兜底分支：留到最后；多余的兜底分支永不生效（admin 侧校验会拦）
+                if (catchAll == null) {
+                    catchAll = branch;
+                }
                 continue;
             }
             if (!matches(branch, context, judgement)) {
                 continue;
             }
-            String flag = trimToNull(branch.getLogicBranchFlag());
-            context.setMatchedBranch(flag);
-            String actionKey = trimToNull(branch.getMethodFlag());
-            actions.execute(actionKey == null ? flag : actionKey, context);
-            return flag;
+            return executeBranch(context, branch);
+        }
+        if (catchAll != null) {
+            LOG.debug("ifmap 接口 {} 常规分支均未命中，走兜底分支（action={}）", config.getInterfaceNo(),
+                    catchAll.getMethodFlag());
+            return executeBranch(context, catchAll);
         }
         LOG.warn("ifmap 接口 {} 有 {} 条逻辑分支但均未命中（result={}）", config.getInterfaceNo(),
                 branches.size(), judgement.getActualValue());
         return null;
     }
 
+    /** 执行分支对应的动作，返回分支标识（{@code logic_branch_flag}）。 */
+    private String executeBranch(StrategyContext context, LogicBranchConfig branch) {
+        String flag = trimToNull(branch.getLogicBranchFlag());
+        context.setMatchedBranch(flag);
+        String actionKey = trimToNull(branch.getMethodFlag());
+        actions.execute(actionKey == null ? flag : actionKey, context);
+        return flag;
+    }
+
+    /** 常规分支是否命中：{@code logic_branch_flag} 策略命中，或判定值在 {@code logic_branch_value} 列表内。 */
     private boolean matches(LogicBranchConfig branch, StrategyContext context, Judgement judgement) {
         String flag = trimToNull(branch.getLogicBranchFlag());
-        if (flag != null && logicBranches.matches(flag, context)) {
+        if (logicBranches.matches(flag, context)) {
             return true;
         }
         String value = trimToNull(branch.getLogicBranchValue());
         if (value == null || judgement.getActualValue() == null) {
-            if (flag == null) {
-                LOG.warn("ifmap 逻辑分支配置 key={} 既无可匹配的 logic_branch_flag 也无 logic_branch_value",
-                        branch.getKeyId());
-            }
             return false;
         }
         for (String candidate : value.split("[;,]")) {

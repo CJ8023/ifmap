@@ -20,8 +20,14 @@ import java.io.Serializable;
 /**
  * 逻辑分支配置（对应表 {@code ifmap_logic_branch_config}）。
  *
- * <p>{@code methodFlag} 是**动作标识（Action Key）**：分支命中后由宿主机 ActionRegistry 执行的动作；
- * 为空表示默认兜底分支。匹配顺序由 {@code logicBranchOrder} 升序决定（同值按 {@code keyId} 兜底）。</p>
+ * <p>两个维度别搞混：</p>
+ * <ul>
+ *   <li>{@code logicBranchFlag} <b>为空 = 兜底分支</b>：不参与常规匹配，仅当所有常规分支都
+ *       未命中时生效（排在前面也不会抢命中）；存量 ECC 的"默认分支"就是这个语义。</li>
+ *   <li>{@code methodFlag} 为空表示该分支不执行动作（只占位、不打日志告警）。</li>
+ * </ul>
+ *
+ * <p>常规分支的匹配顺序由 {@code logicBranchOrder} 升序决定（同值按 {@code keyId} 兜底）。</p>
  *
  * @author caijun
  */
@@ -35,15 +41,15 @@ public class LogicBranchConfig implements Serializable {
     private Long tenantId;
     /** 接口编号。 */
     private String interfaceNo;
-    /** 动作标识（Action Key）；空=默认兜底分支。 */
+    /** 动作标识（Action Key）；空=该分支不执行动作。 */
     private String methodFlag;
     /** 逻辑分支名称。 */
     private String logicBranchName;
-    /** 逻辑分支标志（JsonPath 表达式，支持 {@code $.a.b} 与裸字段名）。 */
+    /** 逻辑分支标志（JsonPath 表达式，支持 {@code $.a.b} 与裸字段名）；<b>空 = 兜底分支</b>。 */
     private String logicBranchFlag;
     /** 逻辑分支判断值，多值以 {@code |} 分隔。 */
     private String logicBranchValue;
-    /** 分支匹配顺序，升序，先命中先生效；默认兜底分支应设为最大。 */
+    /** 分支匹配顺序，升序，先命中先生效；兜底分支不受顺序影响（建议仍设为最大，便于阅读）。 */
     private Integer logicBranchOrder;
     /** 备注。 */
     private String remark;
@@ -52,7 +58,7 @@ public class LogicBranchConfig implements Serializable {
     /** 软删除唯一化。 */
     private Long deletedSeq;
 
-    /** 是否默认兜底分支（未配置动作标识）。 */
+    /** 是否未配置动作标识（与"兜底分支"不是一回事，兜底分支看 {@code logicBranchFlag}）。 */
     public boolean isDefaultBranch() {
         return methodFlag == null || methodFlag.trim().isEmpty();
     }

@@ -95,6 +95,41 @@ class IfmapOrchestratorTest {
         }
     }
 
+    /** 记录动作调用（断言"哪个分支的动作被执行了"）。 */
+    static final class Recorder {
+        final List<String> executed = new ArrayList<String>();
+    }
+
+    /** 常规分支动作（记录调用）。 */
+    @IfmapAction("recSubmit")
+    public static class RecSubmitAction implements IfmapActionHandler {
+        private final Recorder recorder;
+
+        RecSubmitAction(Recorder recorder) {
+            this.recorder = recorder;
+        }
+
+        @Override
+        public void execute(StrategyContext context) {
+            recorder.executed.add("submit");
+        }
+    }
+
+    /** 默认兜底分支动作（记录调用）。 */
+    @IfmapAction("recFallback")
+    public static class RecFallbackAction implements IfmapActionHandler {
+        private final Recorder recorder;
+
+        RecFallbackAction(Recorder recorder) {
+            this.recorder = recorder;
+        }
+
+        @Override
+        public void execute(StrategyContext context) {
+            recorder.executed.add("fallback");
+        }
+    }
+
     /** 捕获出网入参的网关。 */
     static final class CapturingGateway implements BankServiceGateway {
         final List<String> requests = new ArrayList<String>();
@@ -245,6 +280,49 @@ class IfmapOrchestratorTest {
         assertTrue(result.isSuccess());
         assertEquals("submit", result.getMatchedBranch());
         assertTrue(actions.contains("doSubmit"));
+    }
+
+    @Test
+    void defaultBranchFiresWhenNoOtherBranchMatches() {
+        // 存量语义：`logic_branch_flag` 为空的兜底分支在"所有常规分支均未命中"时生效。
+        // 迁移来自 ECC 的兜底分支（flag/value 皆空）如果在 ifmap 里静默不生效，
+        // 表现就是"迁移后某些银行的业务回调不执行"——最难查的一类问题，所以单独锁死。
+        repository.add(mainConfig("IF_I", 1, 1L));
+        repository.add(TestConfigs.branch(20L, "IF_I", 1, "submit", "1111", "recSubmit"));
+        repository.add(TestConfigs.branch(21L, "IF_I", 9, null, null, "recFallback"));
+
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+        actions.register(new RecFallbackAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_I", "GP81");
+
+        assertTrue(result.isSuccess());
+        assertEquals(Collections.singletonList("fallback"), recorder.executed,
+                "常规分支未命中时应执行兜底分支的动作");
+    }
+
+    @Test
+    void defaultBranchDoesNotShadowMatchedBranch() {
+        // 兜底分支即使排在前面（order 更小）也不能抢常规分支的命中
+        repository.add(mainConfig("IF_J", 1, 1L));
+        repository.add(TestConfigs.branch(30L, "IF_J", 1, null, null, "recFallback"));
+        repository.add(TestConfigs.branch(31L, "IF_J", 2, "submit", "0000", "recSubmit"));
+
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+        actions.register(new RecFallbackAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_J", "GP81");
+
+        assertTrue(result.isSuccess());
+        assertEquals(Collections.singletonList("submit"), recorder.executed,
+                "兜底分支排在前面也不能覆盖常规分支的命中");
+        assertEquals("submit", result.getMatchedBranch());
     }
 
     @Test

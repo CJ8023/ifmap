@@ -3,6 +3,7 @@ package cn.cj.ifmap.jdbc;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
+import cn.cj.ifmap.core.model.IfmapConfigHistory;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.sql.ResultSet;
@@ -32,6 +33,11 @@ public final class IfmapRowMappers {
     static final String LOGIC_BRANCH_COLUMNS =
             "`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`logic_branch_flag`,"
             + "`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`";
+
+    /** 配置变更历史列清单。 */
+    static final String HISTORY_COLUMNS =
+            "`key_id`,`config_key_id`,`tenant_id`,`interface_no`,`change_type`,`change_reason`,"
+            + "`snapshot`,`diff`,`add_user_id`,`add_time`,`add_request_id`";
 
     private IfmapRowMappers() {
     }
@@ -116,6 +122,29 @@ public final class IfmapRowMappers {
                 log.setAddUserId(rs.getString("add_user_id"));
                 log.setAddRequestId(rs.getString("add_request_id"));
                 return log;
+            }
+        };
+    }
+
+    /** 配置变更历史映射器（{@code snapshot} / {@code diff} 原样以字符串返回，解析交给管理端）。 */
+    public static RowMapper<IfmapConfigHistory> history() {
+        return new RowMapper<IfmapConfigHistory>() {
+            @Override
+            public IfmapConfigHistory mapRow(ResultSet rs, int rowNum) throws SQLException {
+                IfmapConfigHistory h = new IfmapConfigHistory();
+                h.setKeyId(rs.getLong("key_id"));
+                h.setConfigKeyId(rs.getLong("config_key_id"));
+                h.setTenantId(rs.getLong("tenant_id"));
+                h.setInterfaceNo(rs.getString("interface_no"));
+                h.setChangeType(rs.getString("change_type"));
+                h.setChangeReason(rs.getString("change_reason"));
+                h.setSnapshot(rs.getString("snapshot"));
+                h.setDiff(rs.getString("diff"));
+                h.setAddUserId(rs.getString("add_user_id"));
+                Timestamp addTime = rs.getTimestamp("add_time");
+                h.setAddTime(addTime == null ? null : new java.util.Date(addTime.getTime()));
+                h.setAddRequestId(rs.getString("add_request_id"));
+                return h;
             }
         };
     }

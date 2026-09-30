@@ -293,20 +293,48 @@ public class BankRules {
 | 数据库 | 处理 |
 | --- | --- |
 | MySQL / MariaDB | 脚本**原文执行**（`ENGINE=InnoDB ... COMMENT='...'` 全部保留） |
-| 其它（H2、PG 测试库等） | 剥掉表尾表选项后再执行；列定义、主键、唯一键、索引、列注释完整保留 |
+| 其它（H2、PG 测试库等） | 剥掉表尾表选项后再执行；`json` 列降级为 `text`（见下）；列定义、主键、唯一键、索引、列注释完整保留 |
 
 剥离是**断言式**的：脚本结构与预期不符（没匹配到 `) ENGINE=...`）会直接抛 `IfmapConfigException`，
 不会"静默建半张表"。日志会打印：
 
 ```
 ifmap 检测到非 MySQL 数据库（H2），建表时将剥掉表尾 MySQL 表选项
+ifmap 非 MySQL 建表适配：2 个 json 列降级为 text
 ```
+
+**为什么非 MySQL 要把 `json` 列降级为 `text`**：H2 1.4.200 的 `JSON` 类型与 MySQL 的 `json` **语义不等价** ——
+用 JDBC 写字符串（`setString("{\"a\":1}")`）时 H2 会把它当成 "JSON 字符串值"，读回来是 `"{\"a\":1}"`
+（多一层引号 + 反转义），历史快照 / 回滚会直接解析失败。降级为 `text` 后，H2 上的读写口径与 MySQL 一致
+（存进去什么文本、读出来什么文本）。MySQL 侧**不做任何改写**。
 
 > **H2 必须带 `MODE=MySQL`**：脚本用了 `KEY idx_xxx (...)`、`tinyint(1)`、`datetime(3)` 等 MySQL 写法。
 > 例：`jdbc:h2:mem:demo;MODE=MySQL;DB_CLOSE_DELAY=-1`。
 >
 > **生产建议**：由 DBA 执行 SQL（`docs/04` §1）后把 `ifmap.ddl.auto` 置为 `false`；
 > 已用 Liquibase 管理数据库时同理（避免两套机制同时改结构）。
+
+---
+
+### 5.2 管理端（可选模块）
+
+改配置不想改库 + 发版，引 `ifmap-admin-spring-boot-starter` 并打开开关即可（**默认关闭**，且需自行加鉴权）：
+
+```yaml
+ifmap:
+  admin:
+    enabled: true
+    base-path: /ifmap/admin
+```
+
+| 端点组 | 内容 |
+| --- | --- |
+| `/configs` | CRUD + 保存前校验（422 带明细）+ 乐观锁 + 变更历史 + 一键回滚 |
+| `/configs/dry-run` | 试跑（与线上同一条链路，只把出网换成假应答） |
+| `/branches` | 逻辑分支维护 |
+| `/rules`、`/actions`、`/strategies`、`/audit` | 规则 / 动作 / 策略清单与全量巡检（Markdown 报告） |
+
+完整说明见 [`docs/07-管理端REST.md`](07-管理端REST.md)。
 
 ---
 
@@ -318,6 +346,7 @@ ifmap 检测到非 MySQL 数据库（H2），建表时将剥掉表尾 MySQL 表�
 | 已有 Spring 5 / 非 Boot 项目 | 按 `docs/04` §2.1/§2.3 手工声明 `JdbcConfigRepository` |
 | 纯 Java（无 Spring） | 按 `docs/01` 用 `IfmapEngine.createDefault()` + `docs/04` §2.2 |
 | 灰度共存（存量 `bankint_*` 表） | `ifmap.table-prefix: bankint_`，见 `docs/04` §1.3 |
+| 要"改配置不改库"的管理端 | 追加 `ifmap-admin-spring-boot-starter`（默认关闭），见 `docs/07` |
 
 starter 与手工装配**可以混用**：宿主想要哪个 bean 就自己声明，starter 自动退让。
 

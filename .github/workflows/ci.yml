@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         # core 的字节码目标是 Java 8，因此用 8 编译必须也能通过。
-        # Spring Boot 3 模块（starter / demo-sb3，release=17）由父 POM 的 <jdk>[17,)</jdk>
-        # 剖面自动装卸：JDK 8/11 上不参与构建，无需在 CI 里写分支。
+        # Spring Boot 3 模块（starter / admin-starter / demo-sb3，release=17）由父 POM 的
+        # <jdk>[17,)</jdk> 剖面自动装卸：JDK 8/11 上不参与构建，无需在 CI 里写分支。
         java: [ '8', '11', '17', '21' ]
     steps:
       - uses: actions/checkout@v4

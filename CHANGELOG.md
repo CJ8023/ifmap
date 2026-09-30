@@ -5,6 +5,30 @@
 ## [Unreleased]
 
 ### Added
+- **W5 管理端 REST**（本版本）：
+  - 新模块 `ifmap-admin-spring-boot-starter`：把"改资方接口配置"从**改库 + 发版**变成**页面点点 + 留痕 + 可回滚**（设计 §8）。**默认关闭**（`ifmap.admin.enabled=true` 才装配）+ 三重门控（Web + `JdbcTemplate` + `DataSource`）；**不内置鉴权**，需宿主自行把前缀挂到网关/`SecurityFilterChain`
+  - 配置端点：分页列表 / 详情 / 新增 / 修改（乐观锁）/ 逻辑删除 / 启停 / **保存前校验**（`POST /configs/validate`，不过则 422 + `errors`/`warnings` 明细）/ **试跑**（`POST /configs/dry-run`，与线上同一条链路，只把出网换成假应答）/ 变更历史 / **一键回滚**
+  - 逻辑分支端点：`GET/POST/PUT/DELETE /branches`；元数据端点：`/rules`（`@FUN` 可用清单）、`/actions`、`/strategies`、`/audit`（全量巡检，可返回 Markdown 报告）
+  - `ConfigValidator`：11 项保存前校验（必填列 / 模板 JSON 合法 / `$.path` 合法 / `@FUN` 规则与重载可匹配 / `strategy_name` 已注册 / 前置链成环 / 唯一键冲突 / 分支默认兜底 ≤ 1、顺序唯一、动作已注册）
+  - `ConfigSnapshotMapper`：历史快照用**显式业务列 → 有序 Map → `JsonOps.toJson`**（不用 Bean 反射序列化：少 JSR-310 模块依赖、不写进 `version`/审计列、字段增删不静默丢字段），并给出字段级 diff
+  - `ConfigAuditor`：运行期全量巡检（跨租户），`audit-max-configs` 上限 + `truncated` 标记"报告不完整"
+  - `ConfigAdminService`：每次写操作 = 校验 → 落库（乐观锁）→ **回读** → 写历史 → **失效缓存**；回滚 = 读快照 → **先校验** → 走乐观锁写回 → 再记一条 `UPDATE` 历史
+  - `ifmap-core`：`ConfigQuery`（分页/筛选，`MAX_SIZE=200`，`allTenants` 跨租户开关）/ `PageResult<T>` / `ConfigHistoryRepository` / `IfmapConfigHistory`（含 `CREATE/UPDATE/DELETE/ENABLE/DISABLE`）/ `JsonOps.isValidPath`
+  - `ifmap-provider-jdbc`：`JdbcConfigHistoryRepository`（写/查历史）；`JdbcConfigRepository` 增 `queryConfigs` / `countConfigs` / `queryConfigsByInterface` / `queryConfigsByBusiNode` / `queryLogicBranches(includeDeleted)` / `findLogicBranch`；`JdbcConfigWriter` 增 `updateStatus` / `update(LogicBranchConfig)` / `softDeleteBranch` / `findByKeyId`
+  - 配置项：`ifmap.admin.*`（`enabled` / `base-path` / `history-limit` / `audit-max-configs`）
+  - 文档：[`docs/07-管理端REST.md`](docs/07-管理端REST.md)
+  - 测试：新增 **41 个**（`ConfigAdminServiceTest` 14 / `ConfigValidatorTest` 10 / `IfmapAdminWebEndpointTest` 5（H2 + 真 Tomcat + 真 HTTP）/ `IfmapAdminAutoConfigurationTest` 5 / `ConfigSnapshotMapperTest` 4 / `ConfigAuditorTest` 3）、starter +1（非 MySQL `json` 列降级）；JDK 17 全 reactor **245 个测试全绿**，JDK 8 侧 **170 个全绿**
+
+### Fixed（W5）
+- `JdbcConfigWriter.insert/update(LogicBranchConfig)` 把 `logic_branch_flag` / `method_flag` 当必填 → 但 DDL 里 `logic_branch_flag` 是 `NOT NULL DEFAULT ''`、`method_flag` 允许为空（**空 = 默认兜底分支**），真实数据会被拒 → 只校验 `interfaceNo` + `logicBranchName`，其余统一 `null → ""` 落库
+- `ConfigValidator.validateBranch` 要求 `method_flag` 必填 → 默认兜底分支合法为空，改为只校验 `interfaceNo` + `logicBranchName`；并补「**默认兜底分支最多 1 条**」的**单条**校验（引擎取首个命中者，第二条永远不生效，属"配了但没用"的静默陷阱）
+- `ConfigValidator.checkTemplateContract` 在没有 `ContractValidator`（无引擎）时**完全跳过模板检查** → 改为至少做 JSON 语法兜底校验：历史脏数据（手改 SQL / 旧版本写入的非法 JSON）不能静默放过
+- `JdbcConfigRepository.whereClause` **总是**过滤 `tenant_id = ?`（`null` → `-1`）→ 全量巡检实际只看 `-1` 租户、结果恒为 0 条；新增 `ConfigQuery.allTenants`，巡检按行取各自租户
+- `GET /configs/{keyId}` 不存在时抛的是 `IfmapConfigException`（400），但 Controller 注释写的是 404/409 → 统一为「**200 + `ok=false`** 表示业务没做成（乐观锁冲突等），400 表示用错接口/目标不存在，422 表示校验未通过」并写进文档
+- `POST /configs/validate` 校验不通过也返回 200 → 改为 **422 + `errors`/`warnings`**（与新增/修改走同一套判定，前端可直接展示）
+- `IfmapSchemaInitializer` 在非 MySQL 方言下直接执行 `json` 列 → **H2 1.4.200 的 `JSON` 类型与 MySQL 的 `json` 语义不等价**：JDBC 写字符串会被包成 JSON 字符串字面量（`{"a":1}` 读出成 `"{\"a\":1}"`），历史快照/回滚必然解析失败 → 非 MySQL 分支把 `json` 列降级为 `text`（断言式改写，注释里的 "json" 不受影响），H2 上读写口径与 MySQL 一致
+
+### Added
 - **W4 执行编排与策略 SPI**（本版本）：
   - `ifmap-core`：**编排器 `IfmapOrchestrator`** —— 租户解析 → 配置加载（**递归前置接口** `front_interface_no`，深度护栏 64 + 环检测）→ 拓扑排序（`interface_order`）→ 组包 → 渲染 → 特殊处理 → 出网 → 判定 → 分支动作 → 落执行日志；`stopOnFailure` 控制失败即停；第四参数 `mockResponse` 支持 **dry-run 试跑（不出网）**
   - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`BankCall`

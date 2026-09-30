@@ -116,6 +116,19 @@ public final class JacksonJsonOps implements JsonOps {
         }
     }
 
+    @Override
+    public boolean isValidPath(String path) {
+        if (path == null || path.trim().length() == 0) {
+            return false;
+        }
+        try {
+            JsonPath.compile(path.trim());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** 一次解析、多次取数。 */
     private static final class JacksonReadContext implements JsonReadContext {
 

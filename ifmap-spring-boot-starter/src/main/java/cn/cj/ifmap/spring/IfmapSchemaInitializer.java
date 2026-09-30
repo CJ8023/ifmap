@@ -19,6 +19,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 启动期建表（{@code ifmap.ddl.auto=true}，默认开启）：让"引入 starter 就能用"闭环（P0-4）。
@@ -58,6 +60,18 @@ public class IfmapSchemaInitializer implements InitializingBean {
 
     /** MySQL 表尾选项的起始标记。 */
     private static final String MYSQL_TAIL_PATTERN = "(?is)\\)\\s*ENGINE=.*";
+
+    /**
+     * 列类型 {@code json}（MySQL 专用）。
+     *
+     * <p>为什么要改写：H2 1.4.200 的 {@code JSON} 类型与 MySQL 的 {@code json} <b>语义不等价</b> ——
+     * 用 JDBC 写字符串（{@code PreparedStatement.setString("{\"a\":1}")}）时 H2 会把它当成
+     * "JSON 字符串值"存成 {@code "{\"a\":1}"}（多一层引号 + 反转义），读回来就不再是对象，
+     * 历史快照 / 差异回滚会直接解析失败。MySQL 侧不存在这个问题，所以只在非 MySQL 分支把
+     * {@code json} 列降级成 {@code text}，让 H2 上的读写口径与 MySQL 一致（存 / 取都是 JSON 文本）。</p>
+     */
+    private static final Pattern JSON_COLUMN_PATTERN =
+            Pattern.compile("(?i)(`[A-Za-z0-9_]+`[ \\t]+)json(?=[ \\t,])");
 
     private final JdbcTemplate jdbc;
     private final TableNameResolver tables;
@@ -196,7 +210,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
     }
 
     /**
-     * 表尾适配：MySQL 原样；非 MySQL 剥掉表尾表选项（断言式）。
+     * 表尾适配：MySQL 原样；非 MySQL 剥掉表尾表选项（断言式）+ 把 {@code json} 列降级成 {@code text}。
      *
      * @param ddl        已替换前缀的建表语句
      * @param mysqlFamily 目标库是否 MySQL 系
@@ -211,7 +225,23 @@ public class IfmapSchemaInitializer implements InitializingBean {
             throw new IfmapConfigException("非 MySQL 数据库的表尾适配失败：未匹配到 \") ENGINE=...\" 段，"
                     + "建表脚本结构可能已被改坏（拒绝在拿不准的 SQL 上建表）");
         }
-        return adapted;
+        return downgradeJsonColumns(adapted);
+    }
+
+    /** 非 MySQL：{@code json} 列 → {@code text}（H2 的 JSON 类型存不了 JDBC 字符串，见 {@link #JSON_COLUMN_PATTERN}）。 */
+    private static String downgradeJsonColumns(String ddl) {
+        Matcher matcher = JSON_COLUMN_PATTERN.matcher(ddl);
+        StringBuilder sb = new StringBuilder(ddl.length());
+        int count = 0;
+        while (matcher.find()) {
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(1)) + "text");
+            count++;
+        }
+        matcher.appendTail(sb);
+        if (count > 0) {
+            log.info("ifmap 非 MySQL 建表适配：{} 个 json 列降级为 text", count);
+        }
+        return sb.toString();
     }
 
     private static boolean detectMysqlFamily(DataSource dataSource) {

@@ -1,5 +1,6 @@
 package cn.cj.ifmap.jdbc;
 
+import cn.cj.ifmap.core.config.ConfigQuery;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
@@ -104,6 +105,134 @@ public class JdbcConfigRepository implements ConfigRepository {
                 JdbcValues.require(log.getExecutionResult(), "executionResult"),
                 log.getErrorMsg(), JdbcValues.orEmpty(log.getRemark()),
                 JdbcValues.orEmpty(log.getAddUserId()), JdbcValues.orEmpty(log.getAddRequestId()));
+    }
+
+    /**
+     * 管理端分页查询（设计 §8.2 `GET /configs`）：条件为空即不过滤，{@code tenantId} 为空按 {@code -1}。
+     *
+     * <p>与 {@link #queryConfigs} 的区别：这里<b>不强制</b>只取启用行 —— 管理端要能看到停用与（可选）已删除配置。</p>
+     */
+    public List<IfmapConfig> queryConfigs(ConfigQuery query) {
+        ConfigQuery q = query == null ? new ConfigQuery() : query;
+        StringBuilder sql = new StringBuilder("SELECT ").append(IfmapRowMappers.CONFIG_COLUMNS)
+                .append(" FROM `").append(tables.configTable()).append("` WHERE ").append(whereClause(q));
+        sql.append(" ORDER BY `tenant_id` ASC, `interface_no` ASC, `interface_order` ASC, `key_id` ASC")
+                .append(" LIMIT ").append(q.getSize()).append(" OFFSET ").append(q.offset());
+        return jdbc.query(sql.toString(), IfmapRowMappers.config(), whereArgs(q).toArray());
+    }
+
+    /** 管理端分页查询的总条数（与 {@link #queryConfigs(ConfigQuery)} 条件一致）。 */
+    public long countConfigs(ConfigQuery query) {
+        ConfigQuery q = query == null ? new ConfigQuery() : query;
+        String sql = "SELECT COUNT(1) FROM `" + tables.configTable() + "` WHERE " + whereClause(q);
+        Long count = jdbc.queryForObject(sql, Long.class, whereArgs(q).toArray());
+        return count == null ? 0L : count.longValue();
+    }
+
+    /**
+     * 按接口号查询该接口下<b>所有业务节点</b>的配置（管理端分支维护与前置链校验用）。
+     *
+     * <p>返回包含停用与已删除行（管理端视角），按 {@code interface_order} 升序。</p>
+     */
+    public List<IfmapConfig> queryConfigsByInterface(String tenantId, String interfaceNo) {
+        if (interfaceNo == null || interfaceNo.trim().isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
+                + " WHERE `tenant_id` = ? AND `interface_no` = ?"
+                + " ORDER BY `interface_order` ASC, `key_id` ASC";
+        return jdbc.query(sql, IfmapRowMappers.config(), tenant(tenantId), interfaceNo);
+    }
+
+    /**
+     * 管理端查询逻辑分支：可选包含已删除行（分支表无 {@code status} 列，只有软删除标记）。
+     *
+     * <p>与 {@link #queryLogicBranches} 的区别：引擎链路只读未删除行；管理端要能看"删了什么"。</p>
+     */
+    public List<LogicBranchConfig> queryLogicBranches(String tenantId, String interfaceNo, boolean includeDeleted) {
+        String sql = "SELECT " + IfmapRowMappers.LOGIC_BRANCH_COLUMNS + " FROM `" + tables.logicBranchTable() + "`"
+                + " WHERE `tenant_id` = ? AND `interface_no` = ?"
+                + (includeDeleted ? "" : " AND `del_status` = 0")
+                + " ORDER BY `logic_branch_order` ASC, `key_id` ASC";
+        return jdbc.query(sql, IfmapRowMappers.logicBranch(), tenant(tenantId), interfaceNo);
+    }
+
+    /** 按主键查逻辑分支（含已删除行，管理端编辑/删除前后取租户与接口号用）。 */
+    public java.util.Optional<LogicBranchConfig> findLogicBranch(long keyId) {
+        String sql = "SELECT " + IfmapRowMappers.LOGIC_BRANCH_COLUMNS + " FROM `" + tables.logicBranchTable() + "`"
+                + " WHERE `key_id` = ?";
+        List<LogicBranchConfig> list = jdbc.query(sql, IfmapRowMappers.logicBranch(), keyId);
+        return list.isEmpty() ? java.util.Optional.<LogicBranchConfig>empty() : java.util.Optional.of(list.get(0));
+    }
+
+    /** 按业务节点查询该节点下的全部配置（管理端列表/审计用）。 */
+    public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+        if (busiNode == null || busiNode.trim().isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
+                + " WHERE `tenant_id` = ? AND `busi_node` = ?"
+                + " ORDER BY `interface_no` ASC, `interface_order` ASC, `key_id` ASC";
+        return jdbc.query(sql, IfmapRowMappers.config(), tenant(tenantId), busiNode);
+    }
+
+    private static String whereClause(ConfigQuery q) {
+        StringBuilder sb = new StringBuilder();
+        if (!q.isAllTenants()) {
+            sb.append("`tenant_id` = ?");
+        }
+        if (notBlank(q.getInterfaceNo())) {
+            appendAnd(sb);
+            sb.append("`interface_no` = ?");
+        }
+        if (notBlank(q.getBusiNode())) {
+            appendAnd(sb);
+            sb.append("`busi_node` = ?");
+        }
+        if (notBlank(q.getBankCode())) {
+            appendAnd(sb);
+            sb.append("`bank_code` = ?");
+        }
+        if (q.getStatus() != null) {
+            appendAnd(sb);
+            sb.append("`status` = ?");
+        }
+        if (!q.isIncludeDeleted()) {
+            appendAnd(sb);
+            sb.append("`del_status` = 0");
+        }
+        return sb.length() == 0 ? "1 = 1" : sb.toString();
+    }
+
+    /** 拼接 AND（首个子句不加）。 */
+    private static void appendAnd(StringBuilder sb) {
+        if (sb.length() > 0) {
+            sb.append(" AND ");
+        }
+    }
+
+    private static java.util.List<Object> whereArgs(ConfigQuery q) {
+        java.util.List<Object> args = new java.util.ArrayList<Object>();
+        if (!q.isAllTenants()) {
+            args.add(tenant(q.getTenantId()));
+        }
+        if (notBlank(q.getInterfaceNo())) {
+            args.add(q.getInterfaceNo().trim());
+        }
+        if (notBlank(q.getBusiNode())) {
+            args.add(q.getBusiNode().trim());
+        }
+        if (notBlank(q.getBankCode())) {
+            args.add(q.getBankCode().trim());
+        }
+        if (q.getStatus() != null) {
+            args.add(q.getStatus());
+        }
+        return args;
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && value.trim().length() > 0;
     }
 
     /** 当前生效的表名解析器。 */

@@ -23,7 +23,8 @@ import java.util.Optional;
  *       这样"删掉再建同名配置"不会撞唯一键，且可无限次重复。</li>
  * </ul>
  *
- * <p>本类不写 {@code ifmap_config_history}（版本对比/回滚属 W7 管理端能力）。</p>
+ * <p>本类不写 {@code ifmap_config_history}：历史快照需要 JSON 序列化能力，由管理端
+ * （{@code ifmap-admin-spring-boot-starter}）在自己的事务里落库，provider 层保持零 JSON 依赖。</p>
  *
  * @author caijun
  */
@@ -103,6 +104,12 @@ public class JdbcConfigWriter {
      *
      * <p>自动补齐：{@code keyId}、{@code delStatus = 0}、{@code deletedSeq = 0}、
      * {@code tenantId}（为空时 -1）、{@code logicBranchOrder}（为空时 0）。</p>
+     *
+     * <p><b>空值语义</b>：{@code logic_branch_flag} / {@code logic_branch_value} / {@code method_flag}
+     * 都允许为空 —— "flag 与 value 皆空"就是<b>默认兜底分支</b>的定义，{@code method_flag} 为空表示命中该分支后
+     * 不执行宿主动作。三列在 DDL 里都是 {@code NOT NULL DEFAULT ''}（或可空），所以它们不能进必填校验，
+     * 这里统一按"空串落库"处理（而不是 NULL）：既避开 {@code NOT NULL} 列写 NULL 的报错，也让唯一键
+     * {@code uk_..._logic_branch} 对"默认兜底分支"只有一条生效。</p>
      */
     public long insert(LogicBranchConfig branch) {
         if (branch == null) {
@@ -113,8 +120,7 @@ public class JdbcConfigWriter {
             throw new IfmapConfigException("新增逻辑分支缺少主键：请提供 keyId，或注入会生成 ID 的 IdGenerator");
         }
         JdbcValues.require(branch.getInterfaceNo(), "interfaceNo");
-        JdbcValues.require(branch.getLogicBranchFlag(), "logicBranchFlag");
-        JdbcValues.require(branch.getMethodFlag(), "methodFlag");
+        JdbcValues.require(branch.getLogicBranchName(), "logicBranchName");
         String sql = "INSERT INTO `" + tables.logicBranchTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`logic_branch_flag`,"
                 + "`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
@@ -187,8 +193,70 @@ public class JdbcConfigWriter {
         return jdbc.update(sql, JdbcValues.orEmpty(operatorId), JdbcValues.orEmpty(requestId), keyId) == 1;
     }
 
+    /**
+     * 启用/停用配置（设计 §8.2 {@code POST /configs/{id}/status}）。
+     *
+     * <p>只改 {@code status} 并递增版本；不触碰模板等业务列，避免与"编辑保存"互相覆盖。</p>
+     *
+     * @param status          1 启用 / 0 停用
+     * @param expectedVersion 客户端看到的版本号（乐观锁）
+     * @return {@code true} 成功；{@code false} 版本不匹配或目标已删除
+     */
+    public boolean updateStatus(long keyId, int status, int expectedVersion, String operatorId, String requestId) {
+        if (status != 0 && status != 1) {
+            throw new IfmapConfigException("status 只能是 0（停用）或 1（启用）：" + status);
+        }
+        String sql = "UPDATE `" + tables.configTable() + "`"
+                + " SET `status` = ?, `version` = `version` + 1,"
+                + " `modify_user_id` = ?, `modify_time` = CURRENT_TIMESTAMP(3), `modify_request_id` = ?"
+                + " WHERE `key_id` = ? AND `version` = ? AND `del_status` = 0";
+        return jdbc.update(sql, status, JdbcValues.orEmpty(operatorId), JdbcValues.orEmpty(requestId),
+                keyId, expectedVersion) == 1;
+    }
+
+    /**
+     * 更新逻辑分支（分支表无 {@code version} 列，故用主键直更；唯一键冲突会抛业务异常）。
+     *
+     * @return {@code true} 成功；{@code false} 目标不存在或已删除
+     */
+    public boolean update(LogicBranchConfig branch) {
+        if (branch == null || branch.getKeyId() == null) {
+            throw new IfmapConfigException("更新逻辑分支必须提供 keyId");
+        }
+        JdbcValues.require(branch.getInterfaceNo(), "interfaceNo");
+        JdbcValues.require(branch.getLogicBranchName(), "logicBranchName");
+        String sql = "UPDATE `" + tables.logicBranchTable() + "` SET"
+                + " `interface_no` = ?, `method_flag` = ?, `logic_branch_name` = ?, `logic_branch_flag` = ?,"
+                + " `logic_branch_value` = ?, `logic_branch_order` = ?, `remark` = ?"
+                + " WHERE `key_id` = ? AND `del_status` = 0";
+        try {
+            return jdbc.update(sql, branch.getInterfaceNo(), JdbcValues.orEmpty(branch.getMethodFlag()),
+                    JdbcValues.orEmpty(branch.getLogicBranchName()), JdbcValues.orEmpty(branch.getLogicBranchFlag()),
+                    JdbcValues.orEmpty(branch.getLogicBranchValue()),
+                    JdbcValues.orDefault(branch.getLogicBranchOrder(), 0),
+                    JdbcValues.orEmpty(branch.getRemark()), branch.getKeyId()) == 1;
+        } catch (DuplicateKeyException e) {
+            throw duplicateBranch(branch, e);
+        }
+    }
+
+    /** 原子软删除逻辑分支（{@code del_status = 1, deleted_seq = key_id}）。 */
+    public boolean softDeleteBranch(long keyId) {
+        String sql = "UPDATE `" + tables.logicBranchTable() + "`"
+                + " SET `del_status` = 1, `deleted_seq` = `key_id`"
+                + " WHERE `key_id` = ? AND `del_status` = 0";
+        return jdbc.update(sql, keyId) == 1;
+    }
+
+    private static IfmapConfigException duplicateBranch(LogicBranchConfig branch, DuplicateKeyException cause) {
+        return new IfmapConfigException("逻辑分支唯一键冲突：(tenant_id=" + branch.getTenantId()
+                + ", interface_no=" + branch.getInterfaceNo() + ", method_flag=" + branch.getMethodFlag()
+                + ", logic_branch_name=" + branch.getLogicBranchName() + ") 已存在", cause);
+    }
+
     /** 按主键查询（管理端编辑页需要看到停用/已删除行，故不加 {@code del_status} 过滤）。 */
-    public Optional<IfmapConfig> findByKeyId(long keyId) {        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
+    public Optional<IfmapConfig> findByKeyId(long keyId) {
+        String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
                 + " WHERE `key_id` = ?";
         List<IfmapConfig> list = jdbc.query(sql, IfmapRowMappers.config(), keyId);
         return list.isEmpty() ? Optional.<IfmapConfig>empty() : Optional.of(list.get(0));

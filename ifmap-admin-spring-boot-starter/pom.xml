@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.cj</groupId>
+    <artifactId>ifmap-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>ifmap-admin-spring-boot-starter</artifactId>
+  <name>ifmap-admin-spring-boot-starter</name>
+  <description>ifmap 管理端 REST（配置 CRUD / 校验 / 试跑 / 历史回滚 / 审计），默认关闭，仅在 ifmap.admin.enabled=true 时装配</description>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+        <!-- 控制器参数名（@PathVariable/@RequestParam）不显式写名字时依赖它 -->
+        <maven.compiler.parameters>true</maven.compiler.parameters>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-core</artifactId>
+    </dependency>
+
+    <!-- 声明在 provider-jdbc 之前：让 spring-jdbc 走 Spring Framework 6.2.x（SB3 同族） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+      <version>${spring-boot.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-provider-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-json-jackson</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- 管理端是 Web 能力：提供 Controller / Jackson / 内置容器（可被宿主机排除） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+      <version>${spring-boot.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+      <version>${spring-boot.version}</version>
+    </dependency>
+
+    <!-- 编译期生成 spring-configuration-metadata.json（IDE 提示 ifmap.admin.* 配置） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <version>${spring-boot.version}</version>
+      <optional>true</optional>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <version>${spring-boot.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+    </dependency>
+  </dependencies>
+</project>

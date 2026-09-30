@@ -17,6 +17,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -111,6 +113,37 @@ class IfmapSchemaInitializerTest {
                 IfmapSchemaInitializer.adaptDdl("CREATE TABLE t (id bigint);", false);
             }
         }, "没有表尾却要求剥离，必须失败而不是静默放行");
+    }
+
+    @Test
+    @DisplayName("非 MySQL：json 列降级为 text（H2 的 JSON 类型存不了 JDBC 字符串）")
+    void nonMysqlDowngradesJsonColumns() {
+        String ddl = "CREATE TABLE `t` (\n"
+                + "  `snapshot` json         NOT NULL COMMENT '快照',\n"
+                + "  `diff`     json                  DEFAULT NULL COMMENT '差异',\n"
+                + "  `note`     varchar(32)  NOT NULL DEFAULT '' COMMENT 'json in comment'\n"
+                + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+        String adapted = IfmapSchemaInitializer.adaptDdl(ddl, false);
+        assertTrue(adapted.contains("`snapshot` text"), adapted);
+        assertTrue(adapted.contains("`diff`     text"), adapted);
+        assertFalse(adapted.contains("`snapshot` json"), adapted);
+        assertTrue(adapted.contains("json in comment"), "注释里的 json 不能被误伤：" + adapted);
+        assertEquals(ddl, IfmapSchemaInitializer.adaptDdl(ddl, true), "MySQL 侧不改写");
+
+        // 真跑一遍：H2 建出来后 json 列已不存在（否则 setString 会被包成 JSON 字符串字面量）
+        javax.sql.DataSource dataSource = h2("ifmap_ddl_json");
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        new IfmapSchemaInitializer(dataSource, new TableNameResolver(TableNameResolver.DEFAULT_PREFIX),
+                new DefaultResourceLoader()).createTablesIfAbsent();
+        String type = jdbc.queryForObject("SELECT data_type FROM information_schema.columns "
+                + "WHERE lower(table_name) = 'ifmap_config_history' AND lower(column_name) = 'snapshot'", String.class);
+        assertNotNull(type);
+        assertNotEquals("JSON", type == null ? null : type.toUpperCase(), "H2 上 snapshot 不能还是 JSON 类型");
+        jdbc.update("INSERT INTO `ifmap_config_history` (`key_id`,`config_key_id`,`tenant_id`,`interface_no`,"
+                + "`change_type`,`snapshot`) VALUES (1, 1, 1, 'IF_A', 'CREATE', ?)", "{\"a\":1}");
+        assertEquals("{\"a\":1}", jdbc.queryForObject(
+                "SELECT `snapshot` FROM `ifmap_config_history` WHERE `key_id` = 1", String.class),
+                "H2 上写进去的 JSON 文本必须原样读回（MySQL 语义）");
     }
 
     @Test

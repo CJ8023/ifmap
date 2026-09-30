@@ -37,4 +37,14 @@ public interface JsonOps {
 
     /** 判断文本是否为合法 JSON。 */
     boolean isJson(String text);
+
+    /**
+     * 判断 JsonPath 表达式语法是否合法（管理端"保存前校验"用，设计 §8.3）。
+     *
+     * <p>默认返回 {@code true}（实现方可以不支持该能力，校验会退化为"不校验路径"），
+     * 支持 JsonPath 的实现应返回真实结果。</p>
+     */
+    default boolean isValidPath(String path) {
+        return true;
+    }
 }

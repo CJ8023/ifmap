@@ -173,6 +173,7 @@
       </activation>
       <modules>
         <module>ifmap-spring-boot-starter</module>
+        <module>ifmap-admin-spring-boot-starter</module>
         <module>ifmap-demo-spring-boot3</module>
       </modules>
     </profile>

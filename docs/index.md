@@ -76,9 +76,9 @@ public class DemoController {
 | --- | --- | --- |
 | `ifmap-core` | 8 | 引擎、模板 DSL、18 个内置规则、SPI（零第三方运行时依赖，只有 slf4j-api） |
 | `ifmap-json-jackson` | 8 | `JsonOps` 的 Jackson 实现 |
-| `ifmap-provider-jdbc` | 8 | 建表脚本（Liquibase 格式 SQL）、JDBC 仓储、执行日志清理 |
+| `ifmap-provider-jdbc` | 8 | 建表脚本（Liquibase 格式 SQL）、JDBC 仓储、执行日志清理/归档、日志分区运维手册（`db/optional/`） |
 | `ifmap-spring-boot-starter` | 17 | Spring Boot 3 自动装配（引擎/仓储/策略收集/建表/日志清理） |
-| `ifmap-admin-spring-boot-starter` | 17 | 管理端 REST（配置 CRUD/校验/试跑/历史回滚/巡检），默认关闭 |
+| `ifmap-admin-spring-boot-starter` | 17 | 管理端 REST（配置 CRUD/校验/试跑/历史回滚/巡检）+ 零构建可视化页面，默认关闭 |
 | `ifmap-demo-pure-java` | 8 | 纯 Java 用法示例 |
 | `ifmap-demo-spring-boot3` | 17 | Spring Boot 3 用法示例（可 `java -jar` 直接跑） |
 
@@ -93,8 +93,9 @@ public class DemoController {
 | [Spring Boot 集成](05-SpringBoot集成.md) | 配置项、自动装配条件、关闭/覆盖 bean、宿主扩展点 |
 | [执行编排与策略扩展](06-执行编排与策略扩展.md) | 前置接口链、特殊处理策略、逻辑分支动作、回调 |
 | [管理端 REST](07-管理端REST.md) | 端点、状态码契约、乐观锁、历史与回滚、鉴权建议、可视化页面与字典 SPI |
-| [日志与合规](08-日志与合规.md) | 脱敏规则、截断、写日志降级、保留期清理、合规自查清单 |
+| [日志与合规](08-日志与合规.md) | 脱敏规则、截断、写日志降级、保留期清理、按月分区与冷热分离归档、合规自查清单 |
 | [参与贡献](09-参与贡献.md) | 开发环境、双 JDK 构建、测试与质量门禁、提交检查表 |
+| [迁移指南](10-迁移指南.md) | 存量迁移（表结构 / 规则策略对齐 / 影子运行 / 切换回滚） |
 
 ## 许可
 
@@ -103,6 +104,7 @@ public class DemoController {
 
 ## 状态
 
-当前进度：核心 → 仓储 → Starter → 编排/策略 → 管理端 → 日志合规 **已交付**；
-迁移预热（存量项目迁移脚本、`JsonOps` TCK、影子跑）在计划中。
+当前进度：核心 → 仓储 → Starter → 编排/策略 → 管理端 REST → 日志合规 → 开源工程化 → 迁移预热 →
+可视化页面 → 日志分区与冷热分离 **已交付**；Fastjson 实现、Feign 数据源、PostgreSQL/Oracle 方言、
+Micrometer 指标仍在计划中。
 每个模块的测试数与验证命令见仓库根目录 `README.md` 与 `CHANGELOG.md`。

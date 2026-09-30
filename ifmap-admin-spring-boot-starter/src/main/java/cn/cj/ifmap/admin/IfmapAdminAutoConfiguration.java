@@ -156,7 +156,7 @@ public class IfmapAdminAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider) {
-        return new IfmapEnumCatalog(enumProviderProvider.getIfAvailable());
+        return IfmapEnumCatalog.of(enumProviderProvider.getIfAvailable());
     }
 
     /** 可视化页面入口（静态页 + 302）。 */

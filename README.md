@@ -26,19 +26,20 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化 + W8 迁移预热 + W9 可视化页面 + W10 日志分区与冷热分离）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **338 个**单元/端到端测试全绿（core 155 + json-jackson 46 + provider-jdbc 33 + starter 41 + admin 59 + demo-sb3 4；JDK 8 侧 234 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **353 个**单元/端到端测试全绿（core 155 + json-jackson 46 + provider-jdbc 48 + starter 41 + admin 59 + demo-sb3 4；JDK 8 侧 249 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
 | 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：11 页），CI 独立 job 构建 |
 | 迁移预热 | 存量表迁移 SQL kit（加列/回填/改类型/改表名，含体检与核对脚本）、`JsonOps` 一致性 TCK、影子运行框架（双跑比对、不出网、只记录）、[`docs/10-迁移指南.md`](docs/10-迁移指南.md) |
 | 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
+| 日志分区/冷热分离 | **可选手册**（默认不启用）：`db/optional/execution-log-partition/` 6 步脚本（体检 → 按月分区改造 → 每月加分区 → 校验 → 建冷表 → 归档回收）；归档器 `JdbcExecutionLogArchiver` **可重入**（先写冷表再删热表，中断可重跑）、**列清单写死并自检**（热表加列忘了同步会直接失败而不是静默少归档）；`DROP PARTITION` 秒级回收 |
 | Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` 与 5 类策略 bean |
 | 执行编排 | 编排器：租户解析 → 前置接口**递归**加载 → 拓扑排序 + 环检测 → 渲染 → 出网 → 判定 → 分支动作 → 脱敏落日志；支持 dry-run 试跑与部署前契约自检 |
 | 管理端 REST | 配置 CRUD + 保存前校验（422 带明细）+ 乐观锁 + 变更历史快照/差异 + 一键回滚 + 逻辑分支维护 + 全量巡检（Markdown 报告）；**默认关闭**，需自行加鉴权 |
@@ -46,7 +47,7 @@
 | 日志与合规 | 执行日志脱敏（值形态 + 字段名）+ 超长截断 + 写日志失败降级 + **保留期清理**（默认 90 天，分批删除防主从延迟；cron 可配，守护线程调度、不依赖 `@EnableScheduling`） |
 | License | Apache-2.0（`LICENSE` + `NOTICE`；贡献约定见 `CONTRIBUTING.md`） |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W9 计划）：Fastjson 实现、Feign 数据源、日志冷热分离/分区、PostgreSQL/Oracle 方言、Micrometer 指标。
+**尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：Fastjson 实现、Feign 数据源、PostgreSQL/Oracle 方言、Micrometer 指标。
 
 > 迁移预热（W8）已交付：存量表迁移 SQL kit（`db/migration/ecc-to-ifmap/`，随 jar 发布、需手工执行）、
 > `JsonOps` TCK 一致性套件（`ifmap-json-tck`）、影子运行框架（`cn.cj.ifmap.core.shadow`）、
@@ -78,7 +79,7 @@ ifmap 逐条对齐修正：
 | `ifmap-parent` | 父 POM，统一版本与插件版本 | — | — |
 | `ifmap-core` | 模板 DSL、规则注册表、内置规则、SPI。**零 Spring、零 JSON 库** | 8+ | 仅 `slf4j-api` |
 | `ifmap-json-jackson` | `JsonOps` 的 Jackson + JsonPath 实现（默认） | 8+ | jackson-databind、json-path |
-| `ifmap-provider-jdbc` | `ConfigRepository` 的 JDBC 实现 + 4 张表建表脚本（Liquibase） | 8+ | spring-jdbc |
+| `ifmap-provider-jdbc` | `ConfigRepository` 的 JDBC 实现 + 4 张表建表脚本（Liquibase）+ 执行日志清理/归档器 + 日志分区运维手册（`db/optional/`） | 8+ | spring-jdbc |
 | `ifmap-spring-boot-starter` | Spring Boot 3 自动配置：建表、仓储（可选缓存）、引擎、规则自动收集 | 17+ | starter-jdbc、provider-jdbc、json-jackson、caffeine(可选) |
 | `ifmap-admin-spring-boot-starter` | 管理端 REST（配置 CRUD、校验、历史与回滚、分支维护、巡检）+ 零构建可视化页面（`{base-path}/ui/`）；`ifmap.admin.enabled=true` 才装配 | 17+ | starter、provider-jdbc、starter-web、autoconfigure |
 | `ifmap-demo-pure-java` | 纯 Java（非 Spring）可运行示例 | 8+ | core + json-jackson |
@@ -243,7 +244,7 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) | Spring Boot 3 starter：配置项、自动装配、覆盖机制、缓存、自定义规则、策略自动收集、建表与方言自适应、排错 |
 | [`docs/06-执行编排与策略扩展.md`](docs/06-执行编排与策略扩展.md) | 编排器执行顺序、三类策略 SPI、动作与回调、判定、脱敏与截断、契约自检、异常体系 |
 | [`docs/07-管理端REST.md`](docs/07-管理端REST.md) | 管理端：启用与鉴权、API 一览、状态码语义、保存前校验清单、历史与回滚、试跑、巡检、**可视化页面与字典 SPI**、排错 |
-| [`docs/08-日志与合规.md`](docs/08-日志与合规.md) | 日志与合规：落什么/不落什么、脱敏、截断、失败降级、保留期清理（含分区方案对比）、异常体系、合规自查清单 |
+| [`docs/08-日志与合规.md`](docs/08-日志与合规.md) | 日志与合规：落什么/不落什么、脱敏、截断、失败降级、保留期清理、**按月分区手册与冷热分离归档**、异常体系、合规自查清单 |
 | [`docs/09-参与贡献.md`](docs/09-参与贡献.md) | 参与贡献：开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁与 PR 检查表 |
 | [`docs/10-迁移指南.md`](docs/10-迁移指南.md) | 存量迁移指南（M1 表结构 / M2 规则策略对齐 / M3 影子运行 / M4 切换回滚）、共存方案、行为对齐清单、排错 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南入口（三条底线 + 指向 `docs/09`） |

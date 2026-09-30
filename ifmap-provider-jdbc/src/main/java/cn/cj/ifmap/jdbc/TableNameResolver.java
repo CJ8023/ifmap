@@ -37,6 +37,7 @@ public final class TableNameResolver {
     private static final String CONFIG_SUFFIX = "config";
     private static final String LOGIC_BRANCH_SUFFIX = "logic_branch_config";
     private static final String EXECUTION_LOG_SUFFIX = "execution_log";
+    private static final String EXECUTION_LOG_ARCHIVE_SUFFIX = "execution_log_archive";
     private static final String CONFIG_HISTORY_SUFFIX = "config_history";
     private static final int MAX_PREFIX_LENGTH = 32;
 
@@ -51,6 +52,7 @@ public final class TableNameResolver {
         map.put("config", normalized + CONFIG_SUFFIX);
         map.put("logicBranchConfig", normalized + LOGIC_BRANCH_SUFFIX);
         map.put("executionLog", normalized + EXECUTION_LOG_SUFFIX);
+        map.put("executionLogArchive", normalized + EXECUTION_LOG_ARCHIVE_SUFFIX);
         map.put("configHistory", normalized + CONFIG_HISTORY_SUFFIX);
         this.tables = Collections.unmodifiableMap(map);
     }
@@ -99,12 +101,23 @@ public final class TableNameResolver {
         return tables.get("executionLog");
     }
 
+    /**
+     * 执行日志**归档表**（冷表）。
+     *
+     * <p>只在启用冷热分离时才会用到，建表脚本见
+     * {@code db/optional/execution-log-partition/04-create-archive-table.sql}；
+     * 表名固定为 {@code <前缀>execution_log_archive}（归档器据此推断，不可单独配置）。</p>
+     */
+    public String executionLogArchiveTable() {
+        return tables.get("executionLogArchive");
+    }
+
     /** 配置变更历史表。 */
     public String configHistoryTable() {
         return tables.get("configHistory");
     }
 
-    /** 四张表的只读视图（表逻辑名 → 物理名）。 */
+    /** 全部表名的只读视图（表逻辑名 → 物理名）。 */
     public Map<String, String> tables() {
         return tables;
     }

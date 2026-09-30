@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TableNameResolverTest {
 
     @Test
-    @DisplayName("默认前缀拼出四张表名")
+    @DisplayName("默认前缀拼出全部表名")
     void defaults() {
         TableNameResolver r = TableNameResolver.defaults();
         assertEquals("ifmap_", r.prefix());
@@ -39,6 +39,7 @@ class TableNameResolverTest {
         assertEquals("ifmap_logic_branch_config", r.logicBranchTable());
         assertEquals("ifmap_execution_log", r.executionLogTable());
         assertEquals("ifmap_config_history", r.configHistoryTable());
+        assertEquals("ifmap_execution_log_archive", r.executionLogArchiveTable());
     }
 
     @Test
@@ -47,6 +48,7 @@ class TableNameResolverTest {
         TableNameResolver r = new TableNameResolver("bankint_");
         assertEquals("bankint_config", r.configTable());
         assertEquals("bankint_execution_log", r.executionLogTable());
+        assertEquals("bankint_execution_log_archive", r.executionLogArchiveTable());
     }
 
     @Test
@@ -74,8 +76,8 @@ class TableNameResolverTest {
     }
 
     @Test
-    @DisplayName("表名视图包含四张表")
+    @DisplayName("表名视图包含全部表（含可选的归档冷表）")
     void tableView() {
-        assertEquals(4, TableNameResolver.defaults().tables().size());
+        assertEquals(5, TableNameResolver.defaults().tables().size());
     }
 }

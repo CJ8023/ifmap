@@ -39,8 +39,18 @@ public final class IfmapEnumCatalog {
 
     private final IfmapEnumProvider provider;
 
-    public IfmapEnumCatalog(IfmapEnumProvider provider) {
+    /**
+     * 构造器私有 + 静态工厂：本类持有 {@link #EMPTY} 单例，公开构造器会让 SpotBugs 报
+     * {@code SING_SINGLETON_HAS_NONPRIVATE_CONSTRUCTOR}；工厂方法同时把"可空 provider"这件事
+     * 收敛到一个入口（{@code of(null)} 等价于 {@link #empty()}）。
+     */
+    private IfmapEnumCatalog(IfmapEnumProvider provider) {
         this.provider = provider;
+    }
+
+    /** 包装宿主机注册的枚举来源；{@code provider} 为 {@code null} 时等价于 {@link #empty()}。 */
+    public static IfmapEnumCatalog of(IfmapEnumProvider provider) {
+        return provider == null ? EMPTY : new IfmapEnumCatalog(provider);
     }
 
     /** 没有任何枚举来源（宿主机未注册 provider）。 */

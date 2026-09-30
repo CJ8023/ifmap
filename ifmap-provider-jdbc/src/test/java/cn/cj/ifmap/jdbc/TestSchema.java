@@ -52,6 +52,9 @@ final class TestSchema {
             "db/changelog/v1.0.0/003-create-execution-log.sql",
             "db/changelog/v1.0.0/004-create-config-history.sql");
 
+    /** 执行日志归档冷表（可选运维脚本）：冷热分离测试要跑真实建表语句，见 {@link #freshDataSourceWithArchive}。 */
+    static final String ARCHIVE_DDL = "db/optional/execution-log-partition/04-create-archive-table.sql";
+
     private static final AtomicInteger SEQ = new AtomicInteger();
 
     private TestSchema() {
@@ -59,21 +62,40 @@ final class TestSchema {
 
     /** 新建一个 H2 内存库并按指定前缀建表。 */
     static DataSource freshDataSource(String tablePrefix) {
-        String url = "jdbc:h2:mem:ifmap_" + SEQ.incrementAndGet()
-                + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
-        DriverManagerDataSource ds = new DriverManagerDataSource(url, "sa", "");
-        ds.setDriverClassName("org.h2.Driver");
-        new org.springframework.jdbc.core.JdbcTemplate(ds).execute("/* warm up */ SELECT 1");
-        for (String file : FILES) {
-            String ddl = toH2(read(file), tablePrefix);
-            new org.springframework.jdbc.core.JdbcTemplate(ds).execute(ddl);
-        }
-        return ds;
+        return create(tablePrefix, false);
     }
 
     /** 默认前缀（ifmap_）建表。 */
     static DataSource freshDataSource() {
         return freshDataSource(TableNameResolver.DEFAULT_PREFIX);
+    }
+
+    /** 建表并额外建执行日志归档冷表（冷热分离测试用）。 */
+    static DataSource freshDataSourceWithArchive(String tablePrefix) {
+        return create(tablePrefix, true);
+    }
+
+    /** 建表并额外建执行日志归档冷表（默认前缀）。 */
+    static DataSource freshDataSourceWithArchive() {
+        return freshDataSourceWithArchive(TableNameResolver.DEFAULT_PREFIX);
+    }
+
+    private static DataSource create(String tablePrefix, boolean withArchive) {
+        String url = "jdbc:h2:mem:ifmap_" + SEQ.incrementAndGet()
+                + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
+        DriverManagerDataSource ds = new DriverManagerDataSource(url, "sa", "");
+        ds.setDriverClassName("org.h2.Driver");
+        org.springframework.jdbc.core.JdbcTemplate jdbc = new org.springframework.jdbc.core.JdbcTemplate(ds);
+        jdbc.execute("/* warm up */ SELECT 1");
+        for (String file : FILES) {
+            jdbc.execute(toH2(read(file), tablePrefix));
+        }
+        if (withArchive) {
+            // 归档表脚本是给运维执行的普通 SQL（不是 ${tablePrefix} 的 changelog），
+            // 里面写的是字面量 ifmap_（并在注释里给了 sed 替换说明）→ 测试按同口径替换前缀
+            jdbc.execute(toH2(read(ARCHIVE_DDL).replace("ifmap_", tablePrefix), tablePrefix));
+        }
+        return ds;
     }
 
     /** 读取生产 DDL 原始文本（测试可直接断言，保证脚本存在且非空）。 */

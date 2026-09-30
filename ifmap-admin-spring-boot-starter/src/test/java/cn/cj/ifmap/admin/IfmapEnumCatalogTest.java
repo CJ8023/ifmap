@@ -29,6 +29,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,14 +47,16 @@ class IfmapEnumCatalogTest {
 
         assertFalse(catalog.isPresent());
         assertTrue(catalog.options().isEmpty());
-        assertTrue(new IfmapEnumCatalog(null).options().isEmpty());
+        assertTrue(IfmapEnumCatalog.of(null).options().isEmpty());
+        // of(null) 与 empty() 是同一个实例：调用方不必区分两个"没有字典"的入口
+        assertSame(catalog, IfmapEnumCatalog.of(null));
     }
 
     @Test
     @DisplayName("provider 返回 null / 空 Map：都按「没有字典」处理")
     void providerReturnsNothing() {
-        assertTrue(new IfmapEnumCatalog(() -> null).options().isEmpty());
-        assertTrue(new IfmapEnumCatalog(Collections::emptyMap).options().isEmpty());
+        assertTrue(IfmapEnumCatalog.of(() -> null).options().isEmpty());
+        assertTrue(IfmapEnumCatalog.of(Collections::emptyMap).options().isEmpty());
     }
 
     @Test
@@ -63,7 +66,7 @@ class IfmapEnumCatalogTest {
         source.put("bankCode", Arrays.asList(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")));
         source.put("status", Collections.singletonList(EnumOption.of("1", "启用")));
 
-        IfmapEnumCatalog catalog = new IfmapEnumCatalog(() -> source);
+        IfmapEnumCatalog catalog = IfmapEnumCatalog.of(() -> source);
 
         assertTrue(catalog.isPresent());
         assertEquals(Arrays.asList("bankCode", "status"), new ArrayList<String>(catalog.options().keySet()));
@@ -88,7 +91,7 @@ class IfmapEnumCatalogTest {
         source.put("empty", null);
         source.put("dirty", Arrays.asList(EnumOption.of("A", "有效"), null));
 
-        Map<String, List<EnumOption>> options = new IfmapEnumCatalog(() -> source).options();
+        Map<String, List<EnumOption>> options = IfmapEnumCatalog.of(() -> source).options();
 
         assertEquals(2, options.size(), String.valueOf(options));
         assertTrue(options.get("empty").isEmpty());
@@ -103,7 +106,7 @@ class IfmapEnumCatalogTest {
         Map<String, List<EnumOption>> source = new LinkedHashMap<String, List<EnumOption>>();
         source.put("bankCode", mutable);
 
-        IfmapEnumCatalog catalog = new IfmapEnumCatalog(() -> source);
+        IfmapEnumCatalog catalog = IfmapEnumCatalog.of(() -> source);
         Map<String, List<EnumOption>> first = catalog.options();
         mutable.add(EnumOption.of("ICBC", "工商银行"));
 

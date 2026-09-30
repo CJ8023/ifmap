@@ -21,18 +21,19 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Spring Boot Starter）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
-| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-provider-jdbc`、`ifmap-demo-pure-java` |
-| 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core 字节码目标 Java 8，`major version: 52`） |
-| 测试 | **80 个**单元/端到端测试全绿（core 33 + json-jackson 22 + provider-jdbc 25） |
-| 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog（`ifmap.table-prefix` 可配） |
+| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
+| 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
+| 测试 | **124 个**单元/端到端测试全绿（core 52 + json-jackson 22 + provider-jdbc 25 + starter 21 + demo-sb3 4） |
+| 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
+| Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` |
 | License | Apache-2.0 |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W3~W8 计划）：Spring Boot Starter 自动配置、Feign 数据源、管理端 REST、Fastjson 实现。
+**尚未落地**（见 `docs/` 与整体设计文档 W4~W8 计划）：Feign 数据源、管理端 REST、Fastjson 实现、多租户 `TenantResolver`。
 
 ---
 
@@ -61,11 +62,14 @@ ifmap 逐条对齐修正：
 | `ifmap-core` | 模板 DSL、规则注册表、内置规则、SPI。**零 Spring、零 JSON 库** | 8+ | 仅 `slf4j-api` |
 | `ifmap-json-jackson` | `JsonOps` 的 Jackson + JsonPath 实现（默认） | 8+ | jackson-databind、json-path |
 | `ifmap-provider-jdbc` | `ConfigRepository` 的 JDBC 实现 + 4 张表建表脚本（Liquibase） | 8+ | spring-jdbc |
+| `ifmap-spring-boot-starter` | Spring Boot 3 自动配置：建表、仓储（可选缓存）、引擎、规则自动收集 | 17+ | starter-jdbc、provider-jdbc、json-jackson、caffeine(可选) |
 | `ifmap-demo-pure-java` | 纯 Java（非 Spring）可运行示例 | 8+ | core + json-jackson |
+| `ifmap-demo-spring-boot3` | Spring Boot 3 可运行示例（H2 内存库，`java -jar` 即跑通全链路） | 17+ | starter |
 
 依赖方向严格单向：`demo → json-jackson → core`、`provider-jdbc → core`，**core 不反向依赖任何实现**。
 
-`ifmap-provider-jdbc` 的 `spring-jdbc` 默认 **5.3.x**（JDK8 + Spring 5 兼容），Spring Boot 3 项目覆盖为 6.2.x 即可（见 [`docs/04-接入与建表.md`](docs/04-接入与建表.md) §2.1）。
+`ifmap-provider-jdbc` 的 `spring-jdbc` 就地声明为 **5.3.x**（JDK 8 + Spring 5 兼容），只使用 Spring 5.3 / 6.2 共有的 `JdbcTemplate` API；
+Spring Boot 3 项目引 `ifmap-spring-boot-starter` 时会解析到 Boot 传递来的 **6.2.x**（starter 把 `spring-boot-starter-jdbc` 声明在 `ifmap-provider-jdbc` 之前）。
 
 ---
 
@@ -99,6 +103,26 @@ String target2 = engine.render(templateJson, sourceJson, ctx);
 ```bash
 mvn -q -pl ifmap-demo-pure-java exec:java            # 或直接运行 cn.cj.ifmap.demo.IfmapQuickStart
 ```
+
+### Spring Boot 3 项目（更省事）
+
+```xml
+<dependency>
+  <groupId>cn.cj</groupId>
+  <artifactId>ifmap-spring-boot-starter</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```yaml
+ifmap:
+  table-prefix: ifmap_      # 复用存量表时改成 bankint_
+  ddl:
+    auto: true              # 启动自动建表（表已存在则跳过）
+```
+
+之后直接 `@Autowired IfmapEngine engine;` / `@Autowired ConfigRepository repository;` 即可，
+宿主机自定义规则只要是个 Spring bean（方法带 `@IfmapRule`）就会被自动收集。详见 [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md)。
 
 ---
 
@@ -158,9 +182,13 @@ IfmapEngine engine = IfmapEngine.builder()
 ## 8. 构建与测试
 
 ```bash
-# JDK 8 / 11 / 17 均可构建（core 目标字节码 Java 8）
+# JDK 8 / 11 / 17 / 21 均可构建（core 目标字节码 Java 8）
 mvn clean test
 mvn -pl ifmap-core test                 # 只跑 core（不依赖 JSON 库）
+
+# Spring Boot 3 模块（starter + demo-sb3）要求 JDK 17+：
+# 父 POM 用 <jdk>[17,)</jdk> 剖面自动装卸，JDK 8/11 上执行 mvn test 不会失败
+mvn -pl ifmap-spring-boot-starter -am test
 ```
 
 Windows 下手动指定 JDK 与本地仓库：
@@ -183,6 +211,7 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/02-模板DSL语法.md`](docs/02-模板DSL语法.md) | DSL 全量语法、语义细则、与存量引擎的差异对照 |
 | [`docs/03-规则清单与扩展.md`](docs/03-规则清单与扩展.md) | 18 个内置规则详解、自定义规则、覆盖与重载规则 |
 | [`docs/04-接入与建表.md`](docs/04-接入与建表.md) | 建表脚本与 Liquibase、JDBC 仓储接入、软删除与乐观锁语义、ID 策略、排错 |
+| [`docs/05-SpringBoot集成.md`](docs/05-SpringBoot集成.md) | Spring Boot 3 starter：配置项、自动装配、覆盖机制、缓存、自定义规则、建表与方言自适应、排错 |
 
 **内部文档（仅本地，已在 `.gitignore` 中排除）**
 

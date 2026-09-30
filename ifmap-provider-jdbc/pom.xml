@@ -18,9 +18,14 @@
       <groupId>cn.cj</groupId>
       <artifactId>ifmap-core</artifactId>
     </dependency>
+    <!-- 版本在此就地声明（不放父 pom 的 dependencyManagement）：
+         保证 Spring Boot 3 项目里能被 spring-boot-starter-jdbc 的 spring-jdbc 6.2.x 就近覆盖。
+         本模块只用到 query(String, RowMapper, Object...) / update(String, Object...)，
+         这些 API 在 Spring 5.3 与 6.2 上都存在，故 5.3 编译基线在 SB3 上运行安全。 -->
     <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-jdbc</artifactId>
+      <version>${spring-jdbc.version}</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

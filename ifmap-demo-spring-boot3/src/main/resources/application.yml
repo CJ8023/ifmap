@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: ifmap-demo-spring-boot3
+  datasource:
+    # 生产用 MySQL；这里用 H2 内存库演示（MODE=MySQL 让 MySQL 语法如 KEY idx_... / tinyint(1) 可解析）
+    url: jdbc:h2:mem:ifmapdemo;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: ''
+    driver-class-name: org.h2.Driver
+
+ifmap:
+  table-prefix: ifmap_        # 复用存量表时改成 bankint_
+  ddl:
+    auto: true                # 启动自动建表（表已存在则跳过）
+  id-strategy: snowflake
+  worker-id: 1
+  null-policy: skip-field
+  cache:
+    enabled: true
+    maximum-size: 500
+    ttl: 60s
+
+logging:
+  level:
+    cn.cj.ifmap: info

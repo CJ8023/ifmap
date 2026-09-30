@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs 排除清单（W7）。
+
+  ## 门禁怎么设的
+
+  父 POM 的 spotbugs-maven-plugin：`effort=Max`、`threshold=Medium`、不分析测试代码，
+  绑定在 `verify` 阶段 —— 也就是说 CI 矩阵的每个 JDK 都会跑，**Medium 及以上默认一律构建失败**。
+  本文件只放"确认过不是 bug"的**规则族**，每条都写清理由。
+
+  ## 规矩
+
+  1. 能改代码就改代码，不放行。W7 本波就改掉了 5 处真问题：
+     `InMemoryConfigCache` 匿名类里 `size()` 的实际调用对象有歧义（SpotBugs High）、
+     `IfmapConfigHistory` 的 `Date` 存取未做副本、`ListRules.SmartComparator` 不可序列化、
+     `IfmapOrchestrator.StepOutcome#getData` / `PageResult#getRows` 直接把内部集合交出去。
+  2. 放行必须是**规则族级**（而不是偷偷按类名放行），并且在下文说清"为什么这一族在本项目里
+     天然会误报"。放行规则族意味着：将来真写出这类缺陷，SpotBugs 不会再拦 —— 因此
+     对应地要在 code review 清单里补一条人工检查项（见 docs/09-参与贡献.md）。
+
+  注意：FindBugs 的 `<Class name="~正则">` 是**整串匹配**（不是 contains），要写正则得覆盖到末尾。
+-->
+<FindBugsFilter>
+
+  <!--
+    === EI_EXPOSE_REP / EI_EXPOSE_REP2 / EI_EXPOSE_STATIC_REP2（暴露内部可变对象）===
+
+    ifmap 是一个"把可替换组件装配起来"的库（SPI + 注册表 + 上下文对象），以下引用共享都是**契约本身**：
+
+      · RuleContext#getAttributes / StrategyContext#getConfig|getParams：规则求值与策略要读写这些对象，
+        每个规则一次深拷贝会让单次映射从"零拷贝"变成"多次深拷贝"；
+      · IfmapEngine#getTemplateEngine、IfmapOrchestrator$Builder#actions|logSink|specialDeals：
+        装配期把无状态协作者交给引擎，拷贝会破坏"全局共用一个实例"的语义（注册表/缓存尤其如此）；
+      · BankCall#getConfig、StrategyContext$Builder#config：交给宿主的出网网关/策略，按只读约定使用；
+      · RuleContext/StrategyContext 的属性表在构造时已经拷过一份，之后不再被外部改动。
+
+    纯数据 DTO（对外结果、分页、历史快照）**不在**本放行之列：它们已改成"拷贝 + 不可变视图"，
+    新增 DTO 也必须照此办理 —— 否则 SpotBugs 会（也应当）报出来。
+  -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2,EI_EXPOSE_STATIC_REP2"/>
+  </Match>
+
+  <!--
+    === CT_CONSTRUCTOR_THROW（构造器里抛异常，可能留下半初始化对象）===
+
+    本项目把"构造期校验"作为失败策略的一部分：`SnowflakeIdGenerator(long)`、
+    `RepositoryExecutionLogSink(ConfigRepository)`、`JdbcExecutionLogCleaner(JdbcTemplate, ...)`
+    等都在构造器里对 null / 非法值直接抛 `IllegalArgumentException` / `IfmapConfigException`，
+    属于**启动期快速失败**（设计文档 §6 失败策略）。这些类不在构造器里注册任何全局状态，
+    且只抛不吞（不会"对象半初始化还被继续使用"），因此不适用该规则。
+  -->
+  <Match>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+  </Match>
+
+  <!--
+    === MS_SHOULD_BE_FINAL（public static 字段可以改成 final）===
+
+    被命中的是**刻意暴露给宿主/测试调整的可变开关**（例如测试里临时替换全局实现、
+    以及刻意为方便宿主调参而留的静态上限），语义上就是可变的，加 final 会改变契约。
+  -->
+  <Match>
+    <Bug pattern="MS_SHOULD_BE_FINAL"/>
+  </Match>
+
+</FindBugsFilter>

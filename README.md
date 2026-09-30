@@ -1,5 +1,10 @@
 # ifmap
 
+[![ci](https://github.com/CJ8023/ifmap/actions/workflows/ci.yml/badge.svg)](https://github.com/CJ8023/ifmap/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![JDK](https://img.shields.io/badge/JDK-8%20%7C%2011%20%7C%2017%20%7C%2021-orange.svg)](#3-模块)
+[![docs](https://img.shields.io/badge/docs-mkdocs--material-4b8bbe.svg)](docs/index.md)
+
 > **I**nterface **F**ield **MAP**ping —— 面向银行/资金方接口报文的**声明式字段映射引擎**（Spring Boot Starter + 纯 Java 库）。
 
 用「一份 JSON 模板」描述「源报文 → 目标报文」的映射关系：取值、拼装、码值翻译、日期与金额处理全部在模板里声明，
@@ -21,22 +26,25 @@
 
 ---
 
-## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规）
+## 1. 当前状态（W1 骨架 + W2 配置仓储 + W3 Starter + W4 编排与策略 + W5 管理端 REST + W6 日志与合规 + W7 开源工程化）
 
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-provider-jdbc`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **264 个**单元/端到端测试全绿（core 123 + json-jackson 22 + provider-jdbc 33 + starter 41 + admin 41 + demo-sb3 4；JDK 8 侧 178 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **268 个**单元/端到端测试全绿（core 126 + json-jackson 22 + provider-jdbc 33 + starter 41 + admin 42 + demo-sb3 4；JDK 8 侧 181 个，Spring Boot 3 模块按剖面跳过） |
+| 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
+| 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
+| 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：10 页），CI 独立 job 构建 |
 | 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
 | Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` 与 5 类策略 bean |
 | 执行编排 | 编排器：租户解析 → 前置接口**递归**加载 → 拓扑排序 + 环检测 → 渲染 → 出网 → 判定 → 分支动作 → 脱敏落日志；支持 dry-run 试跑与部署前契约自检 |
 | 管理端 REST | 配置 CRUD + 保存前校验（422 带明细）+ 乐观锁 + 变更历史快照/差异 + 一键回滚 + 逻辑分支维护 + 全量巡检（Markdown 报告）；**默认关闭**，需自行加鉴权 |
 | 日志与合规 | 执行日志脱敏（值形态 + 字段名）+ 超长截断 + 写日志失败降级 + **保留期清理**（默认 90 天，分批删除防主从延迟；cron 可配，守护线程调度、不依赖 `@EnableScheduling`） |
-| License | Apache-2.0 |
+| License | Apache-2.0（`LICENSE` + `NOTICE`；贡献约定见 `CONTRIBUTING.md`） |
 
-**尚未落地**（见 `docs/` 与整体设计文档 W7~W8 计划）：开源工程化（LICENSE/NOTICE/CI 矩阵/静态扫描/文档站）、迁移预热（迁移 SQL + JsonOps TCK + shadow-run）、Fastjson 实现、Feign 数据源。
+**尚未落地**（见 `docs/` 与整体设计文档 W8 计划）：迁移预热（存量项目迁移 SQL + JsonOps TCK + shadow-run 影子跑）、Fastjson 实现、Feign 数据源、管理端可视化、分区/冷热分离。
 
 ---
 
@@ -230,6 +238,8 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/06-执行编排与策略扩展.md`](docs/06-执行编排与策略扩展.md) | 编排器执行顺序、三类策略 SPI、动作与回调、判定、脱敏与截断、契约自检、异常体系 |
 | [`docs/07-管理端REST.md`](docs/07-管理端REST.md) | 管理端：启用与鉴权、API 一览、状态码语义、保存前校验清单、历史与回滚、试跑、巡检、排错 |
 | [`docs/08-日志与合规.md`](docs/08-日志与合规.md) | 日志与合规：落什么/不落什么、脱敏、截断、失败降级、保留期清理（含分区方案对比）、异常体系、合规自查清单 |
+| [`docs/09-参与贡献.md`](docs/09-参与贡献.md) | 参与贡献：开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁与 PR 检查表 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南入口（三条底线 + 指向 `docs/09`） |
 
 **内部文档（仅本地，已在 `.gitignore` 中排除）**
 
@@ -242,6 +252,15 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 
 > 内部文档含客户工商数据与银行合作细节，**推送公开仓前请确认未被纳入版本控制**（`git status` 应看不到它们）。
 
-## 10. License
+## 10. 文档站
 
-[Apache License 2.0](LICENSE)
+```bash
+py -m pip install -r docs-requirements.txt   # Windows（Linux/macOS 用 python3 -m pip）
+py -m mkdocs serve                            # 本地预览 http://127.0.0.1:8000
+py -m mkdocs build --strict                   # 与 CI 相同的严格构建（警告即失败）
+```
+
+## 11. License
+
+[Apache License 2.0](LICENSE) —— 版权与第三方声明见 [`NOTICE`](NOTICE)。
+提交 PR 即表示同意以同一许可分发你的贡献（详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。

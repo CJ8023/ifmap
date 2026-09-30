@@ -56,6 +56,9 @@
     <spring-jdbc.version>5.3.39</spring-jdbc.version>
     <h2.version>1.4.200</h2.version>
 
+    <!-- 静态分析（W7）：只允许零误报的规则组作为构建门禁，见 spotbugs-exclude.xml 的逐条理由 -->
+    <plugin.spotbugs.version>4.8.6.6</plugin.spotbugs.version>
+
     <!-- Spring Boot starter（仅 ifmap-spring-boot-starter / ifmap-demo-spring-boot3 使用，不影响其他模块） -->
     <spring-boot.version>3.5.16</spring-boot.version>
     <caffeine.version>2.9.2</caffeine.version>
@@ -157,11 +160,65 @@
           <artifactId>maven-install-plugin</artifactId>
           <version>${plugin.install.version}</version>
         </plugin>
+        <!--
+          SpotBugs：绑定在 verify 阶段，随 `mvn verify` 一起跑（CI 矩阵的每个 JDK 都会跑到）。
+          effort=Max + threshold=Medium：低优先级（Low）里噪声太多（多为风格建议），
+          门禁只拦 Medium 及以上；被排除的项必须逐条写清理由，见根目录 spotbugs-exclude.xml。
+          不分析测试代码（includeTests 默认 false）。
+        -->
+        <plugin>
+          <groupId>com.github.spotbugs</groupId>
+          <artifactId>spotbugs-maven-plugin</artifactId>
+          <version>${plugin.spotbugs.version}</version>
+          <configuration>
+            <effort>Max</effort>
+            <threshold>Medium</threshold>
+            <includeTests>false</includeTests>
+            <excludeFilterFile>${maven.multiModuleProjectDirectory}/spotbugs-exclude.xml</excludeFilterFile>
+            <failOnError>true</failOnError>
+          </configuration>
+          <executions>
+            <execution>
+              <id>spotbugs-check</id>
+              <phase>verify</phase>
+              <goals>
+                <goal>check</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <!-- 静态分析（SpotBugs）：本身见 pluginManagement；这里只负责在 JDK 11+ 上启用，
+           因为 SpotBugs 4.8.x 运行时要求 Java 11（它仍能分析 Java 8 字节码，只是跑不起来在 JDK 8 上）。 -->
+    </plugins>
   </build>
 
   <profiles>
+    <!--
+      静态分析：**只在 JDK 11+ 自动开启**。SpotBugs 4.8.x 自身要求 Java 11 才能运行
+      （能分析 Java 8 字节码，但在 JDK 8 上跑不起来），所以 JDK 8 矩阵走 `<jdk>[11,)</jdk>`
+      之外的分支 —— 这也是 CI 矩阵里 8 号位不跑 spotbugs 的原因。
+
+      绑定 verify 阶段：`mvn clean verify` 即含静态分析；临时跳过用 -Dspotbugs.skip=true。
+      排除清单（每条带理由）见根目录 spotbugs-exclude.xml。
+    -->
+    <profile>
+      <id>static-analysis</id>
+      <activation>
+        <jdk>[11,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-maven-plugin</artifactId>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
     <!--
       Spring Boot 3 需要 JDK 17。用剖面按 JDK 版本自动装/卸模块，这样 JDK 8/11 上
       执行 mvn test 不会因为 starter 的 release=17 而失败（CI 矩阵见 .github/workflows/ci.yml）。

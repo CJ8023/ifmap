@@ -1,0 +1,14 @@
+ifmap - Interface Mapping Engine
+Copyright 2026 caijun
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+Third-party notices
+
+编译期/运行期不打包任何第三方源码；以 Maven 依赖形式引用的第三方组件（slf4j-api、
+jackson-databind、json-path、spring-jdbc、HikariCP、Spring Boot / Spring Framework、
+Caffeine、H2、MySQL Connector/J）均按其自身许可（Apache-2.0 / MIT / EDL-1.0 / EPL-2.0）
+分发，版权归各自所有者所有。发布二进制包时请一并保留其许可文件。
+
+内置的 18 个规则与模板 DSL 求值器为本项目原创实现，未复制任何第三方代码。

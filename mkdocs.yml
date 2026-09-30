@@ -1,0 +1,75 @@
+# ifmap 文档站配置（MkDocs + Material）
+#
+# 本地预览：py -m mkdocs serve          （Windows：py；Linux/macOS：python3）
+# 严格构建：py -m mkdocs build --strict （CI 也跑这一条；警告即失败）
+#
+# 注意：docs/ 下有若干**内部文档**（整体设计、规则审计、方案稿、tools/），
+# 它们被 .gitignore 排除、不进公开仓，但开发机上是存在的 —— 若不 exclude，
+# 本地 `--strict` 会因为"文件不在 nav 里"而失败。CI 上这些文件本来就不存在，
+# 加这个 exclude 是为了让本地与 CI 行为一致。
+
+site_name: ifmap
+site_description: 接口字段映射引擎 —— 配置驱动的接口报文映射（模板 DSL + 可插拔规则）
+site_url: https://github.com/CJ8023/ifmap
+repo_url: https://github.com/CJ8023/ifmap
+repo_name: CJ8023/ifmap
+edit_uri: edit/main/docs/
+copyright: Copyright 2026 caijun · Apache License 2.0
+
+docs_dir: docs
+site_dir: target/site-mkdocs
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色
+
+nav:
+  - 首页: index.md
+  - 快速开始: 01-快速开始.md
+  - 模板 DSL 语法: 02-模板DSL语法.md
+  - 规则清单与扩展: 03-规则清单与扩展.md
+  - 接入与建表: 04-接入与建表.md
+  - Spring Boot 集成: 05-SpringBoot集成.md
+  - 执行编排与策略扩展: 06-执行编排与策略扩展.md
+  - 管理端 REST: 07-管理端REST.md
+  - 日志与合规: 08-日志与合规.md
+  - 参与贡献: 09-参与贡献.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+exclude_docs: |
+  audit_report.md
+  bankintconfig模块优化方案_v1.md
+  ifmap-内置规则审计与优化_v1.md
+  ifmap-整体设计_v1.md
+  tools/
+
+strict: true

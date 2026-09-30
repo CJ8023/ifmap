@@ -1,3 +1,18 @@
+/*
+ * Copyright 2026 caijun
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.core.IfmapEngine;
@@ -172,6 +187,20 @@ class ConfigValidatorTest {
         existing.setRemark("自我更新");
         ValidationResult selfUpdate = validator.validate(existing, false);
         assertTrue(selfUpdate.isPassed(), String.valueOf(selfUpdate.getErrors()));
+    }
+
+    @Test
+    @DisplayName("唯一维度冲突：顺序号 ≥128（超出 Integer 缓存）也必须能查出来")
+    void uniqueKeyDetectsConflictBeyondIntegerCache() {
+        IfmapConfig existing = AdminTestSupport.config("IF_BIG", "apply", 200);
+        assertTrue(writer.insert(existing) > 0);
+
+        IfmapConfig duplicate = AdminTestSupport.config("IF_BIG", "apply", 200);
+        duplicate.setKeyId(null);
+        ValidationResult result = validator.validate(duplicate, true);
+        assertFalse(result.isPassed(),
+                "顺序号 200 的重复配置必须报冲突（Integer 引用比较会漏判，因为 200 不在 -128..127 缓存里）");
+        assertTrue(result.getErrors().toString().contains("唯一维度冲突"), result.getErrors().toString());
     }
 
     @Test

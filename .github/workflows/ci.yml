@@ -32,6 +32,7 @@ jobs:
           cache: maven
 
       - name: Build & test
+        # 含 SpotBugs（绑定 verify；JDK 11+ 才启用，因为 SpotBugs 4.8.x 运行时要求 Java 11）
         run: mvn -B -ntp clean verify
 
       - name: Upload surefire reports on failure
@@ -41,6 +42,41 @@ jobs:
           name: surefire-reports-jdk${{ matrix.java }}
           path: '**/target/surefire-reports/**'
           if-no-files-found: ignore
+
+  static-analysis:
+    name: static analysis (SpotBugs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: SpotBugs (effort=max, threshold=medium)
+        # 单独跑一遍是为了让“静态分析挂了”在 CI 里一眼可见（build 矩阵里的 verify 也会跑它）。
+        # 用 verify（而不是直接 spotbugs:check）保证编译、依赖、插件版本与矩阵里完全一致。
+        run: mvn -B -ntp -DskipTests verify
+
+  docs:
+    name: docs site (mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install mkdocs-material
+        run: pip install -r docs-requirements.txt
+
+      - name: Build docs (warnings are errors)
+        # 建站本身不参与 Maven 构建，但它必须能过 --strict：文档里的相对链接写错就挂
+        run: mkdocs build --strict
 
   # ---------------------------------------------------------------
   # 待启用：MySQL 5.7 与 8.0 双跑。

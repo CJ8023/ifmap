@@ -1,3 +1,18 @@
+/*
+ * Copyright 2026 caijun
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.core.config.ConfigQuery;
@@ -83,7 +98,7 @@ public class ConfigValidator {
         checkJsonPaths(config, result);
         checkStrategyName(config, result);
         checkFrontChain(config, result);
-        checkUniqueKey(config, creating, result);
+        checkUniqueKey(config, result);
         return result;
     }
 
@@ -310,7 +325,7 @@ public class ConfigValidator {
     }
 
     /** 唯一维度：同 (tenant, interface_no, busi_node, interface_order) 不能有第二条未删除配置。 */
-    private void checkUniqueKey(IfmapConfig config, boolean creating, ValidationResult result) {
+    private void checkUniqueKey(IfmapConfig config, ValidationResult result) {
         if (isBlank(config.getInterfaceNo()) || isBlank(config.getBusiNode())) {
             return;
         }
@@ -321,10 +336,10 @@ public class ConfigValidator {
                 .setSize(ConfigQuery.MAX_SIZE);
         List<IfmapConfig> rows = repository.queryConfigs(query);
         for (IfmapConfig row : rows) {
-            if (row.getDelStatus() != 0) {
+            if (row.getDelStatus() != null && row.getDelStatus() != 0) {
                 continue;
             }
-            boolean sameOrder = row.getInterfaceOrder() == config.getInterfaceOrder();
+            boolean sameOrder = sameOrder(row.getInterfaceOrder(), config.getInterfaceOrder());
             boolean sameRow = config.getKeyId() != null && config.getKeyId().equals(row.getKeyId());
             if (sameOrder && !sameRow) {
                 result.error("唯一维度冲突：已存在 (tenant_id=" + asTenantId(config.getTenantId())
@@ -333,6 +348,17 @@ public class ConfigValidator {
                         + ", interface_order=" + config.getInterfaceOrder() + ") 的配置 #" + row.getKeyId());
             }
         }
+    }
+
+    /**
+     * 顺序号相等判断。
+     *
+     * <p>{@code interface_order} 是包装类型 {@code Integer}，**绝不能写成 {@code a == b}**：
+     * {@code ==} 比的是引用，只对 {@code -128..127} 的缓存实例碰巧成立，
+     * 一旦顺序号 ≥ 128 就会漏判冲突（"唯一键已存在"校验形同虚设）。</p>
+     */
+    private static boolean sameOrder(Integer left, Integer right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private void checkMethodFlag(LogicBranchConfig row, ValidationResult result) {

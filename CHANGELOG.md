@@ -5,6 +5,14 @@
 ## [Unreleased]
 
 ### Added
+- **W7 开源工程化**（本版本）：
+  - `NOTICE`（版权 + 第三方组件许可说明）；`CONTRIBUTING.md`（贡献入口）与 [`docs/09-参与贡献.md`](docs/09-参与贡献.md)（开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁、PR 检查表）
+  - **许可头全量落地**：166 个 `*.java` + 5 个 `*.sql` 全部带 Apache-2.0 许可头（Liquibase changelog 的 `--liquibase formatted sql` 仍保持在首行，许可头插在它之后）
+  - **`LicenseHeaderTest`（core 测试，3 例）**：`mvn test` 即校验「LICENSE/NOTICE 存在且非空」「每个 `.java` 都以许可头开始」「SQL 也带许可头且 changelog 标记行未被顶掉」。用测试而不是 `license-maven-plugin`，是为了"零新增构建期依赖也能拦住漏加"，且 JDK 8 矩阵同样会跑到
+  - **SpotBugs 质量门禁**：绑定 `verify` 阶段（`effort=max`、`threshold=medium`、不分析测试代码），**JDK 11+ 自动启用**（SpotBugs 4.8.x 运行时要求 Java 11；JDK 8 矩阵不跑），临时跳过用 `-Dspotbugs.skip=true`；排除清单 [`spotbugs-exclude.xml`](spotbugs-exclude.xml) **逐条写明理由**（最终 6 个模块全部 **0 条**；口径 = 各模块 `target/spotbugsXml.xml` 里 `<BugInstance ` 的条数，复现：`mvn -B -ntp spotbugs:spotbugs`）（只放行 `EI_EXPOSE_REP*` / `CT_CONSTRUCTOR_THROW` / `MS_SHOULD_BE_FINAL` 三族，并说明"放行规则族"对应的人工 review 三条）
+  - **文档站**：`mkdocs.yml`（MkDocs + Material，10 页 nav，`strict: true`）+ `docs/index.md`（站点首页）+ `docs-requirements.txt`；`exclude_docs` 排除内部文档，保证开发机本地 `--strict` 与 CI 行为一致
+  - **CI 矩阵扩展**（`.github/workflows/ci.yml`）：JDK 8/11/17/21 构建矩阵（每个 JDK 都跑 `clean verify`，即含 SpotBugs）+ 独立 `static-analysis` job（`spotbugs:check`，让静态分析失败一眼可见）+ 独立 `docs` job（`mkdocs build --strict`，文档相对链接写错即挂）
+  - README：CI / License / JDK / docs 四枚徽章；状态表补「静态分析 / 开源合规 / 文档站」三行
 - **W6 日志与合规**（本版本）：
   - `ifmap-provider-jdbc`：新增 `JdbcExecutionLogCleaner` —— 按保留期**分批**删除过期执行日志（设计 §6.4 方案 A / ADR-10）。先 `SELECT key_id ... LIMIT n` 再 `DELETE ... WHERE key_id IN (...)`：`DELETE ... LIMIT` 是 MySQL 方言、`DELETE ... IN (SELECT 同表)` 在 MySQL 上报 1093，两步走 MySQL/H2 都合法（单测因此能用 H2 跑真实生产 DDL）。带**批间停顿**（给从库追 binlog）、**`maxBatches` 护栏**（没删完留给下个周期并 WARN）、**中断安全**（被中断即停止本轮并保留中断标记）、**表名前缀生效**（复用 `bankint_execution_log` 也认）
   - `ifmap-spring-boot-starter`：新增 `IfmapLogCleanTask`（`cleanNow()` 可手工触发；清理异常只 WARN 返回 `-1`，**不让后台任务异常影响业务**）与 `IfmapLogCleanScheduler`（`CronExpression` 驱动，默认每天 03:30）。**不用 `@EnableScheduling`**：自动配置不该打开宿主的全局调度设施，且 Spring 无 TaskScheduler 时建的是**非守护**线程 → 非 Web/批处理应用 `main()` 返回后 JVM 不退出（demo 实测卡死；改守护线程后 `java -jar` exit=0）
@@ -26,6 +34,14 @@
   - 配置项：`ifmap.admin.*`（`enabled` / `base-path` / `history-limit` / `audit-max-configs`）
   - 文档：[`docs/07-管理端REST.md`](docs/07-管理端REST.md)
   - 测试：新增 **41 个**（`ConfigAdminServiceTest` 14 / `ConfigValidatorTest` 10 / `IfmapAdminWebEndpointTest` 5（H2 + 真 Tomcat + 真 HTTP）/ `IfmapAdminAutoConfigurationTest` 5 / `ConfigSnapshotMapperTest` 4 / `ConfigAuditorTest` 3）、starter +1（非 MySQL `json` 列降级）；JDK 17 全 reactor **245 个测试全绿**，JDK 8 侧 **170 个全绿**
+
+### Fixed（W7）
+- `ConfigValidator.checkUniqueKey` 用 **`Integer == Integer`** 比较顺序号 → `Integer` 只缓存 `-128..127`，**顺序号 ≥ 128 时"唯一键冲突"静默漏判**（校验形同虚设，重复配置能被写入）。改为 null 安全的 `sameOrder()`（`equals`）；并补**在旧代码上确认会红**的回归测试 `uniqueKeyDetectsConflictBeyondIntegerCache`（顺序号 200）
+- `IfmapConfigHistory#getAddTime/setAddTime` 直接进出 `java.util.Date` → 调用方能改到内部状态；改为存取都做副本
+- `ListRules.SmartComparator` 未实现 `Serializable` → 它会被 `Collections.reverseOrder(...)` 包进**默认序列化**的 `ReverseComparator`，序列化外层结果时会抛异常；补 `implements Serializable` + `serialVersionUID`
+- `IfmapOrchestrator.StepOutcome#getData`、`PageResult#getRows` 直接交出内部集合 → 改为"拷贝 + 不可变视图"（与 `IfmapResult` 一致）
+- `InMemoryConfigCache` 匿名 `LinkedHashMap` 子类里 `size()` 的实际调用对象有歧义（外层类也有 `size()`）→ 显式写 `super.size()`
+- `ApiError.ok` 是恒为 `false` 的实例字段（SpotBugs `SS_SHOULD_BE_STATIC`）→ 删掉字段，`isOk()` 直接返回 `false`，JSON 里仍有 `"ok": false`
 
 ### Changed（W6）
 - provider-jdbc 测试基座 `TestSchema` 与生产 `IfmapSchemaInitializer` 对齐：非 MySQL 方言下把 `json` 列降级为 `text`（断言式改写，预期列数不符即失败）—— 测试库若保留 H2 的 `JSON` 类型，测的就不是生产语义

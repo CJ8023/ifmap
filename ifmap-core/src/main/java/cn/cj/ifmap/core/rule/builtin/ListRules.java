@@ -1,9 +1,25 @@
+/*
+ * Copyright 2026 caijun
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package cn.cj.ifmap.core.rule.builtin;
 
 import cn.cj.ifmap.core.exception.RuleArgumentException;
 import cn.cj.ifmap.core.rule.IfmapRule;
 import cn.cj.ifmap.core.util.Text;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -106,8 +122,14 @@ public class ListRules {
         }
     }
 
-    /** 数值优先、其次按字符串比较，避免不同类型直接比较抛异常。 */
-    private static final class SmartComparator implements Comparator<Object> {
+    /** 数值优先、其次按字符串比较，避免不同类型直接比较抛异常。
+     *
+     *  <p>{@code Serializable}：本比较器会被 {@code Collections.reverseOrder(...)} 包成
+     *  默认序列化的 {@code ReverseComparator}，若自身不可序列化，序列化外层结果时会炸。</p>
+     */
+    private static final class SmartComparator implements Comparator<Object>, Serializable {
+
+        private static final long serialVersionUID = 1L;
 
         @Override
         public int compare(Object a, Object b) {

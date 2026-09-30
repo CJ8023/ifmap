@@ -1,0 +1,3 @@
+# 文档站依赖（MkDocs + Material）。CI 里 `pip install -r docs-requirements.txt`。
+# 本地：py -m pip install -r docs-requirements.txt（Windows）/ python3 -m pip ...（Linux、macOS）
+mkdocs-material==9.7.7

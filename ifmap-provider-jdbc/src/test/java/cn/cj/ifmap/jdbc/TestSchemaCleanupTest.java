@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,5 +47,28 @@ class TestSchemaCleanupTest {
 
         assertTrue(TestDatabases.tablesWithPrefix(schema.prefix()).isEmpty(),
                 "cleanupAll() 之后不应残留 fresh() 建的表（建表前那次清理若注销了登记，会话监听器/退出钩子都清不掉）");
+    }
+
+    @Test
+    @DisplayName("真库档：cleanupAll() 清空登记后，同一 hint 再建的表仍须在册（回归：缓存命中路径漏登记 -> CI 残留 itt_* 表）")
+    void reuseAfterCleanupStaysManaged() {
+        Assumptions.assumeTrue(TestDatabases.mysqlEnabled(), "只在真库档验证（H2 档没有落库的表）");
+
+        TestDatabases.Schema first = TestSchema.fresh("ifmap_reuse_case");
+        assertFalse(TestDatabases.tablesWithPrefix(first.prefix()).isEmpty(), "前置条件：fresh() 后表已建");
+
+        // 模拟“同一 JVM 里别处调过 cleanupAll()”：登记被清空，但 hint -> 前缀 的映射还在缓存里。
+        // 这正是 CI（Linux runner，文件系统序与本地不同）暴露出来的场景：
+        // 某个测试类调了 cleanupAll()，之后另一个测试类用同一个 hint 再建表。
+        TestDatabases.cleanupAll();
+
+        TestDatabases.Schema second = TestSchema.fresh("ifmap_reuse_case");
+        assertEquals(first.prefix(), second.prefix(), "同一 hint 在同一 JVM 里必须复用同一前缀（走缓存命中路径）");
+
+        // 会话结束时的清理 == 这一步
+        TestDatabases.cleanupAll();
+
+        assertTrue(TestDatabases.tablesWithPrefix(second.prefix()).isEmpty(),
+                "缓存命中路径若不重新登记，之后建的表永远不会被清理（CI 门禁实测残留 itt_bankint_*_config）");
     }
 }

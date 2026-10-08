@@ -109,8 +109,10 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17', cache: maven }
       # -am：testkit / 各 starter 直接从 reactor 构建，无需先 install
+      # runOrder=reversealphabetical：故意换一种执行顺序跑（残表/顺序依赖缺陷只在特定顺序下暴露，
+      # 本地默认顺序曾经全绿而 CI 顺出残留 itt_* 表 —— 见设计 §5.3②）
       - name: run tests against MySQL
-        run: mvn -B -ntp -pl ifmap-testkit,ifmap-provider-jdbc,ifmap-spring-boot-starter,ifmap-admin-spring-boot-starter,ifmap-demo-spring-boot3 -am test
+        run: mvn -B -ntp -pl ifmap-testkit,ifmap-provider-jdbc,ifmap-spring-boot-starter,ifmap-admin-spring-boot-starter,ifmap-demo-spring-boot3 -am -Dsurefire.runOrder=reversealphabetical test
         env:
           IFMAP_JDBC_URL: jdbc:mysql://127.0.0.1:3306/ifmap_test
           IFMAP_JDBC_USER: root

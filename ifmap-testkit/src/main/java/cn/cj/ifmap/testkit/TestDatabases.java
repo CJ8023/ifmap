@@ -183,6 +183,11 @@ public final class TestDatabases {
         sweepStaleOnce();
         String cached = PREFIX_CACHE.get(hint);
         if (cached != null) {
+            // 幂等重登记：cleanupAll() / drop() 会把前缀从 MANAGED 里摘掉，但 hint → 前缀 的映射仍留在
+            // PREFIX_CACHE 里。若命中缓存就直接返回，之后用同一 hint 建出来的表就再也没人清了 ——
+            // 实测后果（CI 的 Linux runner 上顺序与本地不同，才暴露出来）：整轮跑完残留
+            // itt_bankint_*_config，被 "assert no leftover itt_* tables" 门禁卡住。
+            MANAGED.add(cached);
             return cached;
         }
         String prefix = TEST_PREFIX + sanitizeHint(hint) + "_" + hex8() + "_";

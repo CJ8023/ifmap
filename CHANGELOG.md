@@ -19,15 +19,19 @@
   - **清理三层**：JUnit 会话监听器（`META-INF/services` 自动装配，不依赖 JVM 正常退出 —— surefire 的 fork 可能是 `Runtime.halt()` 结束的）
     + JVM 退出钩子 + 每次启动顺带清扫 30 分钟前的 `itt_*` 残表；另有 `dropAllTestTables()` 供人工清库。
     **实测口径：整轮真库跑完 `itt_*` 残表必须为 0**（CI 也加了这条门禁）
-  - **修掉两个实现缺陷**（都是本批自己发现）：① 建表前的“先删干净再建”调了会**注销清理登记**的 `drop()` ⇒ 会话监听器遍历
-    空集合、“清理成功”只在日志里、库里留 8 张残表（拆成 `dropTables`（只删表）/ `drop`（删表+注销），回归守卫 = `TestSchemaCleanupTest`）；
-    ② 真库 URL 只设 `serverTimezone` 不与 `sessionVariables=time_zone=...` 成对 ⇒ 服务器 `@@system_time_zone=UTC` 时 `datetime(3)` 往返偏 8 小时
+  - **修掉三个实现缺陷**（都是本批自己发现，其中第二个是 CI 门禁抓到的）：① 建表前的“先删干净再建”调了会**注销清理登记**的
+    `drop()` ⇒ 会话监听器遍历空集合、“清理成功”只在日志里、库里留 8 张残表（拆成 `dropTables`（只删表）/ `drop`（删表+注销），
+    回归守卫 = `TestSchemaCleanupTest`）；② `cleanupAll()` 摘掉登记后，`prefixFor(hint)` **命中缓存的分支不再重新登记** ⇒
+    同一 JVM 内“先 `cleanupAll()`、之后另一个测试类用同一 hint 再建表”时表没人清（CI 上残留 `itt_bankint_*_config`；
+    本地顺序跑绿、Linux runner 的文件系统序才暴露 —— 用 `-Dsurefire.runOrder=reversealphabetical` 可本地复现，
+    修法 = 命中缓存时幂等重登记，回归守卫 = `TestSchemaCleanupTest.reuseAfterCleanupStaysManaged`）；
+    ③ 真库 URL 只设 `serverTimezone` 不与 `sessionVariables=time_zone=...` 成对 ⇒ 服务器 `@@system_time_zone=UTC` 时 `datetime(3)` 往返偏 8 小时
   - **根治缺陷：`ifmap_execution_log.request_param` 由 `json` 改回 `mediumtext`**（与 `response_param` 对齐）：超长报文被
     `Logs.truncate` 截断后**必然不是合法 JSON**，写 `json` 列直接报 **3140**，而 `IfmapOrchestrator.writeLog` 吞异常只 WARN ⇒
     **该条执行日志静默丢失**；`json` 列顺带还会把 `10.00` 规范化成 `10`、`1e400` 直接拒收（与刚发布的“小数形态保真”契约相反）。
     审计日志的第一要求是“一定写得进去 + 内容忠实”，故 4 处 DDL + 迁移脚本 `03-modify-and-index.sql` 同步改文本；
     迁移 kit 的 `00-precheck.sql §10.5` 由“必须预检”降级为信息性统计，`05-verify.sql` 期望类型同步
-  - **回归用例**：`ExecutionLogPayloadFidelityTest`（3 例：DDL 列型守卫、迁移脚本守卫、超阈值报文截断后能落库读回）+ `TestSchemaCleanupTest`（1 例，真库专属）
+  - **回归用例**：`ExecutionLogPayloadFidelityTest`（3 例：DDL 列型守卫、迁移脚本守卫、超阈值报文截断后能落库读回）+ `TestSchemaCleanupTest`（2 例，真库专属：登记不被建表动作注销、登记被 `cleanupAll()` 摘掉后仍能重登记）
   - **CI**：启用 `integration` job（`services: mysql`，**5.7 与 8.0 双矩阵**，跑完断言 `itt_*` 残表为 0）。H2 仍是默认档，
     没有库的开发者与公共 runner 零依赖
   - **文档**：[`docs/05`](docs/05-SpringBoot集成.md) §8.1（怎么切真库、权限要求、时区陷阱、手工清库）、

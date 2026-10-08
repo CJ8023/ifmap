@@ -144,6 +144,58 @@ public abstract class JsonOpsConformanceTestBase {
         assertEquals(1.5d, ((Number) map.get("dec")).doubleValue(), 1e-9);
     }
 
+    // ---------------------------------------------------------------- 数字保真（小数契约）
+
+    @Test
+    @DisplayName("小数保真：10.00 不等于 10.0，toJson 必须原样输出 10.00")
+    void decimalKeepsTrailingZeros() {
+        assertEquals("{\"a\":10.00}", ops().toJson(ops().parse("{\"a\":10.00}")));
+    }
+
+    @Test
+    @DisplayName("小数保真：多位小数 / 0.100 / 负零都按源文字输出（数值不变，位数不丢）")
+    void decimalKeepsDigits() {
+        assertEquals("{\"a\":12345678.90}", ops().toJson(ops().parse("{\"a\":12345678.90}")));
+        assertEquals("{\"a\":0.100}", ops().toJson(ops().parse("{\"a\":0.100}")));
+        assertEquals("{\"a\":0.00}", ops().toJson(ops().parse("{\"a\":-0.00}")));
+    }
+
+    @Test
+    @DisplayName("小数保真：科学计数法输入在输出侧必须展开（报文里不允许出现 E）")
+    void decimalNeverScientific() {
+        String json = ops().toJson(ops().parse("{\"a\":1.0E+10,\"b\":0.000001}"));
+
+        assertFalse(json.contains("E"), "输出不得含科学计数法：" + json);
+        assertFalse(json.contains("e"), "输出不得含科学计数法：" + json);
+        Map<?, ?> back = assertInstanceOf(Map.class, ops().parse(json));
+        assertEquals(1.0E10d, ((Number) back.get("a")).doubleValue(), 1e-3);
+    }
+
+    @Test
+    @DisplayName("小数保真：数组 / 对象内的数字同样保真，且 JSON 层类型不变")
+    void decimalFidelityInsideContainers() {
+        assertEquals("{\"items\":[1.50,2.25],\"o\":{\"v\":10.00}}",
+                ops().toJson(ops().parse("{\"items\":[1.50,2.25],\"o\":{\"v\":10.00}}")));
+    }
+
+    @Test
+    @DisplayName("整数保真：大整数不丢精度，也不写成浮点")
+    void integerStaysInteger() {
+        assertEquals("{\"a\":123456789012,\"b\":7}", ops().toJson(ops().parse("{\"a\":123456789012,\"b\":7}")));
+    }
+
+    @Test
+    @DisplayName("readContext 取回小数：仍是 Number，且保留源文字位数")
+    void readContextKeepsDecimalScale() {
+        JsonReadContext ctx = ops().readContext("{\"amount\":10.00,\"rates\":[1.50,2.25]}");
+
+        Number amount = assertInstanceOf(Number.class, ctx.read("$.amount"));
+        assertEquals("10.00", String.valueOf(amount));
+        List<?> rates = assertInstanceOf(List.class, ctx.read("$.rates"));
+        assertEquals("1.50", String.valueOf(rates.get(0)));
+        assertEquals("2.25", String.valueOf(rates.get(1)));
+    }
+
     // ---------------------------------------------------------------- toJson
 
     @Test

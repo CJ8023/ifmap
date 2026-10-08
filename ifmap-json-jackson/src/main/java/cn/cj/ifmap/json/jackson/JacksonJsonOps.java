@@ -18,9 +18,11 @@ package cn.cj.ifmap.json.jackson;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.json.JsonReadContext;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
@@ -39,6 +41,12 @@ import org.slf4j.LoggerFactory;
  * <p>注意：{@code JacksonJsonProvider} 默认把 JSON 解析成 JDK 原生结构（{@code Map} / {@code List} /
  * {@code String} / {@code Integer} / {@code Double}），并不一定返回 {@code JsonNode}，
  * 所以取值后必须做一次「两种形态都兼容」的归一化，否则会在类型转换上静默取空值。</p>
+ *
+ * <p>小数契约（详见 {@link JsonOps}）：默认 mapper 同时开启 {@code USE_BIG_DECIMAL_FOR_FLOATS}
+ * （浮点解析成 {@code BigDecimal}，保留源文字小数位）与 {@code WRITE_BIGDECIMAL_AS_PLAIN}
+ * （序列化走 {@code toPlainString()}，不出科学计数法）。<b>两处缺一不可</b>：只开解析侧会在
+ * 最外层 {@code toJson} 时丢掉尾零与展开形式（如 {@code 10.00} → {@code 10.0}），
+ * 只开序列化侧会因为值已经是 {@code Double} 而永远回不到源文字。</p>
  *
  * @author caijun
  */
@@ -69,6 +77,12 @@ public final class JacksonJsonOps implements JsonOps {
     private static ObjectMapper defaultMapper() {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // 小数契约：解析侧读成 BigDecimal（保源文字小数位），序列化侧按 toPlainString 写（不出 E）
+        objectMapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
+        objectMapper.configure(SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN, true);
+        // 上面这个 SerializationFeature 只影响 ObjectMapper 自己创建的 generator，
+        // 外部传入 JsonGenerator（或 JsonPath 内部路径）时还得靠 factory 级开关兜底
+        objectMapper.getFactory().configure(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN, true);
         return objectMapper;
     }
 

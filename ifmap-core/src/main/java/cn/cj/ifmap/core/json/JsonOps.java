@@ -24,6 +24,23 @@ package cn.cj.ifmap.core.json;
  * <p>宿主可自行实现本接口以替换底层 JSON 库（Fastjson / Gson / Jackson 均可），
  * 也可通过 {@link JsonOpsHolder#set(JsonOps)} 手动注入。</p>
  *
+ * <h2>实数契约（两种实现都必须满足，由 TCK 固定）</h2>
+ *
+ * <p>报文里的金额小数是业务语义的一部分（{@code 10.00} 与 {@code 10.0} 不是同一个东西，
+ * {@code 1.0E+10} 进报文则可能被对方系统当成非法数字）。因此：</p>
+ * <ol>
+ *   <li>小数（含科学计数法写法）解析后必须是 {@link java.math.BigDecimal}，且
+ *       <b>scale 等于源文字的小数位</b>（{@code 10.00} → scale 2）；整数解析成
+ *       {@code Integer} / {@code Long} / {@code BigInteger}，<b>不得因位数多而变成浮点</b>；</li>
+ *   <li>{@link #toJson(Object)} 输出的小数<b>永不出现科学计数法</b>，且保留小数位
+ *       （{@code 10.00} 就是 {@code 10.00}）；</li>
+ *   <li>数组 / 对象内部的数字与顶层同一口径（递归生效，不只看第一层）；</li>
+ *   <li><b>只改变数字的写法，不改变类型</b>：数字仍是 JSON number，不会被引号包成字符串。</li>
+ * </ol>
+ *
+ * <p>注意：这两条是<b>成对</b>的 —— 只开「解析成 BigDecimal」会在最外层序列化时丢尾零，
+ * 只开「按 plain 输出」又因为值已经是 {@code Double} 而回不到源文字（探针实测见设计文档 §10）。</p>
+ *
  * @author caijun
  */
 public interface JsonOps {

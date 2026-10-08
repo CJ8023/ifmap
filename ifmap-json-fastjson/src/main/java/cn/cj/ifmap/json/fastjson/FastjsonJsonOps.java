@@ -77,7 +77,10 @@ public final class FastjsonJsonOps implements JsonOps {
         try {
             // WriteMapNullValue：显式 null 值的键必须留在 JSON 里（默认会被 fastjson 丢掉，
             // 而 ifmap 的模板渲染/快照往返依赖「键存在 + 值为 null」这一区别）
-            return JSON.toJSONString(value, SerializerFeature.WriteMapNullValue);
+            // WriteBigDecimalAsPlain：小数契约 —— BigDecimal 必须按 toPlainString() 输出，
+            // 否则 1.0E+10 这种源文字会原样喷进报文（见 JsonOps 小数契约）
+            return JSON.toJSONString(value, SerializerFeature.WriteMapNullValue,
+                    SerializerFeature.WriteBigDecimalAsPlain);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("JSON 序列化失败：" + e.getMessage(), e);
         }

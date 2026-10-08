@@ -124,6 +124,30 @@ class ConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("表达式错语法 @sum@$.a,$.b → error（旧正则遇逗号截断，会静默放行）")
+    void badExpressionIsReported() {
+        IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);
+        config.setResponseParamTemplate("{\"s\":\"@sum@$.a,$.b\"}");
+
+        ValidationResult result = validator.validate(config, true);
+
+        assertFalse(result.isPassed(), String.valueOf(result.getErrors()));
+        assertTrue(result.getErrors().toString().contains("$.a,$.b"), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("未闭合的 @FUN( 同样在保存前被拒")
+    void unclosedFunIsReported() {
+        IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);
+        config.setResponseParamTemplate("{\"s\":\"@FUN(concat,$.a\"}");
+
+        ValidationResult result = validator.validate(config, true);
+
+        assertFalse(result.isPassed(), String.valueOf(result.getErrors()));
+        assertTrue(result.getErrors().toString().contains("concat"), result.getErrors().toString());
+    }
+
+    @Test
     @DisplayName("strategy_name 必须在已注册策略里；注册表为空只给 warning")
     void strategyNameMustBeRegistered() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);

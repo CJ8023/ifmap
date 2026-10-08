@@ -16,6 +16,7 @@
 package cn.cj.ifmap.core.rule.builtin;
 
 import cn.cj.ifmap.core.rule.RuleRegistry;
+import cn.cj.ifmap.core.rule.StrictTypes;
 
 /**
  * 内置规则集：18 个规则名 / 27 个方法（含重载与上下文注入版本）。
@@ -37,12 +38,18 @@ public final class BuiltinRules {
     private BuiltinRules() {
     }
 
-    /** 把内置规则注册进给定注册表。 */
+    /** 把内置规则注册进给定注册表（{@link StrictTypes#WARN} 口径）。 */
     public static RuleRegistry registerTo(RuleRegistry registry) {
+        return registerTo(registry, StrictTypes.WARN);
+    }
+
+    /** 把内置规则注册进给定注册表，并指定静默错误的处置口径。 */
+    public static RuleRegistry registerTo(RuleRegistry registry, StrictTypes strictTypes) {
         if (registry == null) {
             throw new IllegalArgumentException("registry must not be null");
         }
-        registry.registerAll(new StringRules(), new DictRules(), new DateRules(), new NumberRules(), new ListRules());
+        registry.registerAll(new StringRules(strictTypes), new DictRules(), new DateRules(),
+                new NumberRules(), new ListRules());
         return registry;
     }
 

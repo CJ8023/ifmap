@@ -120,6 +120,7 @@ public class IfmapAutoConfiguration {
                 .jsonOps(jsonOps)
                 .builtins(false)
                 .nullPolicy(properties.getNullPolicy())
+                .strictTypes(properties.getStrictTypes())
                 .build();
     }
 

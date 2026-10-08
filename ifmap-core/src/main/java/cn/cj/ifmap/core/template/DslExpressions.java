@@ -175,16 +175,22 @@ public final class DslExpressions {
         if (value == null || value.length() == 0) {
             return problems;
         }
-        if (value.startsWith(TemplateConstants.FUN_PREFIX) && !value.endsWith(TemplateConstants.FUN_SUFFIX)) {
+        String text = expressionPart(value);
+        // 未闭合的 @FUN( 必须先判：它按定义就不算「完整表达式」，放到 isExpression 之后会漏报
+        if (text.startsWith(TemplateConstants.FUN_PREFIX) && !text.endsWith(TemplateConstants.FUN_SUFFIX)) {
             problems.add("表达式 [" + value + "] 以 " + TemplateConstants.FUN_PREFIX
                     + " 开头但缺少右括号，会被当成字面量原样写进报文");
             return problems;
         }
+        if (!isExpression(text)) {
+            // 普通字面量 / 普通字段名里的逗号（"前缀,后缀"）不是表达式错语法，绝不能误报
+            return problems;
+        }
         for (String token : INFIX_TOKENS) {
-            if (!hasInfix(value, token)) {
+            if (!hasInfix(text, token)) {
                 continue;
             }
-            for (String operand : infixOperands(value, token)) {
+            for (String operand : infixOperands(text, token)) {
                 if (operand.length() == 0) {
                     continue;
                 }
@@ -194,7 +200,34 @@ public final class DslExpressions {
                 }
             }
         }
+        if (!problems.isEmpty()) {
+            return problems;
+        }
+        // 顶层逗号把表达式切成了多段（`$.a,$.b`）：整串会变成一个非法路径 -> 取值为空（静默）
+        List<String> pieces = splitTopLevel(text);
+        if (pieces.size() > 1) {
+            StringBuilder sb = new StringBuilder();
+            for (String piece : pieces) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append("[").append(piece.trim()).append("]");
+            }
+            problems.add("表达式 [" + value + "] 被顶层逗号切成了 " + pieces.size()
+                    + " 段：" + sb + "；一个字段只能写一个表达式，多值请用 @FUN(...) 或 @and@ / @concat@ / @sum@ 串联");
+        }
         return problems;
+    }
+
+    /**
+     * 取出真正承载表达式的部分：{@code 结果字段名@array@$.path} 这种 key 把路径藏在 {@code @array@} 之后。
+     */
+    private static String expressionPart(String value) {
+        int idx = value.indexOf(TemplateConstants.KEY_ARRAYS);
+        if (idx >= 0) {
+            return value.substring(idx + TemplateConstants.KEY_ARRAYS.length()).trim();
+        }
+        return value;
     }
 
     // ------------------------------------------------------------------ 内部工具

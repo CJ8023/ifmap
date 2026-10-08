@@ -15,8 +15,16 @@
  */
 package cn.cj.ifmap.core.rule.builtin;
 
+import cn.cj.ifmap.core.exception.RuleArgumentException;
 import cn.cj.ifmap.core.rule.IfmapRule;
+import cn.cj.ifmap.core.rule.StrictTypes;
 import cn.cj.ifmap.core.util.Text;
+import cn.cj.ifmap.core.util.Values;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Collection;
+import java.util.Map;
 
 /**
  * 内置字符串规则。
@@ -25,7 +33,26 @@ import cn.cj.ifmap.core.util.Text;
  */
 public class StringRules {
 
-    /** 多值拼接：null 按空串处理。 */
+    private static final Logger log = LoggerFactory.getLogger(StringRules.class);
+
+    private final StrictTypes strictTypes;
+
+    /** 默认 {@code WARN}：宿主直接 {@code new StringRules()} 时行为不变。 */
+    public StringRules() {
+        this(StrictTypes.WARN);
+    }
+
+    public StringRules(StrictTypes strictTypes) {
+        this.strictTypes = strictTypes == null ? StrictTypes.WARN : strictTypes;
+    }
+
+    /**
+     * 多值拼接：null 按空串处理。
+     *
+     * <p>形参是 {@code Object...}，所以 {@code Coercions.canCoerce} 那道「容器不能当字符串」的防线
+     * 在这里不起作用（{@code canCoerce(t, Object.class)} 恒为 true），只能在本方法里自己查：
+     * 否则 {@code @FUN(concat,$.list)} 会把数组串成 {@code "[01, 02]"} 直接进报文。</p>
+     */
     @IfmapRule(value = "concat", allowNullArgs = true,
             desc = "多值拼接（null 按空串）",
             example = "@FUN(concat,$.province,$.city,$.district)")
@@ -34,12 +61,33 @@ public class StringRules {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        for (Object part : parts) {
-            if (part != null) {
+        for (int i = 0; i < parts.length; i++) {
+            Object part = parts[i];
+            if (part instanceof Map || part instanceof Collection || part instanceof Object[]) {
+                rejectContainer(part, i + 1);
                 sb.append(part);
+            } else if (part != null) {
+                sb.append(Values.stringify(part));
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 容器实参处置（设计 §4.4 U4-A）。
+     *
+     * <p>规则内拿不到字段路径（{@code RuleContext} 只有租户/接口号），所以日志里给的是
+     * 规则名 + 实参下标 + 实际类型；要定位到具体字段，请用 {@code fail} 模式让异常带上调用栈，
+     * 或临时打开 DEBUG。</p>
+     */
+    private void rejectContainer(Object part, int index) {
+        String message = "规则 [concat] 第 " + index + " 个实参收到数组/对象（"
+                + part.getClass().getName() + "），会被 List/Map.toString() 串成 [01, 02] / {a=1} 直接进报文；"
+                + "数组请改用 listJoin 规则或 key 上的 @array 列转行，对象请先取到具体字段";
+        if (strictTypes.failFast()) {
+            throw new RuleArgumentException(message);
+        }
+        log.error("{}（strict-types=warn 保持旧输出 {}）", message, part);
     }
 
     /** 空值兜底：null 或空串时返回默认值。 */

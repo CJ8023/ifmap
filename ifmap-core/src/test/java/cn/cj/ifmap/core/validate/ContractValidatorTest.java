@@ -20,6 +20,7 @@ import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.rule.IfmapRule;
 import cn.cj.ifmap.core.testkit.TestConfigs;
 import cn.cj.ifmap.core.testkit.TestJsonOps;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -85,5 +86,34 @@ class ContractValidatorTest {
         ContractReport report = validator.validate(Collections.singletonList(config));
         assertFalse(report.isClean());
         assertTrue(report.toMarkdown().contains("模板非法"), report.toMarkdown());
+    }
+
+    @Test
+    @DisplayName("表达式错语法（@sum@$.a,$.b / 未闭合 @FUN(）也要报违规，且启动自检与管理端共用同一套")
+    void detectsExpressionProblems() {
+        IfmapConfig config = TestConfigs.config("IF_C", "GP81", 3, 3L);
+        config.setRequestParamTemplate("{\"s\":\"@sum@$.a,$.b\"}");
+        config.setResponseParamTemplate("{\"t\":\"@FUN(concat,$.a\"}");
+
+        ContractReport report = validator.validate(Collections.singletonList(config));
+
+        assertFalse(report.isClean(), report.toMarkdown());
+        String md = report.toMarkdown();
+        assertTrue(md.contains("$.a,$.b"), md);
+        assertTrue(md.contains("@FUN(concat,$.a"), md);
+    }
+
+    @Test
+    @DisplayName("表达式错语法与缺规则同时存在时，两类违规都要报（不能只报一类）")
+    void reportsBothMissingRuleAndExpressionProblem() {
+        IfmapConfig config = TestConfigs.config("IF_D", "GP81", 4, 4L);
+        config.setRequestParamTemplate("{\"a\":\"@FUN(noSuchRule,$.a)\",\"s\":\"@sum@$.x,$.y\"}");
+
+        ContractReport report = validator.validate(Collections.singletonList(config));
+
+        assertFalse(report.isClean());
+        String md = report.toMarkdown();
+        assertTrue(md.contains("noSuchRule"), md);
+        assertTrue(md.contains("$.x,$.y"), md);
     }
 }

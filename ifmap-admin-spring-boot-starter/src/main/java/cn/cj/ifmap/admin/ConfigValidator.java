@@ -21,6 +21,8 @@ import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.template.DslExpressions;
+import cn.cj.ifmap.core.template.TemplateScanner;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 
@@ -29,8 +31,6 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 保存前校验清单（设计 §8.3 的代码化实现）。
@@ -52,9 +52,6 @@ public class ConfigValidator {
 
     /** 前置接口链最大深度（与编排器护栏一致）。 */
     private static final int MAX_FRONT_DEPTH = 64;
-
-    /** 模板里的 JsonPath 片段（{@code $.a.b} / {@code $.list[0].x} / {@code $.a.*}）。 */
-    private static final Pattern JSON_PATH = Pattern.compile("\\$\\.[A-Za-z0-9_\\[\\]\\.\\*\\?']*");
 
     private final ContractValidator contractValidator;
     private final JsonOps jsonOps;
@@ -206,6 +203,19 @@ public class ConfigValidator {
                 result.error("JsonPath 语法非法：" + path);
             }
         }
+        // 表达式错语法：旧实现用正则从原文「剜」路径，遇逗号截断 -> @sum@$.a,$.b 抽出 $.a（合法）
+        // 而静默放行，线上求和成 0。改用引擎同一套 DSL 感知判定（设计 §4.4 U4-C）。
+        checkExpressions(config.getRequestParamTemplate(), "request_param_template", result);
+        checkExpressions(config.getResponseParamTemplate(), "response_param_template", result);
+    }
+
+    private void checkExpressions(String template, String column, ValidationResult result) {
+        if (isBlank(template)) {
+            return;
+        }
+        for (String problem : TemplateScanner.expressionProblems(template)) {
+            result.error(column + " 表达式错语法：" + problem);
+        }
     }
 
     private void collectPaths(String template, Set<String> paths) {
@@ -244,13 +254,7 @@ public class ConfigValidator {
         if (text == null || text.indexOf('$') < 0) {
             return;
         }
-        Matcher matcher = JSON_PATH.matcher(text);
-        while (matcher.find()) {
-            String path = matcher.group();
-            // 去掉尾部的孤立点（例如 "$." 出现在纯文本里）
-            while (path.endsWith(".") || path.endsWith("$")) {
-                path = path.substring(0, path.length() - 1);
-            }
+        for (String path : DslExpressions.extractPathTokens(text)) {
             if (path.length() > 2) {
                 paths.add(path);
             }

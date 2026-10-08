@@ -17,6 +17,9 @@ dependency-reduced-pom.xml
 .project
 nbproject/
 
+# 本地 AI 代理运行时产物（不含项目内容）
+.omo/
+
 # OS
 .DS_Store
 Thumbs.db

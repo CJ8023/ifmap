@@ -77,7 +77,11 @@ public final class ContractValidator {
                 violations.add(new ContractReport.Violation(config.getInterfaceNo(), config.getInterfaceOrder(),
                         kind, "未注册规则 " + entry.getValue()));
             }
-            if (e.getMissingRules().isEmpty()) {
+            for (String problem : e.getProblems()) {
+                violations.add(new ContractReport.Violation(config.getInterfaceNo(), config.getInterfaceOrder(),
+                        kind, "表达式错语法：" + problem));
+            }
+            if (e.getMissingRules().isEmpty() && e.getProblems().isEmpty()) {
                 violations.add(new ContractReport.Violation(config.getInterfaceNo(), config.getInterfaceOrder(),
                         kind, e.getMessage()));
             }

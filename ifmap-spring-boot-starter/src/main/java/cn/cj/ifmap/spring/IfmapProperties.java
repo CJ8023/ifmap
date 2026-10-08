@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.spring;
 
+import cn.cj.ifmap.core.rule.StrictTypes;
 import cn.cj.ifmap.core.template.NullPolicy;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -76,6 +77,13 @@ public class IfmapProperties {
     /** 模板渲染遇到 null 时的策略。 */
     private NullPolicy nullPolicy = NullPolicy.SKIP_FIELD;
 
+    /**
+     * 静默错误的处置口径：{@code warn}（默认）保持存量输出 + ERROR 日志；{@code fail} 直接拒绝。
+     *
+     * <p>下一版默认值会切到 {@code fail}，升级前请先用 {@code warn} 跑一轮日志。</p>
+     */
+    private StrictTypes strictTypes = StrictTypes.WARN;
+
     /** 租户解析请求头名。 */
     private String tenantHeader = "X-Tenant-Id";
 
@@ -132,6 +140,14 @@ public class IfmapProperties {
 
     public void setNullPolicy(NullPolicy nullPolicy) {
         this.nullPolicy = nullPolicy;
+    }
+
+    public StrictTypes getStrictTypes() {
+        return strictTypes;
+    }
+
+    public void setStrictTypes(StrictTypes strictTypes) {
+        this.strictTypes = strictTypes;
     }
 
     public String getTenantHeader() {

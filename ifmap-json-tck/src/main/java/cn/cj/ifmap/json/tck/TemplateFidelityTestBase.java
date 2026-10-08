@@ -16,7 +16,11 @@
 package cn.cj.ifmap.json.tck;
 
 import cn.cj.ifmap.core.IfmapEngine;
+import cn.cj.ifmap.core.exception.IfmapConfigException;
+import cn.cj.ifmap.core.exception.RuleArgumentException;
+import cn.cj.ifmap.core.exception.StartupValidationException;
 import cn.cj.ifmap.core.json.JsonOps;
+import cn.cj.ifmap.core.rule.StrictTypes;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -24,8 +28,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -49,6 +55,11 @@ public abstract class TemplateFidelityTestBase {
 
     private IfmapEngine engine() {
         return IfmapEngine.builder().jsonOps(jsonOps()).build();
+    }
+
+    /** {@code ifmap.strict-types=fail}：静默失败改为直接拒绝。 */
+    private IfmapEngine failFastEngine() {
+        return IfmapEngine.builder().jsonOps(jsonOps()).strictTypes(StrictTypes.FAIL).build();
     }
 
     private Map<String, Object> render(String template, String source) {
@@ -173,5 +184,63 @@ public abstract class TemplateFidelityTestBase {
         assertTrue(json.contains("\"amount\":\"10.00\""), json);
         assertTrue(json.contains("\"sum\":\"11.50\""), json);
         assertTrue(json.contains("\"items\":[1.50,2.25]"), json);
+    }
+
+    // ---------------------------------------------------------------- strict-types = fail
+
+    @Test
+    @DisplayName("fail 模式：concat 收到数组实参直接拒绝（不要再静默串成文本）")
+    void concatContainerRejectedInFailMode() {
+        RuleArgumentException e = assertThrows(RuleArgumentException.class, () -> failFastEngine()
+                .renderToMap("{\"s\":\"@FUN(concat,$.a)\"}", "{\"a\":[\"01\",\"02\"]}", null));
+
+        assertTrue(e.getMessage().contains("concat"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("warn 模式（默认）：concat 的数组实参照旧串成文本，不打断业务")
+    void concatContainerToleratedInWarnMode() {
+        Map<String, Object> out = render("{\"s\":\"@FUN(concat,$.a)\"}", "{\"a\":[\"01\",\"02\"]}");
+
+        assertEquals("[01, 02]", out.get("s"));
+    }
+
+    @Test
+    @DisplayName("fail 模式：@sum@ 操作数是非数值文本直接拒绝")
+    void sumNonNumericRejectedInFailMode() {
+        IfmapConfigException e = assertThrows(IfmapConfigException.class, () -> failFastEngine()
+                .renderToMap("{\"s\":\"$.amount@sum@$.flag\"}", "{\"amount\":10.00,\"flag\":true}", null));
+
+        assertTrue(e.getMessage().contains("@sum@"), e.getMessage());
+        assertTrue(e.getMessage().contains("$.s"), "消息里要能看出是哪个模板字段：" + e.getMessage());
+    }
+
+    @Test
+    @DisplayName("fail 模式：操作数缺失仍是 0（「缺失即 0」不能算错，两种模式一致）")
+    void sumMissingStaysZeroInFailMode() {
+        Map<String, Object> out = failFastEngine()
+                .renderToMap("{\"s\":\"$.amount@sum@$.notExist\"}", "{\"amount\":10.00}", null);
+
+        assertEquals("10.00", out.get("s"));
+    }
+
+    @Test
+    @DisplayName("错语法在两种模式下都被启动期校验拒绝（不受 strict-types 控制：错的东西不该能存进去）")
+    void badExpressionRejectedInBothModes() {
+        assertThrows(StartupValidationException.class,
+                () -> engine().validateTemplate("T", "{\"s\":\"@sum@$.a,$.b\"}"));
+        assertThrows(StartupValidationException.class,
+                () -> failFastEngine().validateTemplate("T", "{\"s\":\"@sum@$.a,$.b\"}"));
+        assertDoesNotThrow(() -> engine().validateTemplate("T", "{\"s\":\"@FUN(concat,$.a,$.b)\"}"),
+                "干净模板不应抛异常");
+    }
+
+    @Test
+    @DisplayName("未闭合的 @FUN( 在启动期校验被拒绝，而不是渲染成字面量")
+    void unclosedFunRejectedInBothModes() {
+        assertThrows(StartupValidationException.class,
+                () -> engine().validateTemplate("T", "{\"s\":\"@FUN(concat,$.a\"}"));
+        assertThrows(StartupValidationException.class,
+                () -> failFastEngine().validateTemplate("T", "{\"s\":\"@FUN(concat,$.a\"}"));
     }
 }

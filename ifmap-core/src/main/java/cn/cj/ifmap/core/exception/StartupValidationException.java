@@ -15,8 +15,10 @@
  */
 package cn.cj.ifmap.core.exception;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -35,16 +37,31 @@ public class StartupValidationException extends IfmapConfigException {
     /** 模板标识 -> 该模板中缺失的规则名（有序）。 */
     private final Map<String, java.util.Set<String>> missingRules;
 
+    /** 表达式错语法（{@code @sum@$.a,$.b} / 未闭合 {@code @FUN(}）的描述，有序。 */
+    private final List<String> problems;
+
     public StartupValidationException(String message, Map<String, java.util.Set<String>> missingRules) {
+        this(message, missingRules, null);
+    }
+
+    public StartupValidationException(String message, Map<String, java.util.Set<String>> missingRules,
+                                      List<String> problems) {
         super(message);
         Map<String, java.util.Set<String>> copy = new LinkedHashMap<String, java.util.Set<String>>();
         if (missingRules != null) {
             copy.putAll(missingRules);
         }
         this.missingRules = Collections.unmodifiableMap(copy);
+        this.problems = Collections.unmodifiableList(new ArrayList<String>(
+                problems == null ? Collections.<String>emptyList() : problems));
     }
 
     public Map<String, java.util.Set<String>> getMissingRules() {
         return missingRules;
+    }
+
+    /** 表达式错语法的描述（空表示没有这类问题）。 */
+    public List<String> getProblems() {
+        return problems;
     }
 }

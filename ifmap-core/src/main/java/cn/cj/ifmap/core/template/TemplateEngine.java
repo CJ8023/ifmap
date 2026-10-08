@@ -20,6 +20,7 @@ import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.json.JsonReadContext;
 import cn.cj.ifmap.core.rule.RuleContext;
 import cn.cj.ifmap.core.rule.RuleRegistry;
+import cn.cj.ifmap.core.rule.StrictTypes;
 import cn.cj.ifmap.core.util.Text;
 import cn.cj.ifmap.core.util.Values;
 import org.slf4j.Logger;
@@ -29,6 +30,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,8 +69,14 @@ public final class TemplateEngine {
     private final JsonOps jsonOps;
     private final RuleRegistry registry;
     private final NullPolicy nullPolicy;
+    private final StrictTypes strictTypes;
 
+    /** 保留 3 参构造（宿主源码兼容），等价于 {@link StrictTypes#WARN}。 */
     public TemplateEngine(JsonOps jsonOps, RuleRegistry registry, NullPolicy nullPolicy) {
+        this(jsonOps, registry, nullPolicy, StrictTypes.WARN);
+    }
+
+    public TemplateEngine(JsonOps jsonOps, RuleRegistry registry, NullPolicy nullPolicy, StrictTypes strictTypes) {
         if (jsonOps == null) {
             throw new IfmapConfigException("jsonOps 不能为空");
         }
@@ -78,6 +86,11 @@ public final class TemplateEngine {
         this.jsonOps = jsonOps;
         this.registry = registry;
         this.nullPolicy = nullPolicy == null ? NullPolicy.SKIP_FIELD : nullPolicy;
+        this.strictTypes = strictTypes == null ? StrictTypes.WARN : strictTypes;
+    }
+
+    public StrictTypes getStrictTypes() {
+        return strictTypes;
     }
 
     public JsonOps getJsonOps() {
@@ -345,10 +358,10 @@ public final class TemplateEngine {
                 Object value = resolve(part, source, ctx, fieldPath);
                 if (value instanceof List) {
                     for (Object item : (List<?>) value) {
-                        sum = sum.add(toDecimal(item));
+                        sum = sum.add(toDecimal(item, fieldPath));
                     }
                 } else {
-                    sum = sum.add(toDecimal(value));
+                    sum = sum.add(toDecimal(value, fieldPath));
                 }
             }
             // 金额统一返回字符串（与 numSum / NumberRules 口径一致）：BigDecimal 直接进报文
@@ -430,7 +443,18 @@ public final class TemplateEngine {
         return Values.stringify(value);
     }
 
-    private static BigDecimal toDecimal(Object value) {
+    /**
+     * {@code @sum@} 的操作数转数值。
+     *
+     * <p>两条返回 0 的路径语义完全不同，不能混为一谈（设计 §4.4 U4-B）：</p>
+     * <ul>
+     *   <li><b>缺失</b>（null / 空串，如 {@code $.notExist}）：静默 0，两种模式都不报 ——
+     *       「缺失即 0」是求和表达式的常规用法，FAIL 下报错会打断正常业务；</li>
+     *   <li><b>非数值</b>（{@code "abc"}、数组、对象）：WARN 保持 0 并把日志升为 ERROR，
+     *       FAIL 直接抛异常（这是本来就该报的错，只是之前只打了 WARN）。</li>
+     * </ul>
+     */
+    private BigDecimal toDecimal(Object value, String fieldPath) {
         if (value == null) {
             return BigDecimal.ZERO;
         }
@@ -440,6 +464,9 @@ public final class TemplateEngine {
         if (value instanceof Number) {
             return Values.toPlainDecimal((Number) value);
         }
+        if (value instanceof Map || value instanceof Collection || value instanceof Object[]) {
+            return nonNumeric(value, fieldPath);
+        }
         String s = String.valueOf(value).trim();
         if (s.length() == 0) {
             return BigDecimal.ZERO;
@@ -447,9 +474,20 @@ public final class TemplateEngine {
         try {
             return new BigDecimal(s);
         } catch (NumberFormatException e) {
-            log.warn("@sum@ 遇到非数值元素 [{}]，按 0 处理", value);
-            return BigDecimal.ZERO;
+            return nonNumeric(value, fieldPath);
         }
+    }
+
+    /** 非数值操作数的处置：WARN 保持 0（ERROR 日志），FAIL 抛异常。 */
+    private BigDecimal nonNumeric(Object value, String fieldPath) {
+        String message = "模板字段 [" + fieldPath + "] 的 @sum@ 操作数不是数值：" + value
+                + "（" + value.getClass().getName() + "）；请确认路径取到的是数字字段，"
+                + "或者用 @FUN(numSum,...) 显式处理集合";
+        if (strictTypes.failFast()) {
+            throw new IfmapConfigException(message);
+        }
+        log.error("{}（strict-types=warn 按 0 处理）", message);
+        return BigDecimal.ZERO;
     }
 
     /** 流水号：yyyyMMddHHmmssSSS + 3 位随机数（与存量实现一致）。 */

@@ -124,4 +124,25 @@ class DslExpressionsTest {
         assertTrue(DslExpressions.operandProblems("常量").isEmpty());
         assertTrue(DslExpressions.operandProblems("@FUN(strDefault,$.x,)").isEmpty(), "空实参合法");
     }
+
+    @Test
+    @DisplayName("operandProblems：顶层逗号把表达式切成多段（含 @array@ key 形态）")
+    void operandProblemsTopLevelComma() {
+        assertEquals(1, DslExpressions.operandProblems("$.a,$.b").size(),
+                "顶层逗号会让整串变成一个非法路径 -> 取值为空（静默）");
+        assertEquals(1, DslExpressions.operandProblems("rows@array@$.a,$.b").size(),
+                "@array@ 形态的 key 里路径藏在后半段，同样要查");
+        assertEquals(1, DslExpressions.operandProblems("@array@$.a,$.b").size());
+        assertTrue(DslExpressions.operandProblems("$.a").isEmpty());
+        assertTrue(DslExpressions.operandProblems("$.items[*].sku").isEmpty());
+    }
+
+    @Test
+    @DisplayName("operandProblems：字面量里的逗号不是错语法（否则存量常量字段全被拦）")
+    void operandProblemsIgnoresLiteralCommas() {
+        assertTrue(DslExpressions.operandProblems("前缀,后缀").isEmpty());
+        assertTrue(DslExpressions.operandProblems("").isEmpty());
+        assertTrue(DslExpressions.operandProblems(null).isEmpty());
+        assertTrue(DslExpressions.operandProblems("rows@array").isEmpty(), "@array 后缀是 key 语义，不是表达式");
+    }
 }

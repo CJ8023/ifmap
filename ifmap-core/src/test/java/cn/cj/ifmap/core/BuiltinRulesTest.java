@@ -18,6 +18,7 @@ package cn.cj.ifmap.core;
 import cn.cj.ifmap.core.exception.RuleArgumentException;
 import cn.cj.ifmap.core.rule.RuleContext;
 import cn.cj.ifmap.core.rule.RuleRegistry;
+import cn.cj.ifmap.core.rule.StrictTypes;
 import cn.cj.ifmap.core.rule.builtin.BuiltinRules;
 import cn.cj.ifmap.core.rule.builtin.DateRules;
 import cn.cj.ifmap.core.rule.builtin.DictRules;
@@ -174,6 +175,24 @@ class BuiltinRulesTest {
         assertEquals("10", lists.listOp(Arrays.asList("2", "10"), "MAX"));
         assertEquals("2", lists.listOp(Arrays.asList("2", "10"), "MIN"));
         assertEquals(Arrays.asList("a", "b"), lists.listOp(Arrays.asList("a", "b", "c"), "LIMIT", "2"));
+    }
+
+    @Test
+    @DisplayName("registerTo 单参重载 = WARN：源码兼容，concat 收容器仍返回旧输出")
+    void registerToDefaultKeepsWarn() {
+        RuleRegistry registry = BuiltinRules.registerTo(new RuleRegistry());
+        assertEquals("[01, 02]", registry.invoke("concat", null, Arrays.asList("01", "02")));
+    }
+
+    @Test
+    @DisplayName("registerTo 双参重载可切 FAIL：concat 收容器抛 RuleArgumentException")
+    void registerToFailRejectsContainer() {
+        RuleRegistry registry = BuiltinRules.registerTo(new RuleRegistry(), StrictTypes.FAIL);
+        RuleArgumentException e = assertThrows(RuleArgumentException.class,
+                () -> registry.invoke("concat", null, Arrays.asList("01", "02")));
+        // 消息必须能指出"改用哪个规则"，否则排查的人只知道错、不知道怎么写
+        assertEquals(true, e.getMessage().contains("listJoin"));
+        assertEquals(true, e.getMessage().contains("第 1 个"));
     }
 
     @Test

@@ -89,6 +89,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmap.id-strategy` | `snowflake` | `snowflake`（应用生成）或 `auto-increment`（交给数据库自增） |
 | `ifmap.worker-id` | 未设 | `snowflake` 下建议显式指定。未设时按主机名派生，见 `docs/04` §7.1 |
 | `ifmap.null-policy` | `skip-field` | `skip-field` / `empty-string` / `fail` |
+| `ifmap.strict-types` | `warn` | 静默类型错误的处置：`warn` 保持存量输出 + ERROR 日志；`fail` 直接拒绝（抛异常）。**只覆盖类型/形态契约，不是通用严格模式**（表达式错语法任何时候都拒）。下一版默认值会切到 `fail`，升级前请先用 `warn` 跑一轮日志 |
 | `ifmap.ddl.auto` | `true` | 启动建表。生产由 DBA 建表时置 `false` |
 | `ifmap.cache.enabled` | `true` | 逻辑分支查询缓存。`false` 时每次查库 |
 | `ifmap.cache.maximum-size` | `1000` | 缓存条目上限（超出按 LRU 淘汰） |
@@ -211,7 +212,9 @@ public class MyJsonConfig {
 #### fastjson 兼容模块的已知差异
 
 `ifmap-json-fastjson` 用 fastjson **1.2.84**（**不用 1.2.68~1.2.83：默认配置下存在可被利用的 AutoType RCE**）。
-它跑通了与 Jackson 实现**同一套 24 条 TCK 契约**，但两套 JsonPath 方言无法完全抹平，
+它跑通了与 Jackson 实现**同一套 30 条 TCK 契约**（`JsonOpsConformanceTestBase`，含数字形态保真），
+以及**同一套模板口径契约**（`TemplateFidelityTestBase`，17 条：`$.path` 小数形态、`@sum@` 返回类型、
+`@and@` 合并语义、`strict-types` 两模式），但两套 JsonPath 方言无法完全抹平，
 以下差异是**已知且被测试钉住**的：
 
 | 差异 | Jackson（jayway） | fastjson | 影响与规避 |
@@ -222,10 +225,21 @@ public class MyJsonConfig {
 | 含 `@type` 的报文 | 当普通字段解析 | **抛异常**（1.2.84 加固后它返回 null，实现转成显式异常） | 有意的安全行为；确实要读该字段请用 Jackson |
 | `isValidPath` | 只做 JsonPath 编译（`$.a[` **能过**） | 额外要求引号外括号配对（`$.a[` 直接判非法） | fastjson 侧更严，保存配置时更早拦住错路径 |
 | `toJson` 的 POJO / `Date` 形态 | Jackson 的日期与字段命名 | fastjson 的默认形态 | 快照/日志以**纯 JSON 结构（Map/List/标量）** 为准 |
+| 小数的**字节形态**（历史坑，现已统一） | `BigDecimal` 默认可能写成 `1.23456789E7` | 默认保留 scale，但 `1.0E10` 会写成 `1.0E+10` | **已由两条契约抹平**（见下） |
 
-**取值语义（返回什么类型、什么时候 `null`、什么时候空列表、数字不隐式转字符串）已由 TCK 统一**：
-模板 DSL 的端到端用例（`TemplateEngineTest`）在两个实现上各跑一遍。上面 6 条之外若出现不一致，
+**取值语义（返回什么类型、什么时候 `null`、什么时候空列表、数字转字符串后的小数形态）已由 TCK 统一**：
+模板 DSL 的端到端用例（`TemplateEngineTest`）在两个实现上各跑一遍。上面 7 条之外若出现不一致，
 属于实现 bug，两边测试都会红。
+
+**数字形态的两条契约**（这是换实现时最容易"静默变样"的地方，所以单独列出）：
+
+| 契约 | 实现方式 |
+| --- | --- |
+| 解析：JSON 小数读成 `BigDecimal` 时**保留源文字小数位**（`"10.00"` 就是 `10.00`，不是 `10.0`） | Jackson 开 `USE_BIG_DECIMAL_FOR_FLOATS`；fastjson 本来就按 `BigDecimal` 保留 scale |
+| 序列化：`BigDecimal` **永不输出科学计数法**（`12345678.90` 不写成 `1.23456789E7`，`1.0E10` 写成 `10000000000`） | Jackson 同时开 `SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN` **和** `JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN`（只开前者对生成器层的 `writeNumber` 不够）；fastjson 开 `SerializerFeature.WriteBigDecimalAsPlain` |
+
+> 自研 `JsonOps` 实现请直接继承 `ifmap-json-tck` 的 `JsonOpsConformanceTestBase` 与
+> `TemplateFidelityTestBase` 跑一遍 —— 这两条契约各有专门的用例，不靠"看起来一样"。
 
 ---
 

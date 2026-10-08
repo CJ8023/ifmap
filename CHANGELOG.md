@@ -5,6 +5,24 @@
 ## [Unreleased]
 
 ### Changed
+- **数字保真与数组语义严格化（本批）**：报文里的金额/数量是"看起来一样就行"的字符串，但**小数形态**过去是随底层 JSON 库（甚至随库版本）漂的 —— 同一个 `12345678.90`，Jackson 出 `1.23456789E7`、fastjson 出 `12345678.90`；`@sum@` 出的是无引号 number、而功能等价的 `numSum` 出字符串。本批把"数字出来长什么样"从"看库的实现"变成**写下来的契约**，并顺手把两处**静默出错**（既不报错也不抛异常，只是报文悄悄不对）变成可观测、可拒绝。**共 8 项破坏性变更**：
+  - **B-1 `JsonOps.parse` 的小数返回 `BigDecimal`**（原 `Double`）：解析层保留源文字小数位（`"10.00"` → `10.00` 而不是 `10.0`），并避免 `Double` 二次转换的精度损失。**直接依赖 `parse()` 返回类型的宿主代码需要核对**；引擎层只受益不受影响
+  - **B-2 `$.path` 取到的小数形态变化**：**保留源文字小数位**（`"10.00"` → `"10.00"`）、**不丢位数**（`12345678.90` 不再变 `1.23456789E7`）、**永不科学计数法**（`0.000001` 不再变 `1.0E-6`、`1.0E10` → `"10000000000"`）。**影响所有报文内容**，上线前需逐接口回归
+  - **B-3 数组/对象内的数字**：**类型不变**（仍是 JSON number，不会变成字符串 —— 那会破坏下游按数组解析的契约），仅去掉科学计数法（`[1.50,2.25]` → `[1.50,2.25]`）
+  - **B-4 `@sum@` 返回字符串**（原无引号 number）：`3.5` → `"3.5"`，与功能等价的 `numSum` 口径一致。位数口径 = 各操作数保留最大小数位（`BigDecimal.add` 天然如此）。**确实需要无引号 number 的目标侧见下方 R4**
+  - **B-5 `concat` 遇到数组/对象实参**：运行期才知道，无法静态盘点。`ifmap.strict-types=warn`（**本版默认**）保持旧输出 `"[01, 02]"` 并把日志升为 **ERROR**，`fail` 抛 `RuleArgumentException`（消息含规则名、实参下标、替代写法：`listJoin` / `key@array@$.path`）
+  - **B-6 `@sum@` 遇到非数值操作数**（`"abc"`、数组、对象）：`warn` 保持按 0 相加但日志升为 ERROR（带模板字段路径与原值），`fail` 抛异常。**注意「缺失」（`$.notExist`）仍静默按 0** —— 这是求和表达式的常规用法，把它改成报错会打断正常业务
+  - **B-7 表达式错语法保存/启动即拒**（**不灰度、立即生效**）：`@sum@$.a,$.b`（顶层逗号把表达式切成两段 → 运行期**求和恒为 0**）、`@FUN(concat,$.a`（少右括号 → 运行期把整串**原样写进报文**）这两类过去静默，现在启动期 `validateTemplate` / `validateTemplates` 与管理端保存前校验（`ConfigValidator` / `ContractValidator`）一律拒绝。**上线前必须先跑一次存量配置巡检**
+  - **B-8 影子（shadow）比对会因数字形态变化报出 diff**：属**预期**，不是逻辑回归 —— 先刷新影子基线再切 `fail`，否则每个接口都会 diff
+  - **两阶段灰度**：本版 `ifmap.strict-types` 默认 `warn`（保持存量输出 + ERROR 日志，用来盘点存量脏写法），**下一版默认切 `fail`**（见 R5）；不想改默认值的宿主在配置里写死 `ifmap.strict-types=warn` 即可
+  - **新增 `ifmap.strict-types`**（`warn` / `fail`，默认 `warn`）：**只覆盖类型/形态契约，不是通用严格模式**（表达式错语法任何时候都拒，不受它控制）；等价 Java API 是 `IfmapEngine.builder().strictTypes(StrictTypes.WARN|FAIL)`，全部旧构造（3 参 `TemplateEngine`、`BuiltinRules.registerTo(reg)`、无参 `StringRules()`）保持源码兼容
+  - **实现要点**：新增 `Values`（Java 8、零依赖的"数字文本化"唯一出口）、`DslExpressions`（DSL 结构解析**唯一**实现，渲染期与管理端保存校验共用，替掉管理端原来那段"从原文里剜路径、遇逗号就截断"的正则）、`TemplateScanner.expressionProblems`（扫字符串值与 key）、`StrictTypes`；Jackson 侧同时开 `SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN` 与 `JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN`（只开前者对生成器层的 `writeNumber` 不够），fastjson 侧开 `SerializerFeature.WriteBigDecimalAsPlain`
+  - **测试：新增 28 个**（438 → **514**）：TCK `JsonOpsConformanceTestBase` **+12**（30 条，小数保真含容器内、整数仍是整数、永不科学计数法）、新 TCK `TemplateFidelityTestBase` **+22**（两个 JSON 实现各跑一遍：`$.path` 形态、`@sum@` 类型与位数、`@and@` 合并语义、`strict-types` 两模式对照、错语法两模式都拒）、`ValuesTest` **+7**、`DslExpressionsTest` **+9**、`TemplateScannerTest` **+6**、`StringRulesStrictTypesTest` **+4**、`ContractValidatorTest` **+2**、管理端 `ConfigValidatorTest` **+2**
+  - **性能**：`BigDecimal` 与 `Double` 的解析+序列化实测（40 字段 × 20 万次 × 4 轮）`2.29~2.53 μs/op` vs `2.80~3.10 μs/op`，**无回退**（比 `Double` 还略快，因为省掉了二次转换）
+  - **开放问题 R4**：「输出无引号 JSON number」本批按 YAGNI **没有出口**（B-4 之后 `@sum@` 也是字符串）。触发条件 = 某个资方确实要求某字段以 JSON number 传输时，补 `numRaw` 这类显式规则，而不是把契约再改回去
+  - **开放问题 R5**：`strict-types` 默认值从 `warn` 切 `fail` 是**二次破坏性变更**，本版提前两个版本预告
+
+### Changed
 - **标识符改名 `bank*` → `partner*`（Java / API / UI / DDL 同步变更）**：把「银行」这个具体机构类型从**标识符**里去掉 —— 引擎本来就要覆盖银行、保理、信托、小贷、保险等各类对手方，`bank` 从第一天起就名不副实。**只改标识符，不动业务字段**：
   - **DDL 与迁移脚本**：列 `bank_code` → `partner_code`、`bank_name` → `partner_name`（`db/changelog/v1.0.0/001-create-ifmap-config.sql`，迁移 kit 的 `03-modify-and-index.sql` 用 `CHANGE COLUMN`、`00-precheck.sql` 的宽度体检按**源端旧列名**继续体检）；`idx_..._config_list` 索引列同步。**迁移脚本因此从「0 处改名」变成「2 处改名」**：kit 的 `README.md`、[`docs/10`](docs/10-迁移指南.md)、[`docs/11`](docs/11-远端配置源.md)、[`docs/04`](docs/04-接入与建表.md) 全部改口径，并新增「列改名是唯一的破坏性变更、会打断共存期（路径 A）」的三种处置办法（同步改存量 SQL / 建可更新兼容视图 / 把改名挪到停写窗口）
   - **Java**：`IfmapConfig` / `ConfigQuery` 的 `getPartnerCode()` / `setPartnerCode()` / `getPartnerName()` / `setPartnerName()`；`BankCall` → `PartnerCall`、`BankServiceGateway` → `PartnerServiceGateway`、`DemoBankGateway` → `DemoPartnerGateway`；`FullParam` 拼参顺序注释 `bank|*` → `partner|*`

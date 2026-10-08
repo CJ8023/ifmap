@@ -27,9 +27,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 主参数组包注册表：按 {@code @FullParam(bankCode, busiNode)} 注册，支持通配。
+ * 主参数组包注册表：按 {@code @FullParam(partnerCode, busiNode)} 注册，支持通配。
  *
- * <p>匹配优先级：精确 &gt; (bank,*) &gt; (*,busiNode) &gt; (*,*)。命中多个同优先级不同 key 时
+ * <p>匹配优先级：精确 &gt; (partner,*) &gt; (*,busiNode) &gt; (*,*)。命中多个同优先级不同 key 时
  * 保留先注册者并记录歧义。</p>
  *
  * @author caijun
@@ -50,16 +50,16 @@ public final class FullParamStrategyRegistry {
             return;
         }
         FullParam annotation = Annotations.find(strategy.getClass(), FullParam.class);
-        String bankCode = annotation == null ? WILDCARD : annotation.bankCode();
+        String partnerCode = annotation == null ? WILDCARD : annotation.partnerCode();
         String busiNode = annotation == null ? WILDCARD : annotation.busiNode();
-        register(bankCode, busiNode, strategy);
+        register(partnerCode, busiNode, strategy);
     }
 
-    public void register(String bankCode, String busiNode, FullParamStrategy strategy) {
+    public void register(String partnerCode, String busiNode, FullParamStrategy strategy) {
         if (strategy == null) {
             return;
         }
-        String key = key(bankCode, busiNode);
+        String key = key(partnerCode, busiNode);
         FullParamStrategy exist = strategies.get(key);
         if (exist == null) {
             strategies.put(key, strategy);
@@ -79,10 +79,10 @@ public final class FullParamStrategyRegistry {
     }
 
     /** 按优先级查找；找不到返回 null（引擎按"无组包"继续，不报错）。 */
-    public FullParamStrategy lookup(String bankCode, String busiNode) {
+    public FullParamStrategy lookup(String partnerCode, String busiNode) {
         String[] order = new String[] {
-                key(bankCode, busiNode),
-                key(bankCode, WILDCARD),
+                key(partnerCode, busiNode),
+                key(partnerCode, WILDCARD),
                 key(WILDCARD, busiNode),
                 key(WILDCARD, WILDCARD)
         };
@@ -96,8 +96,8 @@ public final class FullParamStrategyRegistry {
     }
 
     /** 执行组包，返回结果（无策略或返回 null 时为空 Map）。 */
-    public Map<String, Object> assemble(String bankCode, String busiNode, StrategyContext context) {
-        FullParamStrategy strategy = lookup(bankCode, busiNode);
+    public Map<String, Object> assemble(String partnerCode, String busiNode, StrategyContext context) {
+        FullParamStrategy strategy = lookup(partnerCode, busiNode);
         if (strategy == null) {
             return Collections.emptyMap();
         }
@@ -105,8 +105,8 @@ public final class FullParamStrategyRegistry {
         return result == null ? Collections.<String, Object>emptyMap() : result;
     }
 
-    public boolean contains(String bankCode, String busiNode) {
-        return lookup(bankCode, busiNode) != null;
+    public boolean contains(String partnerCode, String busiNode) {
+        return lookup(partnerCode, busiNode) != null;
     }
 
     public Set<String> keys() {
@@ -121,9 +121,9 @@ public final class FullParamStrategyRegistry {
         return Collections.unmodifiableMap(new LinkedHashMap<String, List<String>>(conflicts));
     }
 
-    /** 组合键：{@code bankCode|busiNode}（空值视作通配）。 */
-    public static String key(String bankCode, String busiNode) {
-        return normalize(bankCode) + '|' + normalize(busiNode);
+    /** 组合键：{@code partnerCode|busiNode}（空值视作通配）。 */
+    public static String key(String partnerCode, String busiNode) {
+        return normalize(partnerCode) + '|' + normalize(busiNode);
     }
 
     private static String normalize(String value) {

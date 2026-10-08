@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- =============================================================================
--- 步骤 3/6：调整列类型/长度/可空 + 建唯一键与索引
+-- 步骤 3/6：调整列名 + 列类型/长度/可空 + 建唯一键与索引
 -- 前置：01、02 已完成；02 的"人工复核"（分支顺序）已确认。
 --
 -- ★★ 算法与锁（MySQL 5.7 官方 "Online DDL Operations" 表格，本脚本的核心依据）：
@@ -51,14 +51,17 @@ ALTER TABLE `bankint_config`
   MODIFY COLUMN `project_code`            varchar(64)           DEFAULT NULL COMMENT '项目编号',
   MODIFY COLUMN `interface_name`          varchar(128) NOT NULL              COMMENT '接口名称',
   MODIFY COLUMN `busi_node`               varchar(32)  NOT NULL              COMMENT '业务节点（取值由宿主机注册）',
-  MODIFY COLUMN `bank_name`               varchar(128)          DEFAULT NULL COMMENT '资方名称',
+  -- ↓ 2 处改名：bank_code/bank_name → partner_code/partner_name（标识符不再锁死在"银行"，
+  --   同一列可承载银行/保理/信托/小贷/保险等各类对手方；名字变了、列位置与数据都不动）
+  CHANGE COLUMN `bank_code`               `partner_code` varchar(32)  NOT NULL                     COMMENT '合作机构编码',
+  CHANGE COLUMN `bank_name`               `partner_name` varchar(128) DEFAULT NULL                 COMMENT '合作机构名称',
   MODIFY COLUMN `financing_mode`          varchar(32)           DEFAULT NULL COMMENT '融资模式',
   MODIFY COLUMN `front_interface_no`      varchar(64)           DEFAULT NULL COMMENT '前置接口编号（空=无前置）',
   MODIFY COLUMN `interface_order`         smallint     NOT NULL DEFAULT 0    COMMENT '接口执行顺序，升序；同值按 key_id 兜底',
   MODIFY COLUMN `request_param_template`  text                               COMMENT '请求参数模板（DSL），可为空',
   MODIFY COLUMN `response_param_template` longtext                           COMMENT '响应参数模板（DSL），可为空',
   MODIFY COLUMN `result_flag`             varchar(512) NOT NULL DEFAULT ''   COMMENT '执行结果标志（JsonPath）',
-  MODIFY COLUMN `success_value`           varchar(512) NOT NULL DEFAULT ''   COMMENT '成功判断值，多值以 | 分隔（大小写不敏感）',
+  MODIFY COLUMN `success_value`           varchar(512) NOT NULL DEFAULT ''   COMMENT '成功判断值，多值以 , 或 ; 分隔（大小写不敏感）',
   MODIFY COLUMN `strategy_name`           varchar(128) NOT NULL DEFAULT ''   COMMENT '特殊处理策略标识（=Spring bean 名）',
   MODIFY COLUMN `remark`                  varchar(512) NOT NULL DEFAULT ''   COMMENT '备注',
   MODIFY COLUMN `add_user_id`             varchar(64)  NOT NULL DEFAULT ''   COMMENT '添加人',
@@ -66,7 +69,7 @@ ALTER TABLE `bankint_config`
   MODIFY COLUMN `modify_user_id`          varchar(64)  NOT NULL DEFAULT ''   COMMENT '更新人',
   MODIFY COLUMN `modify_time`             datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '更新时间（由写入方统一设置，不用 ON UPDATE）',
   ADD UNIQUE KEY `uk_ifmap_config_biz`   (`tenant_id`,`interface_no`,`busi_node`,`interface_order`,`deleted_seq`),
-  ADD KEY `idx_ifmap_config_list`  (`tenant_id`,`del_status`,`busi_node`,`bank_code`),
+  ADD KEY `idx_ifmap_config_list`  (`tenant_id`,`del_status`,`busi_node`,`partner_code`),
   ADD KEY `idx_ifmap_config_front` (`tenant_id`,`del_status`,`front_interface_no`),
   ADD KEY `idx_ifmap_config_code`  (`tenant_id`,`del_status`,`interface_code`),
   ROW_FORMAT=DYNAMIC,
@@ -77,6 +80,8 @@ ALTER TABLE `bankint_config`
 --     这里不写 ON UPDATE 就是**有意去掉**它（目标契约：更新时间由写入方显式维护）。
 --   · `request_param_template` / `response_param_template`：去掉 NOT NULL（目标允许为空）。
 --   · `add_user_id` / `modify_user_id`：bigint → varchar(64)（存的是用户名/工号，不是数值）。
+--   · 改名：`bank_code`→`partner_code`、`bank_name`→`partner_name`。想回退执行
+--     `ALTER TABLE ... CHANGE COLUMN \`partner_code\` \`bank_code\` varchar(32) NOT NULL, ... ALGORITHM=COPY, LOCK=SHARED`。
 --   · 唯一键含 `deleted_seq`：未删除恒 0 → 「同租户 + 同接口 + 同节点 + 同顺序」只允许一条；
 --     软删除时写入 key_id → 同一组可以保留多条历史删除行。
 

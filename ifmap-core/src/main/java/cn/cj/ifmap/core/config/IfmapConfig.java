@@ -48,10 +48,19 @@ public class IfmapConfig implements Serializable {
     private String interfaceName;
     /** 业务节点（取值由宿主机注册）。 */
     private String busiNode;
-    /** 资方编码。 */
-    private String bankCode;
-    /** 资方名称。 */
-    private String bankName;
+    /**
+     * 合作机构（资方）编码。
+     *
+     * <p>v1.0 由 {@code bankCode} 改名而来 —— 引擎要覆盖银行 / 保理 / 信托 / 小贷 / 保险等各类对手方，
+     * 英文标识符不再锁死在「银行」。DB 列 {@code partner_code}（存量列 {@code bank_code}）。</p>
+     */
+    private String partnerCode;
+    /**
+     * 合作机构（资方）名称。
+     *
+     * <p>v1.0 由 {@code bankName} 改名而来，DB 列 {@code partner_name}（存量列 {@code bank_name}）。</p>
+     */
+    private String partnerName;
     /** 融资模式（见文档数据字典）。 */
     private String financingMode;
     /** 前置接口编号：本接口执行前必须先执行的接口，空=无前置。 */
@@ -161,20 +170,20 @@ public class IfmapConfig implements Serializable {
         this.busiNode = busiNode;
     }
 
-    public String getBankCode() {
-        return bankCode;
+    public String getPartnerCode() {
+        return partnerCode;
     }
 
-    public void setBankCode(String bankCode) {
-        this.bankCode = bankCode;
+    public void setPartnerCode(String partnerCode) {
+        this.partnerCode = partnerCode;
     }
 
-    public String getBankName() {
-        return bankName;
+    public String getPartnerName() {
+        return partnerName;
     }
 
-    public void setBankName(String bankName) {
-        this.bankName = bankName;
+    public void setPartnerName(String partnerName) {
+        this.partnerName = partnerName;
     }
 
     public String getFinancingMode() {

@@ -78,8 +78,8 @@ public class ConfigSnapshotMapper {
         config.setProjectCode(asString(map.get("projectCode")));
         config.setInterfaceName(asString(map.get("interfaceName")));
         config.setBusiNode(asString(map.get("busiNode")));
-        config.setBankCode(asString(map.get("bankCode")));
-        config.setBankName(asString(map.get("bankName")));
+        config.setPartnerCode(asString(map.get("partnerCode")));
+        config.setPartnerName(asString(map.get("partnerName")));
         config.setFinancingMode(asString(map.get("financingMode")));
         config.setFrontInterfaceNo(asString(map.get("frontInterfaceNo")));
         config.setInterfaceOrder(asInt(map.get("interfaceOrder")));
@@ -127,8 +127,8 @@ public class ConfigSnapshotMapper {
         map.put("projectCode", config.getProjectCode());
         map.put("interfaceName", config.getInterfaceName());
         map.put("busiNode", config.getBusiNode());
-        map.put("bankCode", config.getBankCode());
-        map.put("bankName", config.getBankName());
+        map.put("partnerCode", config.getPartnerCode());
+        map.put("partnerName", config.getPartnerName());
         map.put("financingMode", config.getFinancingMode());
         map.put("frontInterfaceNo", config.getFrontInterfaceNo());
         map.put("interfaceOrder", config.getInterfaceOrder());

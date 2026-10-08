@@ -47,13 +47,13 @@ class JsonConfigMapperTest {
 
     /** 一份「合法最小」报文：只给 DDL 里必填的 5 列。 */
     private static final String MINIMAL = "{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\","
-            + "\"interfaceName\":\"接口A\",\"busiNode\":\"APPLY\",\"bankCode\":\"BANK_A\"}";
+            + "\"interfaceName\":\"接口A\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\"}";
 
     @Test
     @DisplayName("camelCase 与 snake_case 两种写法映射出完全相同的对象")
     void camelCaseAndSnakeCaseAreEquivalent() {
         String camel = "[{\"keyId\":1001,\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
-                + "\"projectCode\":\"P1\",\"busiNode\":\"APPLY\",\"bankCode\":\"BANK_A\",\"bankName\":\"甲行\","
+                + "\"projectCode\":\"P1\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\",\"partnerName\":\"甲行\","
                 + "\"financingMode\":\"0\",\"frontInterfaceNo\":\"IF_0\",\"interfaceOrder\":3,"
                 + "\"requestParamTemplate\":\"{\\\"a\\\":\\\"@a\\\"}\",\"responseParamTemplate\":\"@resp\","
                 + "\"resultFlag\":\"$.code\",\"successValue\":\"0000|SUCCESS\",\"strategyName\":\"strategyA\","
@@ -66,8 +66,8 @@ class JsonConfigMapperTest {
                 .replace("\"interfaceName\"", "\"interface_name\"")
                 .replace("\"projectCode\"", "\"project_code\"")
                 .replace("\"busiNode\"", "\"busi_node\"")
-                .replace("\"bankCode\"", "\"bank_code\"")
-                .replace("\"bankName\"", "\"bank_name\"")
+                .replace("\"partnerCode\"", "\"partner_code\"")
+                .replace("\"partnerName\"", "\"partner_name\"")
                 .replace("\"financingMode\"", "\"financing_mode\"")
                 .replace("\"frontInterfaceNo\"", "\"front_interface_no\"")
                 .replace("\"interfaceOrder\"", "\"interface_order\"")
@@ -89,8 +89,8 @@ class JsonConfigMapperTest {
         assertEquals("接口A", fromCamel.getInterfaceName());
         assertEquals("P1", fromCamel.getProjectCode());
         assertEquals("APPLY", fromCamel.getBusiNode());
-        assertEquals("BANK_A", fromCamel.getBankCode());
-        assertEquals("甲行", fromCamel.getBankName());
+        assertEquals("BANK_A", fromCamel.getPartnerCode());
+        assertEquals("甲行", fromCamel.getPartnerName());
         assertEquals("0", fromCamel.getFinancingMode());
         assertEquals("IF_0", fromCamel.getFrontInterfaceNo());
         assertEquals(Integer.valueOf(3), fromCamel.getInterfaceOrder());
@@ -138,6 +138,33 @@ class JsonConfigMapperTest {
     }
 
     @Test
+    @DisplayName("改名兼容：存量报文里的 bankCode / bank_code / bankName 仍能映射（新键优先、旧键兜底）")
+    void legacyBankKeysStillAccepted() {
+        String camel = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
+                + "\"busiNode\":\"APPLY\",\"bankCode\":\"BANK_A\",\"bankName\":\"甲行\"}]";
+        String snake = camel.replace("\"bankCode\"", "\"bank_code\"").replace("\"bankName\"", "\"bank_name\"");
+
+        IfmapConfig fromCamel = only(JsonConfigMapper.toConfigs(JSON, camel, null));
+        assertEquals("BANK_A", fromCamel.getPartnerCode());
+        assertEquals("甲行", fromCamel.getPartnerName());
+
+        IfmapConfig fromSnake = only(JsonConfigMapper.toConfigs(JSON, snake, null));
+        assertEquals("BANK_A", fromSnake.getPartnerCode());
+        assertEquals("甲行", fromSnake.getPartnerName());
+    }
+
+    @Test
+    @DisplayName("新键与旧键同时存在 → 以新键为准（存量字段不得悄悄覆盖新字段）")
+    void partnerKeysWinOverLegacyKeys() {
+        String body = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
+                + "\"busiNode\":\"APPLY\",\"partnerCode\":\"NEW\",\"bankCode\":\"OLD\","
+                + "\"partnerName\":\"新名\",\"bankName\":\"旧名\"}]";
+        IfmapConfig config = only(JsonConfigMapper.toConfigs(JSON, body, null));
+        assertEquals("NEW", config.getPartnerCode());
+        assertEquals("新名", config.getPartnerName());
+    }
+
+    @Test
     @DisplayName("入参租户优先于报文里的 tenantId（远端可能串租，查询租户才是权威）")
     void tenantIdArgumentWins() {
         String body = "[" + MINIMAL.replace("}", ",\"tenantId\":999}") + "]";
@@ -148,10 +175,10 @@ class JsonConfigMapperTest {
     @Test
     @DisplayName("必填列缺失或空白 → 明确失败，并指出第几条、缺哪个字段")
     void requiredColumnMissingFails() {
-        String missingBankCode = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"C\",\"interfaceName\":\"N\",\"busiNode\":\"B\"}]";
+        String missingPartnerCode = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"C\",\"interfaceName\":\"N\",\"busiNode\":\"B\"}]";
         IfmapConfigException error = assertThrows(IfmapConfigException.class,
-                () -> JsonConfigMapper.toConfigs(JSON, missingBankCode, null));
-        assertTrue(error.getMessage().contains("bankCode"), error.getMessage());
+                () -> JsonConfigMapper.toConfigs(JSON, missingPartnerCode, null));
+        assertTrue(error.getMessage().contains("partnerCode"), error.getMessage());
         assertTrue(error.getMessage().contains("第 1 条"), error.getMessage());
 
         String blankInterfaceNo = "[" + MINIMAL.replace("\"IF_A\"", "\"   \"") + "]";
@@ -167,7 +194,7 @@ class JsonConfigMapperTest {
     @DisplayName("数字列容忍 JSON 数字与数字字符串（远端 VO 里 keyId/interfaceOrder 就是 String）")
     void numbersAcceptBothJsonNumbersAndNumericStrings() {
         String body = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"C\",\"interfaceName\":\"N\",\"busiNode\":\"B\","
-                + "\"bankCode\":\"K\",\"keyId\":\"1001\",\"interfaceOrder\":\"3\",\"status\":\"0\"}]";
+                + "\"partnerCode\":\"K\",\"keyId\":\"1001\",\"interfaceOrder\":\"3\",\"status\":\"0\"}]";
         IfmapConfig config = only(JsonConfigMapper.toConfigs(JSON, body, null));
         assertEquals(Long.valueOf(1001L), config.getKeyId());
         assertEquals(Integer.valueOf(3), config.getInterfaceOrder());
@@ -230,9 +257,9 @@ class JsonConfigMapperTest {
     @DisplayName("逻辑分支：远端不给 logic_branch_order 时按下标补齐，保全「按返回顺序生效」语义")
     void branchesFallBackToIndexOrder() {
         String body = "[{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\",\"logicBranchFlag\":\"\"},"
-                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.bankCode\","
+                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.partnerCode\","
                 + "\"logicBranchValue\":\"A|B\",\"methodFlag\":\"methodA\"},"
-                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.bankCode\","
+                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.partnerCode\","
                 + "\"logicBranchOrder\":9}]";
         List<LogicBranchConfig> branches = JsonConfigMapper.toBranches(JSON, body, Long.valueOf(3L));
 

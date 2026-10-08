@@ -19,11 +19,11 @@ import cn.cj.ifmap.core.cache.CachingConfigRepository;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
 import cn.cj.ifmap.core.spi.HeaderTenantResolver;
 import cn.cj.ifmap.core.spi.IfmapCallback;
@@ -73,7 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IfmapOrchestratorAutoConfigurationTest {
 
     /** 一个 bean 同时实现 4 类策略接口（模拟存量 ECC 里的策略聚合类）。 */
-    @FullParam(bankCode = "CMB", busiNode = "apply")
+    @FullParam(partnerCode = "CMB", busiNode = "apply")
     @LogicBranch("loanResult")
     @IfmapAction("submitApply")
     public static class AllInOneStrategy
@@ -120,9 +120,9 @@ class IfmapOrchestratorAutoConfigurationTest {
         }
     }
 
-    static final class EchoGateway implements BankServiceGateway {
+    static final class EchoGateway implements PartnerServiceGateway {
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             return "{\"code\":\"0000\",\"data\":{\"applyNo\":\"" + "AP9" + "\"}}";
         }
     }
@@ -199,7 +199,7 @@ class IfmapOrchestratorAutoConfigurationTest {
     @DisplayName("编排器端到端：配置 → 渲染 → 宿主机网关 → 判定 → 执行日志落库（脱敏）")
     void orchestratorEndToEnd() {
         runner("ifmap_orc_e2e")
-                .withBean("echoGateway", BankServiceGateway.class, EchoGateway::new)
+                .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new)
                 .run(context -> {
                     JdbcConfigWriter writer = context.getBean(JdbcConfigWriter.class);
                     IfmapConfig config = new IfmapConfig();
@@ -208,7 +208,7 @@ class IfmapOrchestratorAutoConfigurationTest {
                     config.setInterfaceOrder(1);
                     config.setInterfaceCode("IC001");
                     config.setInterfaceName("测试接口");
-                    config.setBankCode("CMB");
+                    config.setPartnerCode("CMB");
                     config.setTenantId(-1L);
                     config.setRequestParamTemplate("{\"acctName\":\"$.acctName\"}");
                     config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");

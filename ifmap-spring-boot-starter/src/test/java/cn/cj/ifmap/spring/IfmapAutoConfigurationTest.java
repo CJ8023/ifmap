@@ -253,7 +253,7 @@ class IfmapAutoConfigurationTest {
             config.setInterfaceOrder(1);
             config.setInterfaceCode("IC001");
             config.setInterfaceName("测试接口");
-            config.setBankCode("CMB");
+            config.setPartnerCode("CMB");
             config.setTenantId(1001L);
             writer.insert(config);
 

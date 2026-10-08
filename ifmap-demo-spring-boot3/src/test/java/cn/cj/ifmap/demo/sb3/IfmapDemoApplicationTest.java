@@ -71,7 +71,7 @@ class IfmapDemoApplicationTest {
         assertInstanceOf(CachingConfigRepository.class, repository);
         List<IfmapConfig> configs = repository.queryConfigs("1001", "BIZ_APPLY", "apply");
         assertEquals(1, configs.size());
-        assertEquals("CMB", configs.get(0).getBankCode());
+        assertEquals("CMB", configs.get(0).getPartnerCode());
     }
 
     @Test

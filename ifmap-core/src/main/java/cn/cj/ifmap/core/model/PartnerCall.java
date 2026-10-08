@@ -22,25 +22,25 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 一次出网调用的入参：交给宿主机的 {@code BankServiceGateway} 实现。
+ * 一次出网调用的入参：交给宿主机的 {@code PartnerServiceGateway} 实现。
  *
  * @author caijun
  */
-public final class BankCall {
+public final class PartnerCall {
 
     private final IfmapConfig config;
     private final IfmapRequest request;
     private final String requestJson;
     private final Map<String, Object> params;
 
-    private BankCall(Builder builder) {
+    private PartnerCall(Builder builder) {
         this.config = builder.config;
         this.request = builder.request;
         this.requestJson = builder.requestJson;
         this.params = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(builder.params));
     }
 
-    public static BankCall of(IfmapConfig config, IfmapRequest request, String requestJson, Map<String, Object> params) {
+    public static PartnerCall of(IfmapConfig config, IfmapRequest request, String requestJson, Map<String, Object> params) {
         return builder().config(config).request(request).requestJson(requestJson).params(params).build();
     }
 
@@ -68,8 +68,8 @@ public final class BankCall {
 
     @Override
     public String toString() {
-        return "BankCall{interfaceNo=" + (config == null ? null : config.getInterfaceNo())
-                + ", bankCode=" + (config == null ? null : config.getBankCode()) + '}';
+        return "PartnerCall{interfaceNo=" + (config == null ? null : config.getInterfaceNo())
+                + ", partnerCode=" + (config == null ? null : config.getPartnerCode()) + '}';
     }
 
     /** 构造器。 */
@@ -102,8 +102,8 @@ public final class BankCall {
             return this;
         }
 
-        public BankCall build() {
-            return new BankCall(this);
+        public PartnerCall build() {
+            return new PartnerCall(this);
         }
     }
 }

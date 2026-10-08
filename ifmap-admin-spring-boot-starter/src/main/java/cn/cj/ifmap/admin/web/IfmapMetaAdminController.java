@@ -98,7 +98,7 @@ public class IfmapMetaAdminController {
     }
 
     /**
-     * 宿主机字典（可选 SPI，设计 Q8）：页面用它把 {@code bankCode} 之类的字段渲染成下拉。
+     * 宿主机字典（可选 SPI，设计 Q8）：页面用它把 {@code partnerCode} 之类的字段渲染成下拉。
      *
      * <p>没注册 {@code IfmapEnumProvider} 时返回 {@code {}}（而不是 404）：页面只有一条
      * "没有枚举"的普通分支，不用区分两种失败。</p>

@@ -155,7 +155,7 @@ class JdbcConfigRepositoryTest {
         c.setInterfaceCode("PSBC_0001");
         c.setInterfaceName("签约申请");
         c.setBusiNode("GP81");
-        c.setBankCode("PSBC");
+        c.setPartnerCode("PSBC");
 
         long id = writer.insert(c);
         assertTrue(id > 0);
@@ -363,7 +363,7 @@ class JdbcConfigRepositoryTest {
         c.setInterfaceCode(interfaceNo + "_CODE");
         c.setInterfaceName(interfaceNo + " 接口");
         c.setBusiNode(busiNode);
-        c.setBankCode("PSBC");
+        c.setPartnerCode("PSBC");
         c.setInterfaceOrder(order);
         c.setRequestParamTemplate("{\"a\":\"$.a\"}");
         c.setResponseParamTemplate("{\"b\":\"$.b\"}");

@@ -18,7 +18,7 @@ package cn.cj.ifmap.core.strategy;
 import java.util.Map;
 
 /**
- * 主参数组包策略（对应存量 20 个 {@code *FullParamStrategyImpl}，按 {@code @FullParam(bankCode, busiNode)} 注册）。
+ * 主参数组包策略（对应存量 20 个 {@code *FullParamStrategyImpl}，按 {@code @FullParam(partnerCode, busiNode)} 注册）。
  *
  * @author caijun
  */

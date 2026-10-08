@@ -39,7 +39,7 @@ public final class IfmapRowMappers {
     /** 接口配置列清单（顺序与 SQL 中一致，供 SELECT 复用）。 */
     static final String CONFIG_COLUMNS =
             "`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
-            + "`busi_node`,`bank_code`,`bank_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
+            + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
             + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,`strategy_name`,"
             + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
             + "`add_user_id`,`add_time`,`add_request_id`,`modify_user_id`,`modify_time`,`modify_request_id`";
@@ -70,8 +70,8 @@ public final class IfmapRowMappers {
                 c.setProjectCode(rs.getString("project_code"));
                 c.setInterfaceName(rs.getString("interface_name"));
                 c.setBusiNode(rs.getString("busi_node"));
-                c.setBankCode(rs.getString("bank_code"));
-                c.setBankName(rs.getString("bank_name"));
+                c.setPartnerCode(rs.getString("partner_code"));
+                c.setPartnerName(rs.getString("partner_name"));
                 c.setFinancingMode(rs.getString("financing_mode"));
                 c.setFrontInterfaceNo(rs.getString("front_interface_no"));
                 c.setInterfaceOrder(rs.getInt("interface_order"));

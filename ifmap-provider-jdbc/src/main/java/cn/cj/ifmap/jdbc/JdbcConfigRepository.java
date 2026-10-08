@@ -204,9 +204,9 @@ public class JdbcConfigRepository implements ConfigRepository {
             appendAnd(sb);
             sb.append("`busi_node` = ?");
         }
-        if (notBlank(q.getBankCode())) {
+        if (notBlank(q.getPartnerCode())) {
             appendAnd(sb);
-            sb.append("`bank_code` = ?");
+            sb.append("`partner_code` = ?");
         }
         if (q.getStatus() != null) {
             appendAnd(sb);
@@ -237,8 +237,8 @@ public class JdbcConfigRepository implements ConfigRepository {
         if (notBlank(q.getBusiNode())) {
             args.add(q.getBusiNode().trim());
         }
-        if (notBlank(q.getBankCode())) {
-            args.add(q.getBankCode().trim());
+        if (notBlank(q.getPartnerCode())) {
+            args.add(q.getPartnerCode().trim());
         }
         if (q.getStatus() != null) {
             args.add(q.getStatus());

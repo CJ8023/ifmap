@@ -15,8 +15,8 @@
  */
 package cn.cj.ifmap.demo.sb3;
 
-import cn.cj.ifmap.core.model.BankCall;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.model.PartnerCall;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,10 +28,10 @@ import org.springframework.stereotype.Component;
  * @author caijun
  */
 @Component
-public class DemoBankGateway implements BankServiceGateway {
+public class DemoPartnerGateway implements PartnerServiceGateway {
 
     @Override
-    public String exchange(BankCall call) {
+    public String exchange(PartnerCall call) {
         // 演示：回一个"成功 + 业务流水号"的响应
         return "{\"resultCode\":\"0000\",\"resultMsg\":\"成功\",\"data\":{\"applyNo\":\"AP20250101001\"}}";
     }

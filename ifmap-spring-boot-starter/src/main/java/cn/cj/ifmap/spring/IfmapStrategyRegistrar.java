@@ -46,7 +46,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * <p>识别规则（一个 bean 可实现多个接口）：</p>
  * <ul>
  *   <li>{@link SpecialDealStrategy} → 按 <b>bean 名</b>注册（对齐 {@code strategy_name} 列）</li>
- *   <li>{@link FullParamStrategy} → 按 {@code @FullParam(bankCode, busiNode)} 注册</li>
+ *   <li>{@link FullParamStrategy} → 按 {@code @FullParam(partnerCode, busiNode)} 注册</li>
  *   <li>{@link LogicBranchStrategy} → 按 {@code @LogicBranch} 注册</li>
  *   <li>{@link IfmapActionHandler} → 按 {@code @IfmapAction} 注册</li>
  *   <li>{@link IfmapCallbackHandler} → 按接口号注册</li>

@@ -124,8 +124,8 @@ class IfmapAdminAutoConfigurationTest {
                 .run(context -> {
                     IfmapEnumCatalog catalog = context.getBean(IfmapEnumCatalog.class);
                     assertThat(catalog.isPresent()).isTrue();
-                    assertThat(catalog.options()).containsOnlyKeys("bankCode");
-                    assertThat(catalog.options().get("bankCode").get(0).getLabel()).isEqualTo("招商银行");
+                    assertThat(catalog.options()).containsOnlyKeys("partnerCode");
+                    assertThat(catalog.options().get("partnerCode").get(0).getLabel()).isEqualTo("招商银行");
                 });
     }
 
@@ -134,7 +134,7 @@ class IfmapAdminAutoConfigurationTest {
 
         @Bean
         cn.cj.ifmap.admin.spi.IfmapEnumProvider hostEnumProvider() {
-            return () -> java.util.Collections.singletonMap("bankCode",
+            return () -> java.util.Collections.singletonMap("partnerCode",
                     java.util.Collections.singletonList(cn.cj.ifmap.admin.spi.EnumOption.of("CMB", "招商银行")));
         }
     }

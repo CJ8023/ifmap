@@ -18,11 +18,11 @@ package cn.cj.ifmap.core.shadow;
 import cn.cj.ifmap.core.IfmapEngine;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
 import cn.cj.ifmap.core.spi.HeaderTenantResolver;
 import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
@@ -49,7 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShadowEngineIntegrationTest {
 
     /** 记录出网次数的网关。 */
-    static final class CapturingGateway implements BankServiceGateway {
+    static final class CapturingGateway implements PartnerServiceGateway {
         final List<String> requests = new ArrayList<String>();
         private final String response;
 
@@ -58,7 +58,7 @@ class ShadowEngineIntegrationTest {
         }
 
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             requests.add(call.getRequestJson());
             return response;
         }
@@ -70,7 +70,7 @@ class ShadowEngineIntegrationTest {
 
     private IfmapConfig config(String interfaceNo) {
         IfmapConfig config = TestConfigs.config(interfaceNo, "GP81", 1, 1L);
-        config.setBankCode("CMB");
+        config.setPartnerCode("CMB");
         config.setRequestParamTemplate("{\"acctName\":\"$.acctName\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
         config.setResultFlag("$.code");

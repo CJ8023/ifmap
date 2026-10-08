@@ -15,7 +15,7 @@
  */
 package cn.cj.ifmap.core.spi;
 
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 
 /**
  * 出网调用 SPI：由宿主机实现（各银行 SDK / HTTP 客户端 / 加解密都在这里）。
@@ -25,7 +25,7 @@ import cn.cj.ifmap.core.model.BankCall;
  *
  * @author caijun
  */
-public interface BankServiceGateway {
+public interface PartnerServiceGateway {
 
     /**
      * 发起调用并返回响应原文（JSON 文本）。
@@ -33,5 +33,5 @@ public interface BankServiceGateway {
      * @param call 本次调用入参（配置 + 上下文 + 渲染后的报文）
      * @return 响应原文，允许为 null（表示无响应体）
      */
-    String exchange(BankCall call);
+    String exchange(PartnerCall call);
 }

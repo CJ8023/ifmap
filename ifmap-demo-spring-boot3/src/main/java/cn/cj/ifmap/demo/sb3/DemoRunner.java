@@ -115,8 +115,8 @@ public class DemoRunner implements ApplicationRunner {
         config.setInterfaceCode("BIZ_APPLY_001");
         config.setInterfaceName("授信申请-报文组装");
         config.setBusiNode(BUSI_NODE);
-        config.setBankCode("CMB");
-        config.setBankName("招商银行");
+        config.setPartnerCode("CMB");
+        config.setPartnerName("招商银行");
         config.setInterfaceOrder(Integer.valueOf(1));
         config.setRequestParamTemplate(REQUEST_TEMPLATE);
         config.setResponseParamTemplate(RESPONSE_TEMPLATE);

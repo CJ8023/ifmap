@@ -23,11 +23,11 @@ import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.config.PageResult;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapConfigHistory;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
@@ -142,7 +142,7 @@ class ConfigAdminServiceTest {
     @DisplayName("校验不过 → 422 语义异常，且一行都没写（事务前的失败要早）")
     void invalidConfigIsRejectedBeforeInsert() {
         IfmapConfig bad = AdminTestSupport.config("IF_A", "apply", 1);
-        bad.setBankCode(null);
+        bad.setPartnerCode(null);
 
         IfmapValidationException e = assertThrows(IfmapValidationException.class,
                 () -> service.create(bad, null, OPERATOR, REQ));
@@ -287,7 +287,7 @@ class ConfigAdminServiceTest {
 
     @Test
     @DisplayName("试跑：mockResponse 直接判定，不外呼；缺 interfaceNo/busiNode → 400 语义异常")
-    void dryRunDoesNotCallBank() {
+    void dryRunDoesNotCallPartner() {
         service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
 
         DryRunRequest request = new DryRunRequest();
@@ -398,9 +398,9 @@ class ConfigAdminServiceTest {
     }
 
     /** 试跑必须走 mock，真外呼直接失败（一旦被调用测试就红）。 */
-    static class FailingGateway implements BankServiceGateway {
+    static class FailingGateway implements PartnerServiceGateway {
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             throw new IllegalStateException("dry-run 不允许外呼真银行：" + call);
         }
     }

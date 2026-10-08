@@ -55,7 +55,7 @@ class RemoteConfigRepositoryTest {
 
     private static String config(long keyId, String interfaceNo, int order, int status, int delStatus) {
         return "{\"keyId\":" + keyId + ",\"interfaceNo\":\"" + interfaceNo + "\",\"interfaceCode\":\"CODE\","
-                + "\"interfaceName\":\"接口" + keyId + "\",\"busiNode\":\"APPLY\",\"bankCode\":\"BANK\","
+                + "\"interfaceName\":\"接口" + keyId + "\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK\","
                 + "\"interfaceOrder\":" + order + ",\"status\":" + status + ",\"delStatus\":" + delStatus + ","
                 + "\"requestParamTemplate\":\"{\\\"bizNo\\\":\\\"@bizNo\\\"}\","
                 + "\"resultFlag\":\"$.code\",\"successValue\":\"0000\"}";
@@ -112,8 +112,8 @@ class RemoteConfigRepositoryTest {
     @DisplayName("queryLogicBranches：远端不给顺序列时保持返回顺序（下标补齐），已删除的被剔除")
     void queryLogicBranchesKeepsRemoteOrder() {
         String body = "["
-                + "{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.bankCode\"},"
-                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.bankCode\"},"
+                + "{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.partnerCode\"},"
+                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.partnerCode\"},"
                 + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"已删\",\"delStatus\":1},"
                 + "{\"keyId\":14,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\",\"logicBranchFlag\":\"\"}"
                 + "]";

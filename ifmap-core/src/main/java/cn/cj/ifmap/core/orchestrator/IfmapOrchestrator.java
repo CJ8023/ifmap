@@ -23,11 +23,11 @@ import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.exception.IfmapStrategyException;
 import cn.cj.ifmap.core.json.JsonOps;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.rule.RuleContext;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
 import cn.cj.ifmap.core.spi.ConditionValueResolver;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
@@ -62,7 +62,7 @@ import java.util.Set;
  *   → 租户解析（含 tenantId 的缓存键在仓储/缓存层）
  *   → 配置查询 + 启用过滤 + interface_order 排序 + front_interface_no 拓扑排序（含环检测）
  *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 特殊处理 SpecialDealStrategy
- *   → 出网调用 BankServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
+ *   → 出网调用 PartnerServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
  *   → 响应模板解析 → 结果判定 result_flag + success_value
  *   → 逻辑分支（logic_branch_order 升序，首个命中；兜底分支最后）→ ActionRegistry 执行动作
  *   → 执行日志（脱敏 + 截断后落库）
@@ -89,7 +89,7 @@ public final class IfmapOrchestrator {
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
     private final CallbackRegistry callbacks;
-    private final BankServiceGateway gateway;
+    private final PartnerServiceGateway gateway;
     private final ExecutionLogSink logSink;
     private final LogMasker logMasker;
     private final ClockProvider clock;
@@ -125,7 +125,7 @@ public final class IfmapOrchestrator {
     }
 
     /**
-     * 执行一个接口（出网走 {@link BankServiceGateway}）。
+     * 执行一个接口（出网走 {@link PartnerServiceGateway}）。
      */
     public IfmapResult execute(IfmapRequest request, String interfaceNo, String busiNode) {
         return execute(request, interfaceNo, busiNode, null);
@@ -221,7 +221,7 @@ public final class IfmapOrchestrator {
                 .request(request).config(config).ruleContext(ruleContext)
                 .params(request.getPayload()).build();
         Map<String, Object> requestParams = new LinkedHashMap<String, Object>();
-        requestParams.putAll(fullParams.assemble(config.getBankCode(), config.getBusiNode(), context));
+        requestParams.putAll(fullParams.assemble(config.getPartnerCode(), config.getBusiNode(), context));
         context.putParams(requestParams);
         String requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
         context.setRequestJson(requestJson);
@@ -266,11 +266,11 @@ public final class IfmapOrchestrator {
 
     private String exchange(StrategyContext context, String requestJson) {
         if (gateway == null) {
-            LOG.warn("ifmap 未配置 BankServiceGateway，interfaceNo={} 只做本地渲染（dry-run）",
+            LOG.warn("ifmap 未配置 PartnerServiceGateway，interfaceNo={} 只做本地渲染（dry-run）",
                     context.getConfig().getInterfaceNo());
             return null;
         }
-        BankCall call = BankCall.of(context.getConfig(), context.getRequest(), requestJson, context.getParams());
+        PartnerCall call = PartnerCall.of(context.getConfig(), context.getRequest(), requestJson, context.getParams());
         return gateway.exchange(call);
     }
 
@@ -488,7 +488,7 @@ public final class IfmapOrchestrator {
         private LogicBranchStrategyRegistry logicBranches;
         private ActionRegistry actions;
         private CallbackRegistry callbacks;
-        private BankServiceGateway gateway;
+        private PartnerServiceGateway gateway;
         private ExecutionLogSink logSink;
         private LogMasker logMasker;
         private ClockProvider clock;
@@ -542,7 +542,7 @@ public final class IfmapOrchestrator {
             return this;
         }
 
-        public Builder gateway(BankServiceGateway gateway) {
+        public Builder gateway(PartnerServiceGateway gateway) {
             this.gateway = gateway;
             return this;
         }

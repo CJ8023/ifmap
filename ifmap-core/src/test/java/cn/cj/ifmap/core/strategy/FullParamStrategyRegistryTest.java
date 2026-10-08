@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 /** {@link FullParamStrategyRegistry} 的通配与优先级。 */
 class FullParamStrategyRegistryTest {
 
-    @FullParam(bankCode = "CMB", busiNode = "apply")
+    @FullParam(partnerCode = "CMB", busiNode = "apply")
     public static class CmbApplyFullParam implements FullParamStrategy {
         @Override
         public Map<String, Object> assemble(StrategyContext context) {
@@ -38,7 +38,7 @@ class FullParamStrategyRegistryTest {
         }
     }
 
-    @FullParam(bankCode = "CMB")
+    @FullParam(partnerCode = "CMB")
     public static class CmbAnyFullParam implements FullParamStrategy {
         @Override
         public Map<String, Object> assemble(StrategyContext context) {
@@ -71,7 +71,7 @@ class FullParamStrategyRegistryTest {
     }
 
     @Test
-    void emptyBankOrNodeTreatedAsWildcard() {
+    void emptyPartnerOrNodeTreatedAsWildcard() {
         FullParamStrategyRegistry registry = new FullParamStrategyRegistry();
         registry.register(new AnyFullParam());
         assertSame(registry.lookup("*", "*"), registry.lookup(null, null));

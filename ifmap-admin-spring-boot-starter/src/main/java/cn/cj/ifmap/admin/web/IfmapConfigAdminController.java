@@ -69,7 +69,7 @@ public class IfmapConfigAdminController {
     public PageResult<IfmapConfig> list(@RequestParam(value = "tenantId", required = false) String tenantId,
                                         @RequestParam(value = "interfaceNo", required = false) String interfaceNo,
                                         @RequestParam(value = "busiNode", required = false) String busiNode,
-                                        @RequestParam(value = "bankCode", required = false) String bankCode,
+                                        @RequestParam(value = "partnerCode", required = false) String partnerCode,
                                         @RequestParam(value = "status", required = false) Integer status,
                                         @RequestParam(value = "includeDeleted", required = false) Boolean includeDeleted,
                                         @RequestParam(value = "page", defaultValue = "1") int page,
@@ -78,7 +78,7 @@ public class IfmapConfigAdminController {
                 .setTenantId(tenantId)
                 .setInterfaceNo(interfaceNo)
                 .setBusiNode(busiNode)
-                .setBankCode(bankCode)
+                .setPartnerCode(partnerCode)
                 .setStatus(status)
                 .setIncludeDeleted(includeDeleted != null && includeDeleted)
                 .setPage(page)

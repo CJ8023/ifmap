@@ -127,7 +127,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmapLogMasker` | `LogMasker` | `DefaultLogMasker`（值形态 + 字段名两种脱敏） |
 | `ifmapClockProvider` | `ClockProvider` | `SystemClockProvider`（测试可换假时钟） |
 | `ifmapSpecialDealStrategyRegistry` | `SpecialDealStrategyRegistry` | 特殊处理策略注册表（key = bean 名） |
-| `ifmapFullParamStrategyRegistry` | `FullParamStrategyRegistry` | 组包策略注册表（key = `bank|busi`） |
+| `ifmapFullParamStrategyRegistry` | `FullParamStrategyRegistry` | 组包策略注册表（key = `partner|busi`） |
 | `ifmapLogicBranchStrategyRegistry` | `LogicBranchStrategyRegistry` | 分支条件策略注册表（key = 分支 flag） |
 | `ifmapActionRegistry` | `ActionRegistry` | 分支动作注册表（key = `method_flag`） |
 | `ifmapCallbackRegistry` | `CallbackRegistry` | 回调处理器注册表（key = 接口号） |
@@ -253,14 +253,14 @@ public class CzbApplyStrategy implements SpecialDealStrategy {
     }
 }
 
-// 2) 组包策略：注解声明 (bankCode, busiNode)，支持 * 通配
+// 2) 组包策略：注解声明 (partnerCode, busiNode)，支持 * 通配
 @Component
-@FullParam(bankCode = "CMB", busiNode = "*")
+@FullParam(partnerCode = "CMB", busiNode = "*")
 public class CmbFullParam implements FullParamStrategy {
     @Override
     public Map<String, Object> assemble(StrategyContext context) {
         Map<String, Object> full = new LinkedHashMap<>();
-        full.put("bankCode", "CMB");
+        full.put("partnerCode", "CMB");
         return full;
     }
 }

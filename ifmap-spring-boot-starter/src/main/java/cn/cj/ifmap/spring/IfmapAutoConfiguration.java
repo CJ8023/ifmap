@@ -24,7 +24,7 @@ import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.rule.builtin.BuiltinRules;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
 import cn.cj.ifmap.core.spi.DefaultLogMasker;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
@@ -215,7 +215,7 @@ public class IfmapAutoConfiguration {
                                                    LogicBranchStrategyRegistry logicBranches,
                                                    ActionRegistry actions,
                                                    CallbackRegistry callbacks,
-                                                   ObjectProvider<BankServiceGateway> gatewayProvider,
+                                                   ObjectProvider<PartnerServiceGateway> gatewayProvider,
                                                    ObjectProvider<ExecutionLogSink> logSinkProvider,
                                                    LogMasker logMasker,
                                                    ClockProvider clock,

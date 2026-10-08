@@ -5,7 +5,7 @@
 而不是每家资方接口重写一遍 Java 类。
 
 ```text
-调用方 ──IfmapRequest──▶ ifmap 引擎 ──BankCall──▶ 宿主网关（HTTP/SDK/FTP…） ──▶ 资方
+调用方 ──IfmapRequest──▶ ifmap 引擎 ──PartnerCall──▶ 宿主网关（HTTP/SDK/FTP…） ──▶ 资方
                             │
                             ├─ 模板渲染（request_param_template）
                             ├─ 出网前的特殊处理策略（加签/加密/换字段名）

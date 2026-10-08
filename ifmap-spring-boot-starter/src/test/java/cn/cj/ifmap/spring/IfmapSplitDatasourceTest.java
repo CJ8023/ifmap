@@ -18,11 +18,11 @@ package cn.cj.ifmap.spring;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
 import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
@@ -123,9 +123,9 @@ class IfmapSplitDatasourceTest {
         }
     }
 
-    static final class EchoGateway implements BankServiceGateway {
+    static final class EchoGateway implements PartnerServiceGateway {
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             return "{\"code\":\"0000\",\"data\":{\"applyNo\":\"AP-SPLIT\"}}";
         }
     }
@@ -134,7 +134,7 @@ class IfmapSplitDatasourceTest {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(IfmapAutoConfiguration.class))
                 .withUserConfiguration(splitConfig)
-                .withBean("echoGateway", BankServiceGateway.class, EchoGateway::new);
+                .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new);
     }
 
     private static void insertConfig(JdbcConfigWriter writer, String interfaceNo, String successValue) {
@@ -144,7 +144,7 @@ class IfmapSplitDatasourceTest {
         config.setInterfaceOrder(1);
         config.setInterfaceCode("IC-SPLIT");
         config.setInterfaceName("双库测试接口");
-        config.setBankCode("CMB");
+        config.setPartnerCode("CMB");
         config.setTenantId(-1L);
         config.setRequestParamTemplate("{\"acctName\":\"$.acctName\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
@@ -226,7 +226,7 @@ class IfmapSplitDatasourceTest {
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(IfmapAutoConfiguration.class))
                 .withBean("dataSource", DataSource.class, () -> h2("ifmap_split_single_db"))
-                .withBean("echoGateway", BankServiceGateway.class, EchoGateway::new)
+                .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new)
                 .run(context -> {
                     assertNotNull(context.getBean(ConfigRepository.class));
                     insertConfig(context.getBean(JdbcConfigWriter.class), "BIZ_SINGLE", "0000");

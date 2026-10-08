@@ -63,14 +63,14 @@ class IfmapEnumCatalogTest {
     @DisplayName("正常返回：保留插入顺序，value/label 原样带出")
     void keepsOrderAndContent() {
         Map<String, List<EnumOption>> source = new LinkedHashMap<String, List<EnumOption>>();
-        source.put("bankCode", Arrays.asList(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")));
+        source.put("partnerCode", Arrays.asList(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")));
         source.put("status", Collections.singletonList(EnumOption.of("1", "启用")));
 
         IfmapEnumCatalog catalog = IfmapEnumCatalog.of(() -> source);
 
         assertTrue(catalog.isPresent());
-        assertEquals(Arrays.asList("bankCode", "status"), new ArrayList<String>(catalog.options().keySet()));
-        assertEquals(EnumOption.of("ICBC", "工商银行"), catalog.options().get("bankCode").get(1));
+        assertEquals(Arrays.asList("partnerCode", "status"), new ArrayList<String>(catalog.options().keySet()));
+        assertEquals(EnumOption.of("ICBC", "工商银行"), catalog.options().get("partnerCode").get(1));
         assertEquals("启用", catalog.options().get("status").get(0).getLabel());
     }
 
@@ -104,15 +104,15 @@ class IfmapEnumCatalogTest {
         List<EnumOption> mutable = new ArrayList<EnumOption>();
         mutable.add(EnumOption.of("CMB", "招商银行"));
         Map<String, List<EnumOption>> source = new LinkedHashMap<String, List<EnumOption>>();
-        source.put("bankCode", mutable);
+        source.put("partnerCode", mutable);
 
         IfmapEnumCatalog catalog = IfmapEnumCatalog.of(() -> source);
         Map<String, List<EnumOption>> first = catalog.options();
         mutable.add(EnumOption.of("ICBC", "工商银行"));
 
-        assertEquals(1, first.get("bankCode").size(), "取出的结果不该被 provider 的后续改动影响");
+        assertEquals(1, first.get("partnerCode").size(), "取出的结果不该被 provider 的后续改动影响");
         assertThrows(UnsupportedOperationException.class, () -> first.put("x", Collections.emptyList()));
         assertThrows(UnsupportedOperationException.class,
-                () -> first.get("bankCode").add(EnumOption.of("ABC", "农业银行")));
+                () -> first.get("partnerCode").add(EnumOption.of("ABC", "农业银行")));
     }
 }

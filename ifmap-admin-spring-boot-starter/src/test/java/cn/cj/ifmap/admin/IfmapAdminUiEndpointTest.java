@@ -128,7 +128,7 @@ class IfmapAdminUiEndpointTest {
         String json = body(response);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertTrue(json.contains("bankCode"), json);
+        assertTrue(json.contains("partnerCode"), json);
         assertTrue(json.contains("招商银行"), json);
         assertTrue(json.contains("CMB"), json);
     }

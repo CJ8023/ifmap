@@ -158,7 +158,8 @@ SELECT CONCAT('[', interface_order, ']') AS raw_value, COUNT(*) AS cnt
 -- 8.1 长度体检（每张表只扫一次；列名后缀 = 该列的迁移目标上限，逐个比对）
 -- config（小表）
 SELECT MAX(CHAR_LENGTH(interface_name))     AS interface_name_128,
-       MAX(CHAR_LENGTH(bank_name))          AS bank_name_128,
+       MAX(CHAR_LENGTH(bank_name))          AS bank_name_128,   -- 迁移后改名 partner_name
+       MAX(CHAR_LENGTH(bank_code))          AS bank_code_32,    -- 迁移后改名 partner_code（目标 varchar(32)）
        MAX(CHAR_LENGTH(interface_code))     AS interface_code_64,
        MAX(CHAR_LENGTH(project_code))       AS project_code_64,
        MAX(CHAR_LENGTH(front_interface_no)) AS front_interface_no_64,

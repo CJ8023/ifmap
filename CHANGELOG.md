@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+- **标识符改名 `bank*` → `partner*`（Java / API / UI / DDL 同步变更）**：把「银行」这个具体机构类型从**标识符**里去掉 —— 引擎本来就要覆盖银行、保理、信托、小贷、保险等各类对手方，`bank` 从第一天起就名不副实。**只改标识符，不动业务字段**：
+  - **DDL 与迁移脚本**：列 `bank_code` → `partner_code`、`bank_name` → `partner_name`（`db/changelog/v1.0.0/001-create-ifmap-config.sql`，迁移 kit 的 `03-modify-and-index.sql` 用 `CHANGE COLUMN`、`00-precheck.sql` 的宽度体检按**源端旧列名**继续体检）；`idx_..._config_list` 索引列同步。**迁移脚本因此从「0 处改名」变成「2 处改名」**：kit 的 `README.md`、[`docs/10`](docs/10-迁移指南.md)、[`docs/11`](docs/11-远端配置源.md)、[`docs/04`](docs/04-接入与建表.md) 全部改口径，并新增「列改名是唯一的破坏性变更、会打断共存期（路径 A）」的三种处置办法（同步改存量 SQL / 建可更新兼容视图 / 把改名挪到停写窗口）
+  - **Java**：`IfmapConfig` / `ConfigQuery` 的 `getPartnerCode()` / `setPartnerCode()` / `getPartnerName()` / `setPartnerName()`；`BankCall` → `PartnerCall`、`BankServiceGateway` → `PartnerServiceGateway`、`DemoBankGateway` → `DemoPartnerGateway`；`FullParam` 拼参顺序注释 `bank|*` → `partner|*`
+  - **管理端 API / 页面**：字段 `partnerCode` / `partnerName`；页面标签与输入框提示「银行代码 / 银行名称」→「合作机构代码 / 合作机构名称」
+  - **远端配置源**：`JsonConfigMapper` 认 `partnerCode` / `partner_code` / `partnerName` / `partner_name`，**并兼容存量键名** `bankCode` / `bank_code` / `bankName` / `bank_name`（**新键优先、旧键兜底**）→ 远端服务不用改、不用同步发版；`bank_code` 仍是**必填**字段（报错文案用新键名 `partnerCode`）。新增 2 个测试钉住「旧键能收」「新旧同现以新键为准」
+  - **刻意不改**：真·银行领域字段（`bankOrgNo` / `bankAcctNo` / `bankCard`）、存量表前缀与存量类名（`bankint_*` / `IBankintConfigApi` / `BankintConfigManager` / `BankRules`）、迁移脚本里的**源端列名**（`00-precheck.sql` 的 `bank_code` 就是用来体检旧列的，改了反而错）
+  - **MySQL 5.7 依据**：5.7 没有 `RENAME COLUMN`（8.0.28+ 才有），只能 `CHANGE COLUMN`。官方在线 DDL 表里「Renaming a column」虽是 In Place / 不重建表，但脚注限定 *"keep the same data type and only change the column name"* —— 本 kit 顺带改了列注释（`bank_name` 还收窄类型），故**仍然走 `COPY`**；已与类型变更合并进同一条 `ALTER`，不额外多一次重建
+
 ### Added
 - **W12 远端配置源 + 配置库/日志库分离（设计 Q10，本版本）**：
   - **新模块 `ifmap-provider-remote`**：把 `ConfigRepository` 落到**远端 HTTP 接口**上 —— 存量系统已经有"配置中心接口"时（ECC 即如此）**一行表都不用迁**就能把引擎跑起来：配置仍留在老服务里，ifmap 只读，模板 / 分支 / 规则零改动
@@ -118,10 +127,10 @@
 ### Added
 - **W4 执行编排与策略 SPI**（本版本）：
   - `ifmap-core`：**编排器 `IfmapOrchestrator`** —— 租户解析 → 配置加载（**递归前置接口** `front_interface_no`，深度护栏 64 + 环检测）→ 拓扑排序（`interface_order`）→ 组包 → 渲染 → 特殊处理 → 出网 → 判定 → 分支动作 → 落执行日志；`stopOnFailure` 控制失败即停；第四参数 `mockResponse` 支持 **dry-run 试跑（不出网）**
-  - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`BankCall`
-  - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `strategy_name`）、`FullParamStrategy`（`bank|busi` 查找顺序：精确 → `bank|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
+  - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`PartnerCall`
+  - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `strategy_name`）、`FullParamStrategy`（`partner|busi` 查找顺序：精确 → `partner|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
   - `ifmap-core`：注解 `@IfmapAction` / `@FullParam` / `@LogicBranch` / `@IfmapCallback` + `CallbackRegistry` / `ActionRegistry` / 三个策略注册表（含冲突与别名诊断）
-  - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `BankServiceGateway` / `ConditionValueResolver`
+  - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `PartnerServiceGateway` / `ConditionValueResolver`
   - `ifmap-core`：**合规脱敏** `DefaultLogMasker`（手机 / 证件 / 卡号按值形态保留 6+4 或 3+4、姓名字段按字段名、`excludeFields` 整体 `***`、幂等、非 JSON 安全）+ `Logs.truncate`（超出阈值尾部打标 `...truncated`）
   - `ifmap-core`：**判定器 `ResponseJudge`**（`result_flag` 为空 = 成功；`success_value` 多值 `;`/`,`、忽略大小写；响应非 JSON 只判失败不抛异常）
   - `ifmap-core`：**契约自检 `ContractValidator` / `ContractReport`**（模板 JSON 合法性 + `@FUN` 规则名存在 + 参数个数/类型可匹配重载，输出可直接贴工单的 Markdown）

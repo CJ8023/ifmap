@@ -85,10 +85,10 @@ public class JdbcConfigWriter {
         JdbcValues.require(config.getInterfaceCode(), "interfaceCode");
         JdbcValues.require(config.getInterfaceName(), "interfaceName");
         JdbcValues.require(config.getBusiNode(), "busiNode");
-        JdbcValues.require(config.getBankCode(), "bankCode");
+        JdbcValues.require(config.getPartnerCode(), "partnerCode");
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
-                + "`busi_node`,`bank_code`,`bank_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
+                + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
                 + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,`strategy_name`,"
                 + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,`add_user_id`,`add_request_id`)"
                 + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
@@ -96,7 +96,7 @@ public class JdbcConfigWriter {
             jdbc.update(sql, id,
                     JdbcValues.orDefault(config.getTenantId(), -1L),
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
-                    config.getInterfaceName(), config.getBusiNode(), config.getBankCode(), config.getBankName(),
+                    config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), config.getFrontInterfaceNo(),
                     JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
@@ -166,10 +166,10 @@ public class JdbcConfigWriter {
         JdbcValues.require(config.getInterfaceCode(), "interfaceCode");
         JdbcValues.require(config.getInterfaceName(), "interfaceName");
         JdbcValues.require(config.getBusiNode(), "busiNode");
-        JdbcValues.require(config.getBankCode(), "bankCode");
+        JdbcValues.require(config.getPartnerCode(), "partnerCode");
         String sql = "UPDATE `" + tables.configTable() + "` SET"
                 + " `interface_no` = ?, `interface_code` = ?, `project_code` = ?, `interface_name` = ?,"
-                + " `busi_node` = ?, `bank_code` = ?, `bank_name` = ?, `financing_mode` = ?,"
+                + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
                 + " `front_interface_no` = ?, `interface_order` = ?,"
                 + " `request_param_template` = ?, `response_param_template` = ?,"
                 + " `result_flag` = ?, `success_value` = ?, `strategy_name` = ?,"
@@ -180,7 +180,7 @@ public class JdbcConfigWriter {
         try {
             int rows = jdbc.update(sql,
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
-                    config.getInterfaceName(), config.getBusiNode(), config.getBankCode(), config.getBankName(),
+                    config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), config.getFrontInterfaceNo(),
                     JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),

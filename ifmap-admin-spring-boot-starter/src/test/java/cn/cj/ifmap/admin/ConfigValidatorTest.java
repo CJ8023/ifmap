@@ -89,11 +89,11 @@ class ConfigValidatorTest {
     void requiredFieldsAreReported() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);
         config.setInterfaceCode(" ");
-        config.setBankCode(null);
+        config.setPartnerCode(null);
         ValidationResult result = validator.validate(config, true);
         assertFalse(result.isPassed());
         assertTrue(result.getErrors().toString().contains("interfaceCode"), result.getErrors().toString());
-        assertTrue(result.getErrors().toString().contains("bankCode"), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("partnerCode"), result.getErrors().toString());
     }
 
     @Test

@@ -113,9 +113,9 @@ class IfmapAdminWebEndpointTest {
                 });
         assertEquals("WEB_IF_1", detail.getBody().get("interfaceNo"));
 
-        // 保存前校验：故意给错 successValue 仍然合法，但去掉 bankCode 会 422
+        // 保存前校验：故意给错 successValue 仍然合法，但去掉 partnerCode 会 422
         IfmapConfig broken = sample("WEB_IF_2", 1);
-        broken.setBankCode(null);
+        broken.setPartnerCode(null);
         ResponseEntity<Map<String, Object>> badValidate = rest.exchange(BASE + "/configs/validate", HttpMethod.POST,
                 new HttpEntity<Map<String, Object>>(Map.of("config", broken, "isCreate", true), headers()),
                 new ParameterizedTypeReference<Map<String, Object>>() {

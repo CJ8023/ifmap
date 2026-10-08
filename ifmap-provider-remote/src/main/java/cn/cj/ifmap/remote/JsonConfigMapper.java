@@ -38,6 +38,11 @@ import java.util.regex.Pattern;
  * 命名风格不一致（一个 camelCase、一个 snake_case）无需改造任何一侧；未识别的键直接忽略
  * （远端可以自由加字段）。</p>
  *
+ * <p><b>旧键名兼容</b>：{@code partnerCode} / {@code partnerName} 是改名后的键；为不破坏
+ * 「不迁表、直接接存量接口」的用法，存量报文里叫 {@code bankCode} / {@code bank_code} /
+ * {@code bankName} 的也照收 —— 取值按「新键优先、旧键兜底」（见 {@link #textAny}），
+ * 因此宿主无需为这次改名同步改远端服务。</p>
+ *
  * <p><b>缺失字段按建表 DDL 的默认值补齐</b>，与 {@code JdbcConfigRepository} 读出来的对象逐字段一致：
  * {@code interface_order / version / del_status / deleted_seq → 0}、{@code status → 1}、
  * {@code result_flag / success_value / strategy_name / remark → ''}。唯一例外是
@@ -45,7 +50,7 @@ import java.util.regex.Pattern;
  * 「<b>按返回顺序</b>生效」，所以按下标（从 1 起）补齐，而不是一律填 0 退化成靠主键兜底。</p>
  *
  * <p><b>必填字段按 DDL 判定</b>：必填 = 建表脚本里 {@code NOT NULL} 且<b>没有</b> {@code DEFAULT} 的列
- * （配置：{@code interface_no / interface_code / interface_name / busi_node / bank_code}；
+ * （配置：{@code interface_no / interface_code / interface_name / busi_node / partner_code}；
  * 分支：{@code interface_no / logic_branch_name}）。缺一个就抛 {@link IfmapConfigException}
  * 并说明是第几条、缺哪个字段 —— 不留 null 让引擎在后面某个环节莫名报错。</p>
  *
@@ -98,9 +103,9 @@ public final class JsonConfigMapper {
         c.setInterfaceCode(required(row, "interfaceCode", source));
         c.setInterfaceName(required(row, "interfaceName", source));
         c.setBusiNode(required(row, "busiNode", source));
-        c.setBankCode(required(row, "bankCode", source));
+        c.setPartnerCode(requiredAny(row, source, "partnerCode", "bankCode"));
         c.setProjectCode(text(row, "projectCode"));
-        c.setBankName(text(row, "bankName"));
+        c.setPartnerName(textAny(row, "partnerName", "bankName"));
         c.setFinancingMode(text(row, "financingMode"));
         c.setFrontInterfaceNo(text(row, "frontInterfaceNo"));
         c.setInterfaceOrder(integer(row, "interfaceOrder", source, 0));
@@ -202,7 +207,28 @@ public final class JsonConfigMapper {
 
     /** 文本列：缺失/JSON null → null；数字、布尔转文本；对象/数组直接失败（避免出现 {@code {a=1}} 这种 Java toString）。 */
     private static String text(Map<String, Object> row, String field) {
-        Object value = row.get(normalizeKey(field));
+        return textValue(row.get(normalizeKey(field)), field);
+    }
+
+    /**
+     * 同一逻辑字段的<b>多个可接受键名</b>（新键优先、旧键兜底）。
+     *
+     * <p>用于跨版本的键名兼容：键名归一化后逐个查找，取第一个<b>存在</b>的值（值为 JSON null
+     * 视作不存在，继续试下一个）。一个都没有 → 返回 {@code null}，由调用方决定是报错还是取默认值。</p>
+     *
+     * @param names 可接受的键名，按优先级排列；至少要有一个
+     */
+    private static String textAny(Map<String, Object> row, String... names) {
+        for (String name : names) {
+            Object value = row.get(normalizeKey(name));
+            if (value != null) {
+                return textValue(value, names[0]);
+            }
+        }
+        return null;
+    }
+
+    private static String textValue(Object value, String field) {
         if (value == null) {
             return null;
         }
@@ -226,6 +252,15 @@ public final class JsonConfigMapper {
         String value = text(row, field);
         if (value == null || value.trim().isEmpty()) {
             throw new IfmapConfigException(source + "缺少必填字段：" + field);
+        }
+        return value;
+    }
+
+    /** 必填文本列（多键名版）：全部键名都取不到或空白 → 失败，报错用<b>首选键名</b>。 */
+    private static String requiredAny(Map<String, Object> row, String source, String... names) {
+        String value = textAny(row, names);
+        if (value == null || value.trim().isEmpty()) {
+            throw new IfmapConfigException(source + "缺少必填字段：" + names[0]);
         }
         return value;
     }

@@ -86,8 +86,8 @@ final class AdminTestSupport {
         config.setInterfaceCode("CMB_" + interfaceNo);
         config.setInterfaceName("测试接口 " + interfaceNo);
         config.setBusiNode(busiNode);
-        config.setBankCode("CMB");
-        config.setBankName("招商银行");
+        config.setPartnerCode("CMB");
+        config.setPartnerName("招商银行");
         config.setInterfaceOrder(order);
         config.setRequestParamTemplate("{\"bizNo\":\"$.bizNo\",\"amount\":\"@FUN(numRound,$.amount,2)\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");

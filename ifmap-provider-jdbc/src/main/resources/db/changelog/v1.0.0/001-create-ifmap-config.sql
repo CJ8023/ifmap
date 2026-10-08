@@ -22,8 +22,8 @@ CREATE TABLE `${tablePrefix}config` (
   `project_code`              varchar(64)           DEFAULT NULL       COMMENT '项目编号',
   `interface_name`            varchar(128) NOT NULL                    COMMENT '接口名称',
   `busi_node`                 varchar(32)  NOT NULL                    COMMENT '业务节点（取值由宿主机注册）',
-  `bank_code`                 varchar(32)  NOT NULL                    COMMENT '资方编码',
-  `bank_name`                 varchar(128)          DEFAULT NULL       COMMENT '资方名称',
+  `partner_code`              varchar(32)  NOT NULL                    COMMENT '合作机构编码',
+  `partner_name`              varchar(128)          DEFAULT NULL       COMMENT '合作机构名称',
   `financing_mode`            varchar(32)           DEFAULT NULL       COMMENT '融资模式',
   `front_interface_no`        varchar(64)           DEFAULT NULL       COMMENT '前置接口编号（空=无前置）',
   `interface_order`           smallint     NOT NULL DEFAULT 0           COMMENT '接口执行顺序，升序；同值按 key_id 兜底',
@@ -45,7 +45,7 @@ CREATE TABLE `${tablePrefix}config` (
   `modify_request_id`         varchar(40)  NOT NULL DEFAULT ''          COMMENT '修改请求ID',
   PRIMARY KEY (`key_id`),
   UNIQUE KEY `uk_${tablePrefix}config_biz`   (`tenant_id`,`interface_no`,`busi_node`,`interface_order`,`deleted_seq`),
-  KEY `idx_${tablePrefix}config_list`  (`tenant_id`,`del_status`,`busi_node`,`bank_code`),
+  KEY `idx_${tablePrefix}config_list`  (`tenant_id`,`del_status`,`busi_node`,`partner_code`),
   KEY `idx_${tablePrefix}config_front` (`tenant_id`,`del_status`,`front_interface_no`),
   KEY `idx_${tablePrefix}config_code`  (`tenant_id`,`del_status`,`interface_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC

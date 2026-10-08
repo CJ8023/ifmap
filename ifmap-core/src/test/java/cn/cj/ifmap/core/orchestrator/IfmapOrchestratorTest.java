@@ -20,11 +20,11 @@ import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.exception.IfmapStrategyException;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.rule.IfmapRule;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
 import cn.cj.ifmap.core.spi.DefaultLogMasker;
 import cn.cj.ifmap.core.spi.HeaderTenantResolver;
@@ -76,7 +76,7 @@ class IfmapOrchestratorTest {
     }
 
     /** 组包策略。 */
-    @cn.cj.ifmap.core.strategy.FullParam(bankCode = "CMB", busiNode = "GP81")
+    @cn.cj.ifmap.core.strategy.FullParam(partnerCode = "CMB", busiNode = "GP81")
     public static class CmbFullParam implements FullParamStrategy {
         @Override
         public Map<String, Object> assemble(StrategyContext context) {
@@ -131,7 +131,7 @@ class IfmapOrchestratorTest {
     }
 
     /** 捕获出网入参的网关。 */
-    static final class CapturingGateway implements BankServiceGateway {
+    static final class CapturingGateway implements PartnerServiceGateway {
         final List<String> requests = new ArrayList<String>();
         private final String response;
 
@@ -140,7 +140,7 @@ class IfmapOrchestratorTest {
         }
 
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             requests.add(call.getRequestJson());
             return response;
         }
@@ -164,7 +164,7 @@ class IfmapOrchestratorTest {
 
     private IfmapConfig mainConfig(String interfaceNo, int order, long keyId) {
         IfmapConfig config = TestConfigs.config(interfaceNo, "GP81", order, keyId);
-        config.setBankCode("CMB");
+        config.setPartnerCode("CMB");
         config.setRequestParamTemplate("{\"orgNo\":\"@FUN(orgNo,$.orgCode)\",\"acctName\":\"$.acctName\""
                 + ",\"fullParam\":\"$.fullParam\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
@@ -173,7 +173,7 @@ class IfmapOrchestratorTest {
         return config;
     }
 
-    private IfmapOrchestrator orchestrator(BankServiceGateway gateway, ActionRegistry actions) {
+    private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions) {
         SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
         specialDeals.register("extraParamStrategy", new ExtraParamStrategy());
         FullParamStrategyRegistry fullParams = new FullParamStrategyRegistry();

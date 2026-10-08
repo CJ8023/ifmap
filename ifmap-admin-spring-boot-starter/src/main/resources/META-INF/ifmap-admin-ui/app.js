@@ -275,8 +275,8 @@
     { name: 'interfaceName', label: '接口名称' },
     { name: 'projectCode', label: '项目编号' },
     { name: 'busiNode', label: '业务节点' },
-    { name: 'bankCode', label: '银行代码', dict: 'bankCode' },
-    { name: 'bankName', label: '银行名称' },
+    { name: 'partnerCode', label: '合作机构代码', dict: 'partnerCode' },
+    { name: 'partnerName', label: '合作机构名称' },
     { name: 'financingMode', label: '融资模式', dict: 'financingMode' },
     { name: 'frontInterfaceNo', label: '前置接口编号' },
     { name: 'interfaceOrder', label: '执行顺序', type: 'number' },
@@ -309,7 +309,7 @@
       tenantId: el('f-tenantId') ? el('f-tenantId').value.trim() : '',
       interfaceNo: el('f-interfaceNo') ? el('f-interfaceNo').value.trim() : '',
       busiNode: el('f-busiNode') ? el('f-busiNode').value.trim() : '',
-      bankCode: el('f-bankCode') ? el('f-bankCode').value.trim() : '',
+      partnerCode: el('f-partnerCode') ? el('f-partnerCode').value.trim() : '',
       status: el('f-status') ? el('f-status').value : '',
       includeDeleted: el('f-includeDeleted') && el('f-includeDeleted').checked ? 'true' : '',
       page: state.page,
@@ -335,7 +335,7 @@
         '<td>' + esc(config.tenantId) + '</td>' +
         '<td>' + esc(config.interfaceNo) + '</td>' +
         '<td>' + esc(config.busiNode) + '</td>' +
-        '<td>' + esc(config.bankCode) + '</td>' +
+        '<td>' + esc(config.partnerCode) + '</td>' +
         '<td>' + esc(config.interfaceOrder) + '</td>' +
         '<td>' + esc(config.strategyName) + '</td>' +
         '<td>' + statusLabel(config.status) + '</td>' +

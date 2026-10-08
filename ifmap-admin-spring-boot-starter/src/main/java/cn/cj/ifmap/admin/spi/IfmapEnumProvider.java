@@ -27,7 +27,7 @@ import java.util.Map;
  *
  * <p>约定：</p>
  * <ul>
- *   <li>key 用<b>字段名</b>（{@code bankCode} / {@code financingMode} / {@code status} …），
+ *   <li>key 用<b>字段名</b>（{@code partnerCode} / {@code financingMode} / {@code status} …），
  *       页面按同名字段把它渲染成 {@code <select>}；</li>
  *   <li>value 是下拉项，顺序即展示顺序（内部用 {@code LinkedHashMap} 保持插序）；</li>
  *   <li>实现必须是<b>只读且无副作用</b>的：页面每次加载都会调用一次，不要在这里写库或外呼。</li>
@@ -36,7 +36,7 @@ import java.util.Map;
  * <pre>{@code
  * @Bean
  * public IfmapEnumProvider enumProvider() {
- *     return () -> Map.of("bankCode", List.of(EnumOption.of("CMB", "招商银行")),
+ *     return () -> Map.of("partnerCode", List.of(EnumOption.of("CMB", "招商银行")),
  *                         "status", List.of(EnumOption.of("1", "启用"),
  *                                           EnumOption.of("0", "停用")));
  * }

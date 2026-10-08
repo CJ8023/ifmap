@@ -16,12 +16,12 @@
 package cn.cj.ifmap.remote;
 
 import cn.cj.ifmap.core.IfmapEngine;
-import cn.cj.ifmap.core.model.BankCall;
+import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.rule.IfmapRule;
-import cn.cj.ifmap.core.spi.BankServiceGateway;
+import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.DefaultLogMasker;
 import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
 import cn.cj.ifmap.core.spi.TenantResolver;
@@ -60,7 +60,7 @@ class RemoteConfigRepositoryEngineTest {
     /** 远端配置报文：结果的 {@code $.code} 等于 {@code 0000} 判成功。 */
     private static final String CONFIG_JSON = "["
             + "{\"key_id\":1001,\"interface_no\":\"IF_REMOTE\",\"interface_code\":\"CODE\","
-            + "\"interface_name\":\"远端接口\",\"busi_node\":\"GP81\",\"bank_code\":\"CMB\","
+            + "\"interface_name\":\"远端接口\",\"busi_node\":\"GP81\",\"partner_code\":\"CMB\","
             + "\"interface_order\":1,"
             + "\"request_param_template\":\"{\\\"orgNo\\\":\\\"@FUN(orgNo,$.orgCode)\\\",\\\"acctName\\\":\\\"$.acctName\\\"}\","
             + "\"response_param_template\":\"{\\\"applyNo\\\":\\\"$.data.applyNo\\\"}\","
@@ -195,7 +195,7 @@ class RemoteConfigRepositoryEngineTest {
         assertTrue(fetcher.posts.get(0).contains("\"executionResult\":\"FAIL\""), fetcher.posts.get(0));
     }
 
-    private IfmapOrchestrator orchestrator(RemoteConfigRepository repository, BankServiceGateway gateway,
+    private IfmapOrchestrator orchestrator(RemoteConfigRepository repository, PartnerServiceGateway gateway,
                                            List<String> executed) {
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction(executed));
@@ -242,7 +242,7 @@ class RemoteConfigRepositoryEngineTest {
     }
 
     /** 捕获出网报文。 */
-    private static final class CapturingGateway implements BankServiceGateway {
+    private static final class CapturingGateway implements PartnerServiceGateway {
 
         private final List<String> requests = new ArrayList<String>();
         private final String response;
@@ -252,7 +252,7 @@ class RemoteConfigRepositoryEngineTest {
         }
 
         @Override
-        public String exchange(BankCall call) {
+        public String exchange(PartnerCall call) {
             requests.add(call.getRequestJson());
             return response;
         }

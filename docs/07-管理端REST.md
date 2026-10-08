@@ -58,7 +58,7 @@ ifmap:
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/configs` | 分页列表：`tenantId` / `interfaceNo` / `busiNode` / `bankCode` / `status` / `includeDeleted` / `page` / `size` |
+| GET | `/configs` | 分页列表：`tenantId` / `interfaceNo` / `busiNode` / `partnerCode` / `status` / `includeDeleted` / `page` / `size` |
 | GET | `/configs/{keyId}` | 详情 |
 | POST | `/configs` | 新增（含校验 + 写 `CREATE` 历史） |
 | PUT | `/configs/{keyId}` | 修改（**必带 `expectedVersion`**，写 `UPDATE` 历史 + `diff`） |
@@ -124,7 +124,7 @@ ifmap:
   "ok": false,
   "error": "配置 #7 校验未通过（2 项）",
   "type": "IfmapValidationException",
-  "errors": ["bankCode 不能为空", "分支顺序重复：logic_branch_order=1（分支 命中提交）"],
+  "errors": ["partnerCode 不能为空", "分支顺序重复：logic_branch_order=1（分支 命中提交）"],
   "warnings": ["接口 IF_A 尚未配置逻辑分支"]
 }
 ```
@@ -137,7 +137,7 @@ ifmap:
 
 | 校验 | 依据 |
 |---|---|
-| 必填列非空 | `interfaceNo` / `interfaceCode` / `interfaceName` / `busiNode` / `bankCode` |
+| 必填列非空 | `interfaceNo` / `interfaceCode` / `interfaceName` / `busiNode` / `partnerCode` |
 | 模板是合法 JSON | `request_param_template` / `response_param_template` |
 | `$.path` 路径合法 | `JsonOps.isValidPath` —— Jackson 实现只做 JsonPath 编译，**拦不住 `$.a[`**；`ifmap-json-fastjson` 的实现额外要求引号外括号配对，能拦住（差异见 [`docs/05`](05-SpringBoot集成.md) §3.2） |
 | `@FUN` 规则存在且参数可匹配重载 | `ContractValidator`（引擎在位时）；引擎缺席时**至少校验模板 JSON 合法**（历史脏数据真实存在，不能静默放过） |
@@ -266,16 +266,16 @@ ifmap **不建字典表**（设计 Q8）：码值含义是宿主机业务，引�
 
 ```java
 @Bean
-public IfmapEnumProvider bankEnums() {
+public IfmapEnumProvider partnerEnums() {
     return () -> Map.of(
-            "bankCode", List.of(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")),
+            "partnerCode", List.of(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")),
             "status",   List.of(EnumOption.of("1", "启用"), EnumOption.of("0", "停用")));
 }
 ```
 
 | 约定 | 说明 |
 |---|---|
-| key | **模板里的字段名**（元素 `data-field`），如 `bankCode`；页面按名字取，取不到就是普通输入框 |
+| key | **模板里的字段名**（元素 `data-field`），如 `partnerCode`；页面按名字取，取不到就是普通输入框 |
 | 返回 | `Map<String, List<EnumOption>>`；`EnumOption.value` 必填（空值直接 `IllegalArgumentException`），`label` 可省（省了用 `value`） |
 | 没注册 | `/enums` 返回 `200 {}`（**不是 404**）：页面只有"没有字典"这一条正常分支，少一个 SPI 不会让页面报错 |
 | 脏数据 | `null` key / `null` 列表 / `null` 项会被跳过，坏一项不影响其它字段 |

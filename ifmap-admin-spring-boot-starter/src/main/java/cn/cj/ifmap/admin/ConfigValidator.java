@@ -92,7 +92,7 @@ public class ConfigValidator {
         required(result, "interfaceCode", config.getInterfaceCode());
         required(result, "interfaceName", config.getInterfaceName());
         required(result, "busiNode", config.getBusiNode());
-        required(result, "bankCode", config.getBankCode());
+        required(result, "partnerCode", config.getPartnerCode());
 
         checkTemplateContract(config, result);
         checkJsonPaths(config, result);

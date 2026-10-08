@@ -34,7 +34,7 @@ public class ConfigQuery implements Serializable {
     private String tenantId;
     private String interfaceNo;
     private String busiNode;
-    private String bankCode;
+    private String partnerCode;
     private Integer status;
     /** 为 true 时连已删除的配置一起返回（管理端"回收站"视图）。 */
     private boolean includeDeleted;
@@ -74,12 +74,12 @@ public class ConfigQuery implements Serializable {
         return this;
     }
 
-    public String getBankCode() {
-        return bankCode;
+    public String getPartnerCode() {
+        return partnerCode;
     }
 
-    public ConfigQuery setBankCode(String bankCode) {
-        this.bankCode = bankCode;
+    public ConfigQuery setPartnerCode(String partnerCode) {
+        this.partnerCode = partnerCode;
         return this;
     }
 

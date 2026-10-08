@@ -80,7 +80,7 @@ public final class Text {
             return (BigDecimal) v;
         }
         if (v instanceof Number) {
-            return new BigDecimal(v.toString());
+            return Values.toPlainDecimal((Number) v);
         }
         String s = String.valueOf(v).trim();
         if (s.length() == 0) {
@@ -135,9 +135,23 @@ public final class Text {
             if (!first) {
                 sb.append(separator);
             }
-            sb.append(item == null ? "" : String.valueOf(item));
+            sb.append(joinItem(item));
             first = false;
         }
         return sb.toString();
+    }
+
+    /**
+     * 拼接元素的文本化：数字 / 布尔 / 字符走 {@link Values#stringify}（不出科学计数法），
+     * 容器仍走 {@code String.valueOf}（「把对象数组拼成文本」的残留风险见设计 §8 R7，本批有意不动）。
+     */
+    private static String joinItem(Object item) {
+        if (item == null) {
+            return "";
+        }
+        if (item instanceof Map || item instanceof Collection || item instanceof Object[]) {
+            return String.valueOf(item);
+        }
+        return Values.stringify(item);
     }
 }

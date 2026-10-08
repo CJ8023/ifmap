@@ -15,6 +15,8 @@
  */
 package cn.cj.ifmap.core.rule;
 
+import cn.cj.ifmap.core.util.Values;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -125,7 +127,8 @@ final class Coercions {
             return t == Object.class && src == null ? null : src;
         }
         if (t == String.class) {
-            return String.valueOf(src);
+            // 与 TemplateEngine 同一口径：小数字面量不出科学计数法（否则 1.0E10 会进报文）
+            return Values.stringify(src);
         }
         if (t == Integer.class) {
             return src instanceof Number ? ((Number) src).intValue() : new BigDecimal(String.valueOf(src).trim()).intValue();

@@ -21,6 +21,7 @@ import cn.cj.ifmap.core.json.JsonReadContext;
 import cn.cj.ifmap.core.rule.RuleContext;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.util.Text;
+import cn.cj.ifmap.core.util.Values;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -297,20 +298,11 @@ public final class TemplateEngine {
 
     /** 是否为模板变量（而非字面量）。 */
     public static boolean isKey(String valueKey) {
-        if (valueKey == null || valueKey.length() == 0) {
-            return false;
-        }
-        return isFun(valueKey)
-                || valueKey.indexOf(TemplateConstants.SEPARATOR_AND) >= 0
-                || valueKey.indexOf(TemplateConstants.SEPARATOR_OR) >= 0
-                || valueKey.indexOf(TemplateConstants.SEPARATOR_CONCAT) >= 0
-                || valueKey.indexOf(TemplateConstants.SEPARATOR_APPEND) >= 0
-                || valueKey.indexOf(TemplateConstants.SEPARATOR_SUM) >= 0
-                || valueKey.startsWith(TemplateConstants.PATH_PREFIX);
+        return DslExpressions.isExpression(valueKey);
     }
 
     private static boolean isFun(String valueKey) {
-        return valueKey.startsWith(TemplateConstants.FUN_PREFIX) && valueKey.endsWith(TemplateConstants.FUN_SUFFIX);
+        return DslExpressions.isFun(valueKey);
     }
 
     /** 解析单个取值表达式。 */
@@ -318,9 +310,9 @@ public final class TemplateEngine {
         if (isFun(valueKey)) {
             return invokeFun(valueKey, source, ctx, fieldPath);
         }
-        if (contains(valueKey, TemplateConstants.SEPARATOR_AND)) {
+        if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_AND)) {
             List<Object> merged = new ArrayList<Object>();
-            for (String part : split(valueKey, TemplateConstants.SEPARATOR_AND)) {
+            for (String part : DslExpressions.infixOperands(valueKey, TemplateConstants.SEPARATOR_AND)) {
                 Object value = resolve(part, source, ctx, fieldPath);
                 if (value instanceof List) {
                     merged.addAll((List<?>) value);
@@ -330,14 +322,14 @@ public final class TemplateEngine {
             }
             return merged;
         }
-        if (contains(valueKey, TemplateConstants.SEPARATOR_CONCAT)) {
+        if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_CONCAT)) {
             return joinResolved(valueKey, TemplateConstants.SEPARATOR_CONCAT, source, ctx, fieldPath, ",");
         }
-        if (contains(valueKey, TemplateConstants.SEPARATOR_APPEND)) {
+        if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_APPEND)) {
             return joinResolved(valueKey, TemplateConstants.SEPARATOR_APPEND, source, ctx, fieldPath, "");
         }
-        if (contains(valueKey, TemplateConstants.SEPARATOR_OR)) {
-            for (String part : split(valueKey, TemplateConstants.SEPARATOR_OR)) {
+        if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_OR)) {
+            for (String part : DslExpressions.infixOperands(valueKey, TemplateConstants.SEPARATOR_OR)) {
                 Object value = resolve(part, source, ctx, fieldPath);
                 if (value != null) {
                     return value;
@@ -347,9 +339,9 @@ public final class TemplateEngine {
             log.warn("模板字段 [{}] 的 @or@ 表达式 [{}] 全部分支取值为空", fieldPath, valueKey);
             return null;
         }
-        if (contains(valueKey, TemplateConstants.SEPARATOR_SUM)) {
+        if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_SUM)) {
             BigDecimal sum = BigDecimal.ZERO;
-            for (String part : split(valueKey, TemplateConstants.SEPARATOR_SUM)) {
+            for (String part : DslExpressions.infixOperands(valueKey, TemplateConstants.SEPARATOR_SUM)) {
                 Object value = resolve(part, source, ctx, fieldPath);
                 if (value instanceof List) {
                     for (Object item : (List<?>) value) {
@@ -359,13 +351,15 @@ public final class TemplateEngine {
                     sum = sum.add(toDecimal(value));
                 }
             }
-            return sum;
+            // 金额统一返回字符串（与 numSum / NumberRules 口径一致）：BigDecimal 直接进报文
+            // 会是 JSON number，而源文字的位数（10.00 的两位）只有 String 能携带
+            return Values.stringify(sum);
         }
         if (TemplateConstants.PATH_SEQ_NO.equals(valueKey)) {
             return seqNo();
         }
         if (valueKey.startsWith(TemplateConstants.PATH_PREFIX)) {
-            return normalizePathValue(source.read(valueKey, valueKey.indexOf('*') >= 0));
+            return normalize(source.read(valueKey, valueKey.indexOf('*') >= 0));
         }
         return valueKey;
     }
@@ -373,7 +367,7 @@ public final class TemplateEngine {
     private Object joinResolved(String valueKey, String separator, JsonReadContext source,
                                 RuleContext ctx, String fieldPath, String joiner) {
         List<Object> values = new ArrayList<Object>();
-        for (String part : split(valueKey, separator)) {
+        for (String part : DslExpressions.infixOperands(valueKey, separator)) {
             Object value = resolve(part, source, ctx, fieldPath);
             if (value instanceof List) {
                 values.addAll((List<?>) value);
@@ -386,80 +380,54 @@ public final class TemplateEngine {
 
     /** 调用规则。 */
     private Object invokeFun(String valueKey, JsonReadContext source, RuleContext ctx, String fieldPath) {
-        String inner = valueKey.substring(TemplateConstants.FUN_PREFIX.length(),
-                valueKey.length() - TemplateConstants.FUN_SUFFIX.length());
+        String inner = DslExpressions.inner(valueKey);
         if (Text.isBlank(inner)) {
             log.warn("模板字段 [{}] 出现空函数调用 [{}]，按取值为空处理", fieldPath, valueKey);
             return null;
         }
-        List<String> parts = splitTopLevel(inner);
-        String ruleName = parts.get(0).trim();
+        String ruleName = DslExpressions.funName(valueKey);
         if (Text.isEmpty(ruleName)) {
             log.warn("模板字段 [{}] 的函数名称为空 [{}]，按取值为空处理", fieldPath, valueKey);
             return null;
         }
         // 规则不存在 -> 立刻抛 RuleNotFoundException，不做静默降级
         boolean allowNullArgs = registry.descriptor(ruleName).allowsNullArgs();
-        Object[] args = new Object[parts.size() - 1];
-        for (int i = 1; i < parts.size(); i++) {
-            String expr = parts.get(i).trim();
+        List<String> args = DslExpressions.funArgs(valueKey);
+        Object[] resolved = new Object[args.size()];
+        for (int i = 0; i < args.size(); i++) {
+            String expr = args.get(i);
             Object value = expr.length() == 0 ? "" : resolve(expr, source, ctx, fieldPath);
             if (value == null && !allowNullArgs) {
                 log.warn("模板字段 [{}] 调用规则 [{}] 时第 {} 个参数 [{}] 取值为空，按 {} 处理",
-                        fieldPath, ruleName, i, expr, nullPolicy);
+                        fieldPath, ruleName, i + 1, expr, nullPolicy);
                 return null;
             }
-            args[i - 1] = value;
+            resolved[i] = value;
         }
-        return registry.invoke(ruleName, ctx, args);
+        return registry.invoke(ruleName, ctx, resolved);
     }
 
     /** 按顶层逗号切分函数参数（支持参数里嵌套 @FUN(...)）。 */
     static List<String> splitTopLevel(String inner) {
-        List<String> parts = new ArrayList<String>();
-        int depth = 0;
-        StringBuilder current = new StringBuilder();
-        for (int i = 0; i < inner.length(); i++) {
-            char c = inner.charAt(i);
-            if (c == '(') {
-                depth++;
-            } else if (c == ')') {
-                depth--;
-            }
-            if (c == ',' && depth == 0) {
-                parts.add(current.toString());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        parts.add(current.toString());
-        return parts;
+        return DslExpressions.splitTopLevel(inner);
     }
 
-    private static List<String> split(String value, String separator) {
-        List<String> parts = new ArrayList<String>();
-        int from = 0;
-        while (true) {
-            int idx = value.indexOf(separator, from);
-            if (idx < 0) {
-                parts.add(value.substring(from).trim());
-                return parts;
-            }
-            parts.add(value.substring(from, idx).trim());
-            from = idx + separator.length();
+    /**
+     * 取到的值归一化为「可进报文」的形态：
+     * 标量 -> 文本（{@link Values#stringify}，小数保尾零、不出科学计数法）；
+     * 数组 / 对象 -> 递归规整但<b>保持 JSON 层类型</b>（数组还是数组）。
+     *
+     * <p>null 必须原样返回 null：上游靠它区分「取不到值」并走 {@link NullPolicy}，
+     * 归一成空串会让 SKIP_FIELD 失效。</p>
+     */
+    private Object normalize(Object value) {
+        if (value instanceof Map || value instanceof List || value instanceof Object[]) {
+            return Values.plainify(value);
         }
-    }
-
-    private static boolean contains(String value, String token) {
-        return value.indexOf(token) >= 0;
-    }
-
-    private Object normalizePathValue(Object value) {
-        if (value instanceof Number || value instanceof Boolean) {
-            return String.valueOf(value);
+        if (value == null) {
+            return null;
         }
-        return value;
+        return Values.stringify(value);
     }
 
     private static BigDecimal toDecimal(Object value) {
@@ -470,7 +438,7 @@ public final class TemplateEngine {
             return (BigDecimal) value;
         }
         if (value instanceof Number) {
-            return new BigDecimal(value.toString());
+            return Values.toPlainDecimal((Number) value);
         }
         String s = String.valueOf(value).trim();
         if (s.length() == 0) {

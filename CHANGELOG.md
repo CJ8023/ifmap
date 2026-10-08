@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### Fixed（P3 真库迁移演练：ecc-to-ifmap kit）
+- **把迁移 kit 拿到真库跑了一遍，修掉 4 处「参考环境假设」**：在专用测试库 `ifmap` 内、以两套真实存量
+  （`yfl_bill.bankint_config` 22 列 / `yfl_financing_scheme.bankint_config` 25 列）各建副本真数据，完整执行
+  `00 → 05`（含 12 组历史重复行的软删去重），暴露并修掉：
+  1. **`00-precheck.sql` 卡在第 0 步**：§8.1 硬引用 `financing_mode`，而**实测两套真实存量都没有这一列** ⇒ 1054
+     （`mysql < 00-precheck.sql` 会直接停在这里）。改为**按 `information_schema` 动态生成体检列清单**
+     （只体检当前库真实存在的列，缺列不再 1054），并新增 **§3.1「列齐备性预检」**：把 kit 引用到的存量列逐列对照，
+     缺失的一次全列出来（**待办清单，不是门禁** —— 各环境形态本就不同）
+  2. **`financing_mode` 从「改类型」改成「新增列」**：设计文档假设存量是 `varchar(50)`，实测**没有任何真实变体有它**，
+     而 ifmap 的 `JdbcConfigWriter`（INSERT/UPDATE）与 `IfmapRowMappers`（SELECT）**显式写了这一列** ⇒ 少了它运行期
+     每次读写配置都是 1054。`01-add-columns.sql` 新增 **1.1 段**把它备好（单独一条 `ADD COLUMN`：存量已有该列的
+     环境只会这条报 `1060`，爆炸半径最小；`01` 自检 5 → 6 个新列）
+  3. **`03-modify-and-index.sql` 的执行日志段漏了 3 列**（实测两套存量都不齐）：`interface_no` 是 `varchar(50)`
+     （目标 64，超长会 `1406`）、`biz_id` 在 `yfl_bill` 变体里是 **`bigint`**（目标是 `varchar(64)`；ifmap 写的是字符串，
+     不改会在严格模式下 **`1366` → 整条执行日志丢行**）、`execution_time` 目标要求 `NOT NULL DEFAULT 0`（耗时 ms）。
+     三条都加进已经 `ALGORITHM=COPY` 的 C-2 段（不额外重建表）；同一段顺带把三张表的 `key_id`/`tenant_id`
+     `bigint(19)` **显示宽度**与列注释对齐目标 DDL（否则按列名核对的 `05` 会一直报差异）。§5 的 gh-ost `--alter` 同步补齐
+  4. **`05-verify.sql` / `README.md` 口径更新**：关键列清单补 `financing_mode`/`partner_code`/`partner_name`/`execution_time`，
+     说明「列数多不算错、要核对的是目标列齐备」；`README.md` 新增 **§9.4「存量结构差异（实测结论）」** 记录两个变体的差异与处置
+- **实测验收（两套变体各一遍）**：迁移后除各自的「存量独有列」（`fig_bank_code` / `interface_url`，都是 `DEFAULT NULL`，
+  按「只增不映射」保留）外**逐列一致**（列数/类型/可空/默认值/注释、索引名与列序全对）；行数与主键指纹迁移前后一致；
+  12 组重复行软删后唯一键一次建成；再用 ifmap 真实的 `JdbcConfigRepository` / `JdbcConfigWriter` 对迁移后的表做读写探针
+  **18/18 通过**（读存量配置含中文与改名后的 `partner_code`、`1062` 唯一键拦截、软删后可重插、20 万字符日志报文**原样**落库读回）
+- **文档**：迁移 kit `README.md` §9.4 与 [`docs/10`](docs/10-迁移指南.md) §3.3 明确写清 **「这套 kit 不是环境无关的」**：
+  换环境必须先把 `00-precheck` 第 3 步 + 3.1 步的输出当输入逐列核对一次
+
 ### Added
 - **真库（MySQL）测试档 + 执行日志列缺陷修复（本批）**：数据库相关测试过去只能在 **H2 内存库** 上跑，而 H2 永远测不出
   MySQL 专属语义（`json` 列校验与规范化、表尾存储引擎选项、`datetime(3)`、STRICT 模式），于是一个**只会在真库发生的静默丢日志缺陷**

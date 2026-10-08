@@ -44,6 +44,24 @@ ALTER TABLE `bankint_config`
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
+-- 1.1) ★ 接口配置表：条件列 `financing_mode`
+--      目标 DDL 有 `financing_mode varchar(32)`，而且 ifmap 的配置读写 SQL **显式带了这一列**
+--      （`JdbcConfigWriter` 的 INSERT/UPDATE、`IfmapRowMappers` 的 SELECT）—— 迁完没有它，
+--      运行期每次读写配置都会 1054。所以它必须存在。
+--
+--      ⚠️ 存量环境分两种（实测，见 README §9.4）：
+--        · 存量**没有**该列 → 执行下面这条（先跑 00-precheck 第 3.1 步，清单里会出现 financing_mode）；
+--        · 存量**已有**该列 → **删掉下面这条语句**，否则报 `1060 Duplicate column name 'financing_mode'`；
+--          存量已有时它的类型交给 03 的 MODIFY 归一成 varchar(32)。
+--
+--      单独一条 ALTER（不并进下面那条）：万一存量已有该列，失败范围只限本条，
+--      不会把 status / version / deleted_seq 三个 ADD COLUMN 一起拖下水。
+-- ---------------------------------------------------------------------------
+ALTER TABLE `bankint_config`
+  ADD COLUMN `financing_mode` varchar(32) DEFAULT NULL COMMENT '融资模式' AFTER `bank_name`,
+  ALGORITHM=INPLACE, LOCK=NONE;
+
+-- ---------------------------------------------------------------------------
 -- 2) 逻辑分支表：+2 列（logic_branch_order / deleted_seq）
 -- ---------------------------------------------------------------------------
 ALTER TABLE `bankint_logic_branch_config`
@@ -61,18 +79,20 @@ ALTER TABLE `bankint_execution_log`
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
--- 4) 执行后自检：5 个新列都应存在
+-- 4) 执行后自检：6 个新列都应存在
 -- ---------------------------------------------------------------------------
 SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
   FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
-   AND COLUMN_NAME IN ('status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg')
+   AND COLUMN_NAME IN ('financing_mode', 'status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg')
  ORDER BY TABLE_NAME, COLUMN_NAME;
--- **期望 5 行**。少于 5 行说明有语句没执行成功，不要继续。
+-- **期望 6 行**；若存量本来就有 `financing_mode`、按上面说明删掉了那条 ADD COLUMN，则是 5 行。
+-- 少于期望说明有语句没执行成功，不要继续。
 
 -- ---------------------------------------------------------------------------
 -- 回滚（如需）：
+--   ALTER TABLE `bankint_config` DROP COLUMN `financing_mode`, ALGORITHM=INPLACE, LOCK=NONE;   -- 仅当本条 ADD 执行过
 --   ALTER TABLE `bankint_config` DROP COLUMN `deleted_seq`, DROP COLUMN `version`, DROP COLUMN `status`,
 --     ALGORITHM=INPLACE, LOCK=NONE;
 --   ALTER TABLE `bankint_logic_branch_config` DROP COLUMN `deleted_seq`, DROP COLUMN `logic_branch_order`,

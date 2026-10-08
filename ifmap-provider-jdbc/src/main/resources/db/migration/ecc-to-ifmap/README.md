@@ -26,7 +26,7 @@ sed -i 's/bankint_/acme_/g' *.sql
 |---|---|---|
 | 表名 | **变** | `bankint_*` → `ifmap_*`（项目更名后 DDL 同步更名） |
 | 列名 | **2 处改名** | `bank_code` → `partner_code`、`bank_name` → `partner_name`（标识符不再锁死在「银行」：同一列要承载银行 / 保理 / 信托 / 小贷 / 保险等各类合作机构）；**其余列名原样保留** → 没有 ETL、没有字段映射表 |
-| 列定义 | 部分变化 | 新增 6 列、改类型/长度/可空 32 列、加 9 个索引/唯一键 |
+| 列定义 | 部分变化 | 新增 6 列（config 3 / branch 2 / log 1）+ **1 个条件新增列** `financing_mode`（存量没有就加，见 §9.4 ①；`yfl_bill` 那一类还要再补 `interface_code`/`project_code`/`interface_name`，见 §9.4 ③）、改类型/长度/可空 30+ 列、加 9 个索引/唯一键 |
 
 所以整个迁移 = **`ADD COLUMN` → 回填 → 改列名与列类型 / 加唯一键与索引 → `RENAME TABLE`**。
 
@@ -85,7 +85,7 @@ sed -i 's/bankint_/acme_/g' *.sql
 | 序号 | 文件 | 做什么 | 算法 / 锁（MySQL 5.7） | 预期耗时 | 回滚 |
 |---|---|---|---|---|---|
 | 0 | `00-precheck.sql` | 只读体检：环境参数、表体量、列清单基线、**唯一键冲突**、类型可转换性、长度/NULL 超限、零值时间、兜底分支、时区 | 只读 | 配置表秒级；日志表看体量 | 不需要 |
-| 1 | `01-add-columns.sql` | 加 5 个新列（config 3 / branch 2 / log 1），全部带 `DEFAULT` | **`ALGORITHM=INPLACE, LOCK=NONE`**（纯 `ADD COLUMN`：允许并发 DML） | 秒级~分钟级 | `DROP COLUMN`（同样在线） |
+| 1 | `01-add-columns.sql` | 加 5 个新列（config 3 / branch 2 / log 1）+ **1 个条件新列** `financing_mode`（1.1 段，存量已有该列就删掉那条语句），全部带 `DEFAULT` | **`ALGORITHM=INPLACE, LOCK=NONE`**（纯 `ADD COLUMN`：允许并发 DML） | 秒级~分钟级 | `DROP COLUMN`（同样在线） |
 | 2 | `02-backfill.sql` | 回填 `deleted_seq`（历史软删行）与 `logic_branch_order`；**人工复核分支顺序** | 普通 `UPDATE` | 秒级 | 回填值可重算 |
 | 3 | `03-modify-and-index.sql` | **改列名**（`bank_code`/`bank_name` → `partner_code`/`partner_name`）+ 改类型/长度/可空 + 建唯一键与索引 | 配置表：**`ALGORITHM=COPY, LOCK=SHARED`**（改名与类型变更合并进**同一条** `ALTER`，不多花一次重建）；日志表：索引单独走在线 DDL，类型变更看体量 | 配置表秒级；日志表看体量（大表走 gh-ost） | 反向 `CHANGE COLUMN` 改回旧列名 + 按 `00` 留档的 `COLUMN_TYPE` 反向 `MODIFY`（先 `DROP INDEX`） |
 | 4 | `04-rename-tables.sql` | `RENAME TABLE bankint_* → ifmap_*`（**切换时刻**） | 元数据操作 | 毫秒级 | 再 `RENAME` 回去 |
@@ -159,7 +159,12 @@ Column Operations*。）
 gh-ost \
   --host=<db_host> --port=3306 --user=<user> --password=<pwd> \
   --database=<db_name> --table=bankint_execution_log \
-  --alter="MODIFY COLUMN \`request_param\` json DEFAULT NULL, \
+  --alter="MODIFY COLUMN \`interface_no\` varchar(64) NOT NULL, \
+           MODIFY COLUMN \`biz_id\` varchar(64) NOT NULL, \
+           MODIFY COLUMN \`execution_time\` bigint(20) NOT NULL DEFAULT 0, \
+           MODIFY COLUMN \`key_id\` bigint(20) NOT NULL, \
+           MODIFY COLUMN \`tenant_id\` bigint(20) NOT NULL DEFAULT -1, \
+           MODIFY COLUMN \`request_param\` mediumtext DEFAULT NULL, \
            MODIFY COLUMN \`response_param\` mediumtext DEFAULT NULL, \
            MODIFY COLUMN \`execution_result\` varchar(16) DEFAULT NULL, \
            MODIFY COLUMN \`remark\` varchar(512) NOT NULL DEFAULT '', \
@@ -191,6 +196,8 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 |---|---|---|
 | `LOCK=NONE is not supported ... Try LOCK=SHARED`（1846 附近） | 在"改变列类型"这种不支持并发 DML 的操作上写了 `LOCK=NONE` | 改成 `ALGORITHM=COPY, LOCK=SHARED`（本 kit 已如此） |
 | `ALGORITHM=INPLACE is not supported ... Try ALGORITHM=COPY`（1845 附近） | 同上（写了 `INPLACE`） | 改成 `ALGORITHM=COPY` |
+| `Duplicate column name 'financing_mode'`（1060） | 你的存量环境**本来就有** `financing_mode`，但跑了 `01` 的 1.1 段 | 删掉 1.1 段那条 `ADD COLUMN` 再跑（03 的 `MODIFY` 保持不变） |
+| `Unknown column 'xxx' in 'field list'`（1054）**出现在 00-precheck** | 你的存量变体缺这个列（实测两套真实存量都缺 `financing_mode`，`yfl_bill` 还缺 `interface_code`/`project_code`/`interface_name`） | 先看 3.1 步的「列齐备性清单」，按清单补 `ADD COLUMN`（第 8 条体检 8.1/8.2 已改成**只体检当前库真实存在的列**，不会再因缺列 1054） |
 | `Duplicate entry '...' for key 'uk_ifmap_config_biz'`（1062） | `00-precheck` 第 6 步没通过就跑了 03 | 处理重复数据（拉开 `interface_order` / 停用多余行）后重跑 6.1、6.3 与 03 |
 | `Data too long for column 'xxx'`（1406） | 列宽收窄（`varchar(255) → 64/128`、`longtext → mediumtext`）但有超长数据 | 按 `00-precheck` 第 8.1 条逐列清理，或放宽目标列宽 |
 | `Invalid use of NULL value`（1138）/ `Column 'x' cannot be null`（1048） | 目标为 `NOT NULL` 但存量有 NULL | 按第 8.2 条补默认值（**不要**靠列的 `DEFAULT`：显式写 NULL 不生效） |
@@ -227,7 +234,7 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 - [ ] 磁盘余量 ≥ 最大表大小 × 1.5（`COPY` / 在线加索引期间新旧两份并存）
 - [ ] 记录当前会话时区，且全流程固定 `SET time_zone='+08:00'`
 - [ ] `00-precheck.sql` 全部"期望 0 / ≤ 1"通过，输出留档（这是迁移前的**唯一**基线）
-- [ ] `01-add-columns.sql` 执行完成，自检 5 个新列都在
+- [ ] `01-add-columns.sql` 执行完成，自检 6 个新列都在（存量本来就有 `financing_mode` 时删掉那条 `ADD COLUMN`，自检为 5 行）
 - [ ] `02-backfill.sql` 执行完成，自检全 0；**分支顺序已人工复核**
 - [ ] `03-modify-and-index.sql` 执行完成：**`bank_code`/`bank_name` 已改名为 `partner_code`/`partner_name`**（用 `SHOW FULL COLUMNS` 复核）、9 条索引都在；大表走 gh-ost 且已 `--dry-run`
 - [ ] **存量模块的列名已处置**（§2 路径 A 的三种做法选一种），并用存量侧的**真实 SQL** 跑过冒烟
@@ -256,3 +263,65 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 4. **列改名（`bank_code`/`bank_name` → `partner_code`/`partner_name`）是脚本里唯一的破坏性变更**：
    它假设存量模块会被同步处置（§2）。如果你的环境做不到，**执行 03 之前先改脚本**，
    把那两条 `CHANGE COLUMN` 挪到 `04` 的停写窗口。
+
+### 9.4 存量结构差异（实测结论，2026-10）
+
+本套脚本写的是**参考环境**的存量结构。把脚本拿到真库跑过之后（在专用测试库内建副本 + 造真数据、
+完整走 `00 → 05`），确认了三件事：
+
+**① `financing_mode` 必须按「新增列」处理，不能按「改类型」处理。**
+参考环境的 `bankint_config` 有 `financing_mode varchar(50)`，而实测的两套真实存量**都没有这一列**：
+
+| 存量来源 | `bankint_config` 列数 | `financing_mode` | `interface_code` / `project_code` / `interface_name` | 其他独有列 |
+|---|---|---|---|---|
+| `yfl_bill`（ECC 服务的 dev 数据源，`application-dev.yml`） | 22 | ✗ | ✗ / ✗ / ✗ | `interface_url` |
+| `yfl_financing_scheme`（融资方案模块） | 25 | ✗ | ✓ / ✓ / ✓ | `fig_bank_code` |
+
+它不能省：ifmap 的 `JdbcConfigWriter`（INSERT/UPDATE）与 `IfmapRowMappers`（SELECT）**显式写了这一列**，
+少了它运行期每次读写配置都是 1054。处置：`01-add-columns.sql` 的 **1.1** 段已把 `ADD COLUMN financing_mode`
+备好（存量已有该列就删掉那条语句，否则 1060）。
+
+**② 先跑 `00-precheck.sql` 第 3.1 步的「列齐备性清单」，不要等 03 报 1054。**
+03 是一条几十列的 `ALTER`，报 1054 时只能看到第一个缺失列，得改一次跑一次；
+3.1 步把「kit 引用到的存量列」逐列对照 `information_schema`，缺失的一次全列出来（待办清单，不是门禁）。
+
+**③ 列数「多」不算错，要核对的是「目标列齐备」。**
+除了上面两个变体各自的独有列，实测 `yfl_bill` 变体还缺 `interface_code`/`project_code`/`interface_name` 三列，
+它们**目标 DDL 里有、存量没有** ⇒ 必须 `ADD COLUMN`（`01` 里没有这一段，需要按实际环境补），
+反过来 `interface_url` / `fig_bank_code` 是**存量独有、目标没有**，按「只增不映射」保留即可（都是 `DEFAULT NULL`，
+ifmap 的 INSERT 不写它们，不影响功能）。`05-verify.sql` 第 1 节已按这个口径补了说明。
+
+**④ 执行日志表还有三列不齐，其中一列会真的丢日志。** 实测两套存量：
+
+| 列 | 存量形态 | 目标 | 不改的后果 |
+|---|---|---|---|
+| `interface_no` | `varchar(50)` | `varchar(64)` | 超 50 字符的接口号在 `MODIFY` 时报 `1406`（先看 8.1 条） |
+| `biz_id` | `varchar(50)`（`yfl_financing_scheme`）/ **`bigint`**（`yfl_bill`） | `varchar(64)` | ifmap 写的是字符串，`bigint` 列在严格模式下报 **1366 → 整条执行日志丢行** |
+| `execution_time` | 无 `DEFAULT`，注释是「执行时间」 | `NOT NULL DEFAULT 0`，注释「执行耗时(ms)」 | 语义不合（耗时 ms vs 时间），`05` 核对会一直报差异 |
+
+因此 `03` 的 C-2 段已补上这 3 条 `MODIFY`；同一段的 `key_id` / `tenant_id` 也顺手把 `bigint(19)` 的
+**显示宽度**和列注释对齐目标 DDL（只是显示宽度，不是类型差异，但会让按列名核对的 `05` 一直报差异）。
+这些都是同一条 `COPY` 语句里的改动，不会额外重建表；走 gh-ost 的环境请用 §5 里已同步补齐的 `--alter`。
+
+**⑤ 迁移后的验收口径（实测已达成）。** 两套变体各完整跑了一遍 `00 → 05`，之后：
+
+- 结构：**除各自的「存量独有列」外逐列一致** —— 列数/类型/可空/默认值/注释、索引名与索引列序全对
+  （`yfl_financing_scheme` 多 `fig_bank_code`，`yfl_bill` 多 `interface_url`；都是 `DEFAULT NULL`，ifmap 的
+  INSERT 不写它们，按「只增不映射」保留）；
+- 数据：行数/主键指纹迁移前后一致；12 组历史重复行按 `deleted_seq` 软删后唯一键一次建成；
+- 运行期：用 ifmap 真实的 `JdbcConfigRepository` / `JdbcConfigWriter` 对迁移后的表做了读写探针
+  （读存量配置、`1062` 唯一键拦截、软删后可重插、20 万字符日志报文**原样**落库读回），全过。
+
+若你的存量是 `yfl_bill` 那一类（缺 `interface_code` / `project_code` / `interface_name`），
+在 `01` 里按目标定义补这三列即可（类型/注释与 `03` 保持一致）：
+
+```sql
+ALTER TABLE `bankint_config`
+  ADD COLUMN `interface_code` varchar(64)  NOT NULL DEFAULT '' COMMENT '接口编码（对接方接口编码）' AFTER `interface_no`,
+  ADD COLUMN `project_code`   varchar(64)  DEFAULT NULL      COMMENT '项目编号' AFTER `interface_code`,
+  ADD COLUMN `interface_name` varchar(128) NOT NULL DEFAULT '' COMMENT '接口名称' AFTER `project_code`,
+  ALGORITHM=INPLACE, LOCK=NONE;
+```
+
+> 结论：**换一个环境就要把 `00-precheck` 第 3 步 + 3.1 步的输出当输入，逐列核对一次**。
+> 「脚本一字不改、拿到哪个库都能跑」在这个迁移里不成立 —— 存量结构本来就不止一个版本。

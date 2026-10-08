@@ -31,7 +31,12 @@ SELECT TABLE_NAME, COUNT(*) AS col_cnt
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('ifmap_config', 'ifmap_logic_branch_config', 'ifmap_execution_log')
  GROUP BY TABLE_NAME ORDER BY TABLE_NAME;
--- 期望 28 / 17 / 17。少列说明 01/03 漏了；多列说明目标 DDL 改了而 kit 没同步。
+-- 期望 28 / 17 / 17。少列说明 01/03 漏了。
+-- ⚠️ 多列**未必是错**：kit 的原则是"只增不映射"，存量独有、目标 DDL 没有的列（实测有
+--    `fig_bank_code`（financing_scheme 变体）、`interface_url`（yfl_bill 变体））会原样留着，
+--    这些列都是 DEFAULT NULL，ifmap 的 INSERT 不写它们，不影响功能。
+--    所以比列数更可靠的做法是：核对**目标列是否齐备**（用 00-precheck 第 3.1 步的清单 + 本步的列清单对齐）。
+--    要彻底对齐就把这些存量独有列 DROP 掉（可选，非必需；DROP 前确认没有其他系统在读）。
 
 SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
   FROM information_schema.COLUMNS
@@ -39,11 +44,14 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLU
    AND TABLE_NAME IN ('ifmap_config', 'ifmap_logic_branch_config', 'ifmap_execution_log')
    AND COLUMN_NAME IN ('interface_order', 'busi_node', 'add_user_id', 'modify_user_id',
                        'add_time', 'modify_time', 'status', 'version', 'deleted_seq',
+                       'financing_mode', 'partner_code', 'partner_name', 'execution_time',
                        'logic_branch_order', 'logic_branch_flag', 'logic_branch_value',
                        'method_flag', 'request_param', 'response_param', 'execution_result', 'error_msg')
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- 期望：interface_order smallint；busi_node varchar(32)；add_user_id varchar(64)；
 --       add_time datetime(3)；status tinyint(1)；deleted_seq bigint；logic_branch_order smallint；
+--       partner_code varchar(32) NOT NULL；partner_name varchar(128)；financing_mode varchar(32)；
+--       execution_time bigint；
 --       request_param mediumtext；response_param mediumtext；execution_result varchar(16)；error_msg varchar(1024)。
 --       ⚠️ 两列都是文本类型是**刻意设计**：日志列必须"一定写得进去"（超长报文会被截断，截断结果不是合法 JSON，
 --          若是 json 列会报 3140 直接丢行），且不能被 json 规范化（10.00 → 10）。

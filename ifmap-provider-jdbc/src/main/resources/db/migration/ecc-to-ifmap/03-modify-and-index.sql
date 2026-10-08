@@ -46,6 +46,11 @@ SET SESSION time_zone = '+08:00';
 -- A. 接口配置表（数据量小：低峰直接 COPY）
 -- ===========================================================================
 ALTER TABLE `bankint_config`
+  -- 存量主键/租户列的 bigint(19) 只是"显示宽度"，与目标 DDL 的 bigint(20) 不是两种类型；
+  -- 写在这里是为了让迁移后的结构与目标**逐列一致**（否则 05-verify 按列名比对时会一直报差异）。
+  -- 同一条 COPY 语句里顺带改掉，不额外重建表。
+  MODIFY COLUMN `key_id`                  bigint(20)   NOT NULL              COMMENT '主键（默认雪花ID）',
+  MODIFY COLUMN `tenant_id`               bigint(20)   NOT NULL DEFAULT -1   COMMENT '租户ID（单租户固定 -1）',
   MODIFY COLUMN `interface_no`            varchar(64)  NOT NULL              COMMENT '接口编号（业务唯一键）',
   MODIFY COLUMN `interface_code`          varchar(64)  NOT NULL              COMMENT '接口编码（对接方接口编码）',
   MODIFY COLUMN `project_code`            varchar(64)           DEFAULT NULL COMMENT '项目编号',
@@ -55,6 +60,8 @@ ALTER TABLE `bankint_config`
   --   同一列可承载银行/保理/信托/小贷/保险等各类对手方；名字变了、列位置与数据都不动）
   CHANGE COLUMN `bank_code`               `partner_code` varchar(32)  NOT NULL                     COMMENT '合作机构编码',
   CHANGE COLUMN `bank_name`               `partner_name` varchar(128) DEFAULT NULL                 COMMENT '合作机构名称',
+  -- ★ 条件列：存量有它 → 归一到 varchar(32)；存量没有 → 由 01-add-columns.sql 的 1.1 先 ADD
+  --   （实测两套真实存量都没有这一列，见 README §9.4；少这一列 ifmap 运行期读写配置必 1054）
   MODIFY COLUMN `financing_mode`          varchar(32)           DEFAULT NULL COMMENT '融资模式',
   MODIFY COLUMN `front_interface_no`      varchar(64)           DEFAULT NULL COMMENT '前置接口编号（空=无前置）',
   MODIFY COLUMN `interface_order`         smallint     NOT NULL DEFAULT 0    COMMENT '接口执行顺序，升序；同值按 key_id 兜底',
@@ -89,6 +96,11 @@ ALTER TABLE `bankint_config`
 -- B. 逻辑分支表（数据量小：低峰直接 COPY）
 -- ===========================================================================
 ALTER TABLE `bankint_logic_branch_config`
+  -- 存量主键/租户列的 bigint(19) 只是"显示宽度"，与目标 DDL 的 bigint(20) 不是两种类型；
+  -- 写在这里是为了让迁移后的结构与目标**逐列一致**（否则 05-verify 按列名比对时会一直报差异）。
+  -- 同一条 COPY 语句里顺带改掉，不额外重建表。
+  MODIFY COLUMN `key_id`                  bigint(20)   NOT NULL              COMMENT '主键',
+  MODIFY COLUMN `tenant_id`               bigint(20)   NOT NULL DEFAULT -1   COMMENT '租户ID',
   MODIFY COLUMN `interface_no`       varchar(64)  NOT NULL              COMMENT '接口编号',
   MODIFY COLUMN `method_flag`        varchar(64)           DEFAULT NULL COMMENT '动作标识(Action Key)：分支命中后执行的动作，由宿主机 ActionRegistry 注册；空=该分支不执行动作',
   MODIFY COLUMN `logic_branch_name`  varchar(128) NOT NULL              COMMENT '逻辑分支名称',
@@ -122,6 +134,18 @@ ALTER TABLE `bankint_logic_branch_config`
 -- C-2 类型/长度/可空调整（一条 ALTER：COPY 一共只重建一次表）
 --     前置：磁盘余量 >= 表大小（COPY 期间新旧两份表并存）；低峰执行。
 ALTER TABLE `bankint_execution_log`
+  -- 存量主键/租户列的 bigint(19) 只是"显示宽度"，与目标 DDL 的 bigint(20) 不是两种类型；
+  -- 写在这里是为了让迁移后的结构与目标**逐列一致**（否则 05-verify 按列名比对时会一直报差异）。
+  -- 同一条 COPY 语句里顺带改掉，不额外重建表。
+  MODIFY COLUMN `key_id`                  bigint(20)   NOT NULL              COMMENT '主键',
+  MODIFY COLUMN `tenant_id`               bigint(20)   NOT NULL DEFAULT -1   COMMENT '租户ID',
+  -- ★ 这三列在真实存量里也不齐：`interface_no` 实测两套存量都是 varchar(50)（目标是 64）；
+  --   `biz_id` 在 yfl_bill 变体里是 bigint（目标是 varchar(64)，ifmap 写日志时传的是字符串 →
+  --   不改会在严格模式下 1366 丢日志行）；`execution_time` 目标要求 NOT NULL DEFAULT 0（耗时 ms）。
+  --   本语句已经是 ALGORITHM=COPY，多这几条 MODIFY 不会多一次表重建。
+  MODIFY COLUMN `interface_no`     varchar(64) NOT NULL              COMMENT '接口编号',
+  MODIFY COLUMN `biz_id`           varchar(64) NOT NULL              COMMENT '业务ID',
+  MODIFY COLUMN `execution_time`   bigint(20)  NOT NULL DEFAULT 0    COMMENT '执行耗时(ms)',
   MODIFY COLUMN `request_param`    mediumtext  DEFAULT NULL COMMENT '请求参数（已脱敏；超长按配置截断；文本列，不要求是合法 JSON）',
   MODIFY COLUMN `response_param`   mediumtext  DEFAULT NULL COMMENT '响应参数（已脱敏；超长按配置截断）',
   MODIFY COLUMN `execution_result` varchar(16) DEFAULT NULL COMMENT '执行结果：SUCCESS/FAIL/SKIP/TIMEOUT',

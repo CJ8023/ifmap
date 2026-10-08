@@ -62,6 +62,81 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE,
    AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- 与目标 DDL 的列数对比：config 25 → 28（+3）、logic_branch 15 → 17（+2）、execution_log 16 → 17（+1）
+-- ⚠️ 「25 → 28」这个对比是**按 kit 的参考环境**写的：实测有的存量环境 config 是 22 列
+--    （没有 interface_code / project_code / interface_name，却多一个 interface_url，见 README §9.4），
+--    列数对不上属正常 —— 以第 3.1 步的「列齐备性」清单为准。
+
+-- ---------------------------------------------------------------------------
+-- 3.1) ★ 列齐备性预检：把 03 里那句 「Unknown column 'xxx'（1054）」提前成一张待办清单
+--      （实测价值：kit 按参考环境写死了 `financing_mode` / `interface_code` 等列，
+--        而真实存量环境未必有 —— 本步一跑就知道差哪几列，不必等到 03 才 1054。）
+--
+--      处置规则：
+--        · 缺的是「目标 DDL 有、存量没有」的列（如 `financing_mode`）→ 它是**新增列**，
+--          01-add-columns.sql 里已备好对应的 ADD COLUMN（注释里标 ★）；
+--        · 缺的是「kit 引用、但目标 DDL 也没有」的列 → 把 03 里对应的 MODIFY 行删掉即可。
+--      本步输出的是**待办清单，不是门禁**（各环境存量结构不同，README §9.4 有实测对照）。
+-- ---------------------------------------------------------------------------
+SELECT r.tbl AS table_name, r.col AS missing_column
+  FROM ( SELECT 'bankint_config' AS tbl, 'key_id' AS col
+         UNION ALL SELECT 'bankint_config', 'tenant_id'
+         UNION ALL SELECT 'bankint_config', 'interface_no'
+         UNION ALL SELECT 'bankint_config', 'interface_code'
+         UNION ALL SELECT 'bankint_config', 'project_code'
+         UNION ALL SELECT 'bankint_config', 'interface_name'
+         UNION ALL SELECT 'bankint_config', 'busi_node'
+         UNION ALL SELECT 'bankint_config', 'bank_code'
+         UNION ALL SELECT 'bankint_config', 'bank_name'
+         UNION ALL SELECT 'bankint_config', 'financing_mode'
+         UNION ALL SELECT 'bankint_config', 'front_interface_no'
+         UNION ALL SELECT 'bankint_config', 'interface_order'
+         UNION ALL SELECT 'bankint_config', 'request_param_template'
+         UNION ALL SELECT 'bankint_config', 'response_param_template'
+         UNION ALL SELECT 'bankint_config', 'result_flag'
+         UNION ALL SELECT 'bankint_config', 'success_value'
+         UNION ALL SELECT 'bankint_config', 'strategy_name'
+         UNION ALL SELECT 'bankint_config', 'remark'
+         UNION ALL SELECT 'bankint_config', 'del_status'
+         UNION ALL SELECT 'bankint_config', 'add_user_id'
+         UNION ALL SELECT 'bankint_config', 'add_time'
+         UNION ALL SELECT 'bankint_config', 'modify_user_id'
+         UNION ALL SELECT 'bankint_config', 'modify_time'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'key_id'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'tenant_id'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'interface_no'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'method_flag'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'logic_branch_name'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'logic_branch_flag'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'logic_branch_value'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'remark'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'del_status'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'add_user_id'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'add_time'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'modify_user_id'
+         UNION ALL SELECT 'bankint_logic_branch_config', 'modify_time'
+         UNION ALL SELECT 'bankint_execution_log', 'key_id'
+         UNION ALL SELECT 'bankint_execution_log', 'tenant_id'
+         UNION ALL SELECT 'bankint_execution_log', 'interface_no'
+         UNION ALL SELECT 'bankint_execution_log', 'biz_id'
+         UNION ALL SELECT 'bankint_execution_log', 'request_param'
+         UNION ALL SELECT 'bankint_execution_log', 'response_param'
+         UNION ALL SELECT 'bankint_execution_log', 'execution_result'
+         UNION ALL SELECT 'bankint_execution_log', 'remark'
+         UNION ALL SELECT 'bankint_execution_log', 'del_status'
+         UNION ALL SELECT 'bankint_execution_log', 'add_user_id'
+         UNION ALL SELECT 'bankint_execution_log', 'add_time'
+         UNION ALL SELECT 'bankint_execution_log', 'modify_user_id'
+         UNION ALL SELECT 'bankint_execution_log', 'modify_time'
+       ) r
+  LEFT JOIN information_schema.COLUMNS c
+    ON c.TABLE_SCHEMA = DATABASE()
+   AND c.TABLE_NAME   = r.tbl
+   AND c.COLUMN_NAME  = r.col
+ WHERE c.COLUMN_NAME IS NULL
+ ORDER BY r.tbl, r.col;
+-- 本清单只列 kit 在 01/02/03 里**引用到**的列。目标 DDL 还有 `status` / `version` / `deleted_seq` /
+-- `logic_branch_order`（这四列由 01 新增，不在此列）、`error_msg`（由 01 新增）
+-- 以及 `execution_log.execution_time`（kit 不改它，但目标 DDL 必须有；缺了要自行 ADD COLUMN，05-verify 会核对）。
 
 -- ---------------------------------------------------------------------------
 -- 4) 现有索引（确认没有同名 uk_ifmap_* / idx_ifmap_* 冲突）
@@ -156,66 +231,80 @@ SELECT CONCAT('[', interface_order, ']') AS raw_value, COUNT(*) AS cnt
 -- 8) 列长度与 NULL（P0：超长 → 1406；目标 NOT NULL 但有 NULL → 1048/1138）
 -- ---------------------------------------------------------------------------
 -- 8.1 长度体检（每张表只扫一次；列名后缀 = 该列的迁移目标上限，逐个比对）
+-- ★ 列清单是**动态生成**的：只体检"当前库里真实存在"的列 —— 存量变体缺列时这条不会 1054
+--   （缺了哪几列看第 3.1 步的清单）。GROUP_CONCAT 故意不写 DISTINCT：MySQL 5.7 下
+--   DISTINCT + ORDER BY 非选列表达式会报 3029。
 -- config（小表）
-SELECT MAX(CHAR_LENGTH(interface_name))     AS interface_name_128,
-       MAX(CHAR_LENGTH(bank_name))          AS bank_name_128,   -- 迁移后改名 partner_name
-       MAX(CHAR_LENGTH(bank_code))          AS bank_code_32,    -- 迁移后改名 partner_code（目标 varchar(32)）
-       MAX(CHAR_LENGTH(interface_code))     AS interface_code_64,
-       MAX(CHAR_LENGTH(project_code))       AS project_code_64,
-       MAX(CHAR_LENGTH(front_interface_no)) AS front_interface_no_64,
-       MAX(CHAR_LENGTH(financing_mode))     AS financing_mode_32,
-       MAX(CHAR_LENGTH(busi_node))          AS busi_node_32,
-       MAX(CHAR_LENGTH(strategy_name))      AS strategy_name_128,
-       MAX(CHAR_LENGTH(result_flag))        AS result_flag_512,
-       MAX(CHAR_LENGTH(success_value))      AS success_value_512,
-       MAX(CHAR_LENGTH(remark))             AS remark_512
-  FROM bankint_config;
+SET @s8a1 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('MAX(CHAR_LENGTH(`', COLUMN_NAME, '`)) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_config`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_config'
+                 AND COLUMN_NAME IN ('interface_name','bank_name','bank_code','interface_code','project_code',
+                                     'front_interface_no','financing_mode','busi_node','strategy_name',
+                                     'result_flag','success_value','remark'));
+SET @s8a1 := IFNULL(@s8a1, 'SELECT 1 AS config_variant_columns_absent');
+PREPARE q8a1 FROM @s8a1; EXECUTE q8a1; DEALLOCATE PREPARE q8a1;
 -- logic_branch（小表）
-SELECT MAX(CHAR_LENGTH(logic_branch_name))  AS logic_branch_name_128,
-       MAX(CHAR_LENGTH(logic_branch_flag))  AS logic_branch_flag_512,
-       MAX(CHAR_LENGTH(logic_branch_value)) AS logic_branch_value_512,
-       MAX(CHAR_LENGTH(method_flag))        AS method_flag_64,
-       MAX(CHAR_LENGTH(remark))             AS remark_512
-  FROM bankint_logic_branch_config;
+SET @s8a2 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('MAX(CHAR_LENGTH(`', COLUMN_NAME, '`)) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_logic_branch_config`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_logic_branch_config'
+                 AND COLUMN_NAME IN ('logic_branch_name','logic_branch_flag','logic_branch_value',
+                                     'method_flag','remark'));
+SET @s8a2 := IFNULL(@s8a2, 'SELECT 1 AS logic_branch_variant_columns_absent');
+PREPARE q8a2 FROM @s8a2; EXECUTE q8a2; DEALLOCATE PREPARE q8a2;
 -- execution_log（大表：低峰执行）
-SELECT MAX(CHAR_LENGTH(response_param))   AS response_param_max_16777215,
-       MAX(CHAR_LENGTH(execution_result)) AS execution_result_16,
-       MAX(CHAR_LENGTH(remark))           AS remark_512
-  FROM bankint_execution_log;
+-- `interface_no` / `biz_id` 也在这里量：目标都是 varchar(64)，存量实测是 varchar(50) / bigint，
+-- 超长会在 03 的 MODIFY 时报 1406（见 README §9.4）。
+SET @s8a3 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('MAX(CHAR_LENGTH(`', COLUMN_NAME, '`)) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_execution_log`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_execution_log'
+                 AND COLUMN_NAME IN ('interface_no','biz_id','response_param','execution_result','remark'));
+SET @s8a3 := IFNULL(@s8a3, 'SELECT 1 AS execution_log_variant_columns_absent');
+PREPARE q8a3 FROM @s8a3; EXECUTE q8a3; DEALLOCATE PREPARE q8a3;
 -- 超过上限时：先清理/截断数据，或放宽目标列宽（需同步改 db/changelog/v1.0.0/*.sql 与目标一致性检查）。
 
 -- 8.2 NULL 体检：目标为 NOT NULL 的列（**期望全 0**；每张表只扫一次）
-SELECT SUM(interface_name IS NULL)    AS interface_name,
-       SUM(interface_code IS NULL)    AS interface_code,
-       SUM(busi_node IS NULL)         AS busi_node,
-       SUM(bank_code IS NULL)         AS bank_code,
-       SUM(interface_order IS NULL)   AS interface_order,
-       SUM(result_flag IS NULL)       AS result_flag,
-       SUM(success_value IS NULL)     AS success_value,
-       SUM(strategy_name IS NULL)     AS strategy_name,
-       SUM(remark IS NULL)            AS remark,
-       SUM(add_user_id IS NULL)       AS add_user_id,
-       SUM(modify_user_id IS NULL)    AS modify_user_id,
-       SUM(add_request_id IS NULL)    AS add_request_id,
-       SUM(modify_request_id IS NULL) AS modify_request_id,
-       SUM(add_time IS NULL)          AS add_time,
-       SUM(modify_time IS NULL)       AS modify_time
-  FROM bankint_config;
-
-SELECT SUM(interface_no IS NULL)      AS interface_no,
-       SUM(logic_branch_name IS NULL) AS logic_branch_name,
-       SUM(del_status IS NULL)        AS del_status,
-       SUM(add_time IS NULL)          AS add_time,
-       SUM(modify_time IS NULL)       AS modify_time
-  FROM bankint_logic_branch_config;
-
-SELECT SUM(interface_no IS NULL)   AS interface_no,
-       SUM(biz_id IS NULL)         AS biz_id,
-       SUM(execution_time IS NULL) AS execution_time,
-       SUM(remark IS NULL)         AS remark,
-       SUM(add_time IS NULL)       AS add_time,
-       SUM(modify_time IS NULL)    AS modify_time
-  FROM bankint_execution_log;
+-- ★ 同样动态生成列清单：存量没有的列不参与（缺列看第 3.1 步）。
+-- config
+SET @s8b1 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('SUM(`', COLUMN_NAME, '` IS NULL) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_config`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_config'
+                 AND COLUMN_NAME IN ('interface_name','interface_code','busi_node','bank_code','interface_order',
+                                     'result_flag','success_value','strategy_name','remark','add_user_id',
+                                     'modify_user_id','add_request_id','modify_request_id','add_time','modify_time'));
+SET @s8b1 := IFNULL(@s8b1, 'SELECT 1 AS config_variant_columns_absent');
+PREPARE q8b1 FROM @s8b1; EXECUTE q8b1; DEALLOCATE PREPARE q8b1;
+-- logic_branch
+SET @s8b2 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('SUM(`', COLUMN_NAME, '` IS NULL) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_logic_branch_config`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_logic_branch_config'
+                 AND COLUMN_NAME IN ('interface_no','logic_branch_name','del_status','add_time','modify_time'));
+SET @s8b2 := IFNULL(@s8b2, 'SELECT 1 AS logic_branch_variant_columns_absent');
+PREPARE q8b2 FROM @s8b2; EXECUTE q8b2; DEALLOCATE PREPARE q8b2;
+-- execution_log
+SET @s8b3 := (SELECT CONCAT('SELECT ',
+                      GROUP_CONCAT(CONCAT('SUM(`', COLUMN_NAME, '` IS NULL) AS `', COLUMN_NAME, '`')
+                                   ORDER BY COLUMN_NAME SEPARATOR ','),
+                      ' FROM `bankint_execution_log`')
+                FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_execution_log'
+                 AND COLUMN_NAME IN ('interface_no','biz_id','execution_time','remark','add_time','modify_time'));
+SET @s8b3 := IFNULL(@s8b3, 'SELECT 1 AS execution_log_variant_columns_absent');
+PREPARE q8b3 FROM @s8b3; EXECUTE q8b3; DEALLOCATE PREPARE q8b3;
 -- 处理：按业务语义补默认值（字符串 → ''、时间 → '1970-01-01 00:00:00'、数字 → 0）。
 -- 不用处理的列：logic_branch_flag / logic_branch_value —— 它们为 NULL 恰恰表达"兜底分支"，
 -- 03 的 MODIFY（NOT NULL DEFAULT ''）会把 NULL 归一成空串，语义不变（引擎把空串与 NULL 同等对待），

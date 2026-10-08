@@ -40,7 +40,7 @@ CREATE TABLE `ifmap_execution_log_archive` (
   `tenant_id`         bigint       NOT NULL DEFAULT -1         COMMENT '租户ID',
   `interface_no`      varchar(64)  NOT NULL                   COMMENT '接口编号',
   `biz_id`            varchar(64)  NOT NULL                   COMMENT '业务ID',
-  `request_param`     json                   DEFAULT NULL       COMMENT '请求参数（已脱敏；超长按配置截断）',
+  `request_param`     mediumtext             DEFAULT NULL       COMMENT '请求参数（已脱敏；超长按配置截断；文本列，不要求是合法 JSON）',
   `response_param`    mediumtext             DEFAULT NULL       COMMENT '响应参数（已脱敏；超长按配置截断）',
   `execution_time`    bigint       NOT NULL DEFAULT 0          COMMENT '执行耗时(ms)',
   `execution_result`  varchar(16)            DEFAULT NULL       COMMENT '执行结果：SUCCESS/FAIL/SKIP/TIMEOUT',

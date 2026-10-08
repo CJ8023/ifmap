@@ -77,6 +77,8 @@ public class DemoController {
 | `ifmap-core` | 8 | 引擎、模板 DSL、18 个内置规则、SPI（零第三方运行时依赖，只有 slf4j-api） |
 | `ifmap-json-jackson` | 8 | `JsonOps` 的 Jackson 实现（默认） |
 | `ifmap-json-fastjson` | 8 | `JsonOps` 的 fastjson 兼容实现（存量迁移过渡用） |
+| `ifmap-json-tck` | 8 | `JsonOps` 一致性测试套件（换 JSON 库时继承基类即可；只进测试范围） |
+| `ifmap-testkit` | 8 | 测试支持：H2/真 MySQL 双档开关、方言感知建表、唯一前缀隔离与三层清理（只进测试范围） |
 | `ifmap-provider-jdbc` | 8 | 建表脚本（Liquibase 格式 SQL）、JDBC 仓储、执行日志清理/归档、日志分区运维手册（`db/optional/`） |
 | `ifmap-provider-remote` | 8 | `ConfigRepository` 的远端 HTTP 实现（配置不落库时用；`ConfigFetcher` SPI 注入 Feign/RestTemplate） |
 | `ifmap-spring-boot-starter` | 17 | Spring Boot 3 自动装配（引擎/仓储/策略收集/建表/日志清理） |

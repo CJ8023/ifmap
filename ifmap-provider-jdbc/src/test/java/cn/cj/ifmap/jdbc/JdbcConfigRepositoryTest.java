@@ -20,6 +20,7 @@ import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.spi.IdGenerator;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 仓储端到端测试：用**生产建表脚本**（H2 MySQL 模式）验证 §6 表结构 + 仓储 SQL + 两个关键约定
+ * 仓储端到端测试：用**生产建表脚本**（默认 H2 MySQL 模式；设置 {@code IFMAP_JDBC_URL} 则跑真 MySQL）
+ * 验证 §6 表结构 + 仓储 SQL + 两个关键约定
  * （查询有序、软删除可重建）。
  *
  * @author caijun
@@ -49,13 +51,16 @@ class JdbcConfigRepositoryTest {
     private JdbcTemplate jdbc;
     private JdbcConfigRepository repo;
     private JdbcConfigWriter writer;
+    private String prefix;
 
     @BeforeEach
     void setUp() {
-        ds = TestSchema.freshDataSource();
+        TestDatabases.Schema schema = TestSchema.fresh();
+        ds = schema.dataSource();
+        prefix = schema.prefix();
         jdbc = new JdbcTemplate(ds);
-        repo = new JdbcConfigRepository(ds);
-        writer = new JdbcConfigWriter(ds);
+        repo = new JdbcConfigRepository(ds, prefix);
+        writer = new JdbcConfigWriter(ds, prefix);
     }
 
     // ------------------------------------------------------------------ 查询
@@ -273,7 +278,7 @@ class JdbcConfigRepositoryTest {
         assertEquals(703L, repo.queryConfigs(TENANT, "IF_K", "GP81").get(0).getKeyId().longValue());
 
         // 历史行仍在库中（软删除），共 3 行
-        Integer rows = jdbc.queryForObject("SELECT COUNT(*) FROM `ifmap_config` WHERE `interface_no` = 'IF_K'", Integer.class);
+        Integer rows = jdbc.queryForObject("SELECT COUNT(*) FROM `" + prefix + "config` WHERE `interface_no` = 'IF_K'", Integer.class);
         assertEquals(3, ((Number) rows).intValue());
         assertEquals(third, 703L);
     }
@@ -322,7 +327,7 @@ class JdbcConfigRepositoryTest {
     @DisplayName("saveExecutionLog 无 keyId 且生成器为 AUTO_INCREMENT 时抛错（避免写空主键）")
     void saveExecutionLogWithoutIdFails() {
         JdbcConfigRepository autoRepo = new JdbcConfigRepository(
-                jdbc, TableNameResolver.defaults(), IdGenerator.AUTO_INCREMENT);
+                jdbc, new TableNameResolver(prefix), IdGenerator.AUTO_INCREMENT);
         ExecutionLog log = ExecutionLog.success("IF_N", "BIZ-3", 1L);
 
         IfmapConfigException e = assertThrows(IfmapConfigException.class, () -> autoRepo.saveExecutionLog(log));
@@ -338,11 +343,12 @@ class JdbcConfigRepositoryTest {
     // ------------------------------------------------------------------ 前缀
 
     @Test
-    @DisplayName("自定义表名前缀（bankint_）可建表可读写 —— 复用存量表路径")
+    @DisplayName("自定义表名前缀（真库档自动加唯一后缀）可建表可读写 —— 复用存量表路径")
     void customTablePrefixWorks() {
-        DataSource legacy = TestSchema.freshDataSource("bankint_");
-        JdbcConfigRepository legacyRepo = new JdbcConfigRepository(legacy, "bankint_");
-        JdbcConfigWriter legacyWriter = new JdbcConfigWriter(legacy, "bankint_");
+        TestDatabases.Schema legacy = TestSchema.fresh("bankint_");
+        DataSource legacyDs = legacy.dataSource();
+        JdbcConfigRepository legacyRepo = new JdbcConfigRepository(legacyDs, legacy.prefix());
+        JdbcConfigWriter legacyWriter = new JdbcConfigWriter(legacyDs, legacy.prefix());
 
         long id = legacyWriter.insert(config("IF_P", "GP81", 1, 801L));
         assertEquals(1, legacyRepo.queryConfigs(TENANT, "IF_P", "GP81").size());
@@ -373,7 +379,7 @@ class JdbcConfigRepositoryTest {
     }
 
     private long branch(String interfaceNo, String methodFlag, int order, long keyId) {
-        String sql = "INSERT INTO `ifmap_logic_branch_config`"
+        String sql = "INSERT INTO `" + prefix + "logic_branch_config`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,"
                 + "`logic_branch_flag`,`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
                 + " VALUES (?,?,?,?,?,?,?,?,'',0,0)";

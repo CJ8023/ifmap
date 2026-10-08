@@ -31,6 +31,8 @@ import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import cn.cj.ifmap.testkit.TestDatabases;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -44,11 +46,8 @@ class IfmapAdminAutoConfigurationTest {
             .withConfiguration(AutoConfigurations.of(DataSourceAutoConfiguration.class,
                     JdbcTemplateAutoConfiguration.class, WebMvcAutoConfiguration.class,
                     IfmapAutoConfiguration.class, IfmapAdminAutoConfiguration.class))
-            .withPropertyValues(
-                    "spring.datasource.url=jdbc:h2:mem:ifmap_admin_autoconfig;MODE=MySQL;DB_CLOSE_DELAY=-1",
-                    "spring.datasource.driver-class-name=org.h2.Driver",
-                    "spring.datasource.username=sa",
-                    "spring.datasource.password=");
+            // 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL（前缀也由它给出）
+            .withPropertyValues(TestDatabases.springPropertyArray("ifmap_admin_autoconfig"));
 
     @Test
     @DisplayName("默认关闭：一个管理端 bean 都不装配（能改线上配置的端点必须显式打开）")
@@ -100,12 +99,8 @@ class IfmapAdminAutoConfigurationTest {
                 .withConfiguration(AutoConfigurations.of(DataSourceAutoConfiguration.class,
                         JdbcTemplateAutoConfiguration.class, IfmapAutoConfiguration.class,
                         IfmapAdminAutoConfiguration.class))
-                .withPropertyValues(
-                        "ifmap.admin.enabled=true",
-                        "spring.datasource.url=jdbc:h2:mem:ifmap_admin_noweb;MODE=MySQL;DB_CLOSE_DELAY=-1",
-                        "spring.datasource.driver-class-name=org.h2.Driver",
-                        "spring.datasource.username=sa",
-                        "spring.datasource.password=")
+                .withPropertyValues("ifmap.admin.enabled=true")
+                .withPropertyValues(TestDatabases.springPropertyArray("ifmap_admin_noweb"))
                 .run(context -> assertThat(context).doesNotHaveBean(ConfigAdminService.class));
     }
 

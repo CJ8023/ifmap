@@ -16,6 +16,7 @@
 package cn.cj.ifmap.jdbc;
 
 import cn.cj.ifmap.core.exception.IfmapConfigException;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link JdbcExecutionLogCleaner} 测试：真实生产 DDL 建表（H2 MODE=MySQL）+ 真实删除语句。
+ * {@link JdbcExecutionLogCleaner} 测试：真实生产 DDL 建表（默认 H2 MODE=MySQL；设置 {@code IFMAP_JDBC_URL}
+ * 则跑真 MySQL）+ 真实删除语句。
  *
  * <p>断言的是"哪些行被删、哪些必须留着、每批删多少"，不是"SQL 长什么样"。</p>
  *
@@ -45,20 +47,23 @@ class JdbcExecutionLogCleanerTest {
     private DataSource dataSource;
     private JdbcTemplate jdbc;
     private JdbcExecutionLogCleaner cleaner;
+    private String prefix;
     private long seq;
 
     @BeforeEach
     void setUp() {
-        dataSource = TestSchema.freshDataSource();
+        TestDatabases.Schema schema = TestSchema.fresh();
+        dataSource = schema.dataSource();
+        prefix = schema.prefix();
         jdbc = new JdbcTemplate(dataSource);
-        cleaner = new JdbcExecutionLogCleaner(jdbc, TableNameResolver.defaults());
+        cleaner = new JdbcExecutionLogCleaner(jdbc, new TableNameResolver(prefix));
         seq = 0L;
     }
 
     /** 插一条指定 add_time 的执行日志，返回主键。 */
     private long insertLog(long addTimeMillis) {
         long keyId = 700000L + (++seq);
-        jdbc.update("INSERT INTO `ifmap_execution_log`"
+        jdbc.update("INSERT INTO `" + prefix + "execution_log`"
                         + " (`key_id`, `tenant_id`, `interface_no`, `biz_id`, `request_param`,"
                         + "  `execution_result`, `add_time`) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 keyId, -1L, "IF_CLEAN", "BIZ-" + keyId, "{\"amount\":1}", "SUCCESS",
@@ -67,11 +72,11 @@ class JdbcExecutionLogCleanerTest {
     }
 
     private List<Long> allKeyIds() {
-        return jdbc.queryForList("SELECT `key_id` FROM `ifmap_execution_log` ORDER BY `key_id`", Long.class);
+        return jdbc.queryForList("SELECT `key_id` FROM `" + prefix + "execution_log` ORDER BY `key_id`", Long.class);
     }
 
     private int count() {
-        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM `ifmap_execution_log`", Integer.class);
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM `" + prefix + "execution_log`", Integer.class);
         return n == null ? 0 : n;
     }
 
@@ -144,24 +149,25 @@ class JdbcExecutionLogCleanerTest {
     @Test
     @DisplayName("表名前缀生效：复用存量 bankint_ 表也能清理")
     void honoursTablePrefix() {
-        DataSource prefixed = TestSchema.freshDataSource("bankint_");
-        JdbcTemplate prefixedJdbc = new JdbcTemplate(prefixed);
-        prefixedJdbc.update("INSERT INTO `bankint_execution_log`"
+        TestDatabases.Schema legacy = TestSchema.fresh("bankint_");
+        String old = legacy.prefix();
+        JdbcTemplate prefixedJdbc = new JdbcTemplate(legacy.dataSource());
+        prefixedJdbc.update("INSERT INTO `" + old + "execution_log`"
                         + " (`key_id`, `tenant_id`, `interface_no`, `biz_id`, `execution_result`, `add_time`)"
                         + " VALUES (?, ?, ?, ?, ?, ?)",
                 1L, -1L, "IF_OLD", "BIZ-OLD", "SUCCESS",
                 new Timestamp(System.currentTimeMillis() - 365L * DAY));
-        prefixedJdbc.update("INSERT INTO `bankint_execution_log`"
+        prefixedJdbc.update("INSERT INTO `" + old + "execution_log`"
                         + " (`key_id`, `tenant_id`, `interface_no`, `biz_id`, `execution_result`, `add_time`)"
                         + " VALUES (?, ?, ?, ?, ?, ?)",
                 2L, -1L, "IF_NEW", "BIZ-NEW", "SUCCESS", new Timestamp(System.currentTimeMillis()));
 
         JdbcExecutionLogCleaner prefixedCleaner =
-                new JdbcExecutionLogCleaner(prefixedJdbc, new TableNameResolver("bankint_"));
+                new JdbcExecutionLogCleaner(prefixedJdbc, new TableNameResolver(old));
 
-        assertEquals("bankint_execution_log", prefixedCleaner.tables().executionLogTable());
+        assertEquals(old + "execution_log", prefixedCleaner.tables().executionLogTable());
         assertEquals(1L, prefixedCleaner.clean(90, 100, 10, 0L));
-        assertEquals(1, prefixedJdbc.queryForList("SELECT `key_id` FROM `bankint_execution_log`"
+        assertEquals(1, prefixedJdbc.queryForList("SELECT `key_id` FROM `" + old + "execution_log`"
                 + " ORDER BY `key_id`", Long.class).size(), "只应剩未过期的那条");
     }
 

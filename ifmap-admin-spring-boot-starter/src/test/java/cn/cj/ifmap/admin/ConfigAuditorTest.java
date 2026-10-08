@@ -28,7 +28,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,19 +40,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ConfigAuditorTest {
 
+    private AdminTestSupport.Db db;
+    private String configTable;
     private JdbcConfigWriter writer;
     private ConfigAuditor auditor;
     private JdbcTemplate jdbc;
 
     @BeforeEach
     void setUp() {
-        DataSource dataSource = AdminTestSupport.dataSource("ifmap_admin_auditor");
-        AdminTestSupport.createSchema(dataSource);
-        jdbc = AdminTestSupport.jdbc(dataSource);
-        jdbc.update("DELETE FROM `ifmap_config`");
-        jdbc.update("DELETE FROM `ifmap_logic_branch_config`");
-        JdbcConfigRepository repository = AdminTestSupport.repository(jdbc);
-        writer = AdminTestSupport.writer(jdbc);
+        db = AdminTestSupport.db("ifmap_admin_auditor");
+        db.createSchema();
+        jdbc = db.jdbc();
+        configTable = db.configTable();
+        JdbcConfigRepository repository = db.repository();
+        writer = db.writer();
 
         JacksonJsonOps jsonOps = new JacksonJsonOps();
         ActionRegistry actions = new ActionRegistry();
@@ -82,7 +82,7 @@ class ConfigAuditorTest {
     void auditLocatesProblems() {
         writer.insert(AdminTestSupport.config("IF_BAD", "apply", 1));
         // 直接改坏模板，模拟历史脏数据
-        jdbc.update("UPDATE `ifmap_config` SET `request_param_template` = ? WHERE `interface_no` = ?",
+        jdbc.update("UPDATE `" + configTable + "` SET `request_param_template` = ? WHERE `interface_no` = ?",
                 "{bad-json", "IF_BAD");
 
         writer.insert(AdminTestSupport.branch("IF_BAD", "submit", "重复1", "f", "v", 1));
@@ -103,9 +103,9 @@ class ConfigAuditorTest {
     void truncatedFlag() {
         writer.insert(AdminTestSupport.config("IF_1", "apply", 1));
         writer.insert(AdminTestSupport.config("IF_2", "apply", 1));
-        ConfigAuditor small = new ConfigAuditor(AdminTestSupport.repository(jdbc),
+        ConfigAuditor small = new ConfigAuditor(db.repository(),
                 new ConfigValidator(null, new JacksonJsonOps(), new SpecialDealStrategyRegistry(),
-                        new ActionRegistry(), AdminTestSupport.repository(jdbc)), 1);
+                        new ActionRegistry(), db.repository()), 1);
         AuditReport report = small.audit(null, null);
         assertTrue(report.isTruncated());
         assertEquals(1, report.getConfigCount());

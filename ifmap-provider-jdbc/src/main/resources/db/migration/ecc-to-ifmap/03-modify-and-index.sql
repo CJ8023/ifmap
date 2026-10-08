@@ -122,7 +122,7 @@ ALTER TABLE `bankint_logic_branch_config`
 -- C-2 类型/长度/可空调整（一条 ALTER：COPY 一共只重建一次表）
 --     前置：磁盘余量 >= 表大小（COPY 期间新旧两份表并存）；低峰执行。
 ALTER TABLE `bankint_execution_log`
-  MODIFY COLUMN `request_param`    json        DEFAULT NULL COMMENT '请求参数（已脱敏；超长按配置截断）',
+  MODIFY COLUMN `request_param`    mediumtext  DEFAULT NULL COMMENT '请求参数（已脱敏；超长按配置截断；文本列，不要求是合法 JSON）',
   MODIFY COLUMN `response_param`   mediumtext  DEFAULT NULL COMMENT '响应参数（已脱敏；超长按配置截断）',
   MODIFY COLUMN `execution_result` varchar(16) DEFAULT NULL COMMENT '执行结果：SUCCESS/FAIL/SKIP/TIMEOUT',
   MODIFY COLUMN `remark`           varchar(512) NOT NULL DEFAULT '' COMMENT '备注',
@@ -133,7 +133,9 @@ ALTER TABLE `bankint_execution_log`
   ROW_FORMAT=DYNAMIC,
   ALGORITHM=COPY, LOCK=SHARED;
 -- 注意：
---   · `request_param` 若现状已是 json 列，这一行只是"放开可空"，可单独执行且是 INPLACE；
+--   · `request_param` 统一改成 mediumtext（与 `response_param` 对齐）：审计日志要"一定写得进去 + 内容忠实"，
+--     json 列会拒收超长截断后的文本（3140 → 整条日志丢行），还会把小数规范化（10.00 → 10）。
+--     若现状已是 json 列，改类型同样是 COPY（见上方在线 DDL 说明）。
 --     但为了与其余列共用一条语句（只重建一次），这里统一走 COPY。
 --   · `response_param` longtext → mediumtext（4GB → 16MB）：超长会报 1406，
 --     迁移前用 00-precheck 第 8.1 条核对最大值；若确实存在 > 16MB 的报文，

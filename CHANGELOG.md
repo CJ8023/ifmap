@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### Added
+- **真库（MySQL）测试档 + 执行日志列缺陷修复（本批）**：数据库相关测试过去只能在 **H2 内存库** 上跑，而 H2 永远测不出
+  MySQL 专属语义（`json` 列校验与规范化、表尾存储引擎选项、`datetime(3)`、STRICT 模式），于是一个**只会在真库发生的静默丢日志缺陷**
+  一直被绿灯掩着。本批加一个开关把测试切到真 MySQL，并把它掩着的缺陷**根治**：
+  - **新增测试支持模块 `ifmap-testkit`**（`main` scope，各模块以 `test` 依赖引入 ⇒ H2/MySQL 驱动**不进生产包**）：
+    `TestDatabases` 提供档位开关（`IFMAP_JDBC_URL` / `IFMAP_JDBC_USER` / `IFMAP_JDBC_PASSWORD`，**不设就是 H2，默认路径不变**）、
+    方言感知的建表（真库**原文执行生产 DDL**，H2 走断言式降级）、`springProperties/springPropertyArray(hint)`（Spring 测试用，
+    按档位给 url/账号/驱动 + `ifmap.table-prefix`）、以及三层清理兜底。**依赖只有 H2 + MySQL 驱动 + junit**（用 JDK 原生 `DriverManager`，
+    刻意不引 `spring-jdbc`，避免污染宿主的 Spring 版本）
+  - **隔离靠唯一表前缀，不建库**：每处测试用 `itt_<hint≤18>_<hex8>_`（`ifmap.table-prefix` 传入），只操作自己建的表；
+    删表前有三重栅栏（前缀形状必须匹配 `^itt_[a-z0-9_]{0,18}_[0-9a-f]{8}_$`、表名必须以该前缀开头、只查 `TABLE_SCHEMA = DATABASE()`），
+    **构造上不可能碰到已有的 `ifmap_*` / `bankint_*` 表**
+  - **清理三层**：JUnit 会话监听器（`META-INF/services` 自动装配，不依赖 JVM 正常退出 —— surefire 的 fork 可能是 `Runtime.halt()` 结束的）
+    + JVM 退出钩子 + 每次启动顺带清扫 30 分钟前的 `itt_*` 残表；另有 `dropAllTestTables()` 供人工清库。
+    **实测口径：整轮真库跑完 `itt_*` 残表必须为 0**（CI 也加了这条门禁）
+  - **修掉两个实现缺陷**（都是本批自己发现）：① 建表前的“先删干净再建”调了会**注销清理登记**的 `drop()` ⇒ 会话监听器遍历
+    空集合、“清理成功”只在日志里、库里留 8 张残表（拆成 `dropTables`（只删表）/ `drop`（删表+注销），回归守卫 = `TestSchemaCleanupTest`）；
+    ② 真库 URL 只设 `serverTimezone` 不与 `sessionVariables=time_zone=...` 成对 ⇒ 服务器 `@@system_time_zone=UTC` 时 `datetime(3)` 往返偏 8 小时
+  - **根治缺陷：`ifmap_execution_log.request_param` 由 `json` 改回 `mediumtext`**（与 `response_param` 对齐）：超长报文被
+    `Logs.truncate` 截断后**必然不是合法 JSON**，写 `json` 列直接报 **3140**，而 `IfmapOrchestrator.writeLog` 吞异常只 WARN ⇒
+    **该条执行日志静默丢失**；`json` 列顺带还会把 `10.00` 规范化成 `10`、`1e400` 直接拒收（与刚发布的“小数形态保真”契约相反）。
+    审计日志的第一要求是“一定写得进去 + 内容忠实”，故 4 处 DDL + 迁移脚本 `03-modify-and-index.sql` 同步改文本；
+    迁移 kit 的 `00-precheck.sql §10.5` 由“必须预检”降级为信息性统计，`05-verify.sql` 期望类型同步
+  - **回归用例**：`ExecutionLogPayloadFidelityTest`（3 例：DDL 列型守卫、迁移脚本守卫、超阈值报文截断后能落库读回）+ `TestSchemaCleanupTest`（1 例，真库专属）
+  - **CI**：启用 `integration` job（`services: mysql`，**5.7 与 8.0 双矩阵**，跑完断言 `itt_*` 残表为 0）。H2 仍是默认档，
+    没有库的开发者与公共 runner 零依赖
+  - **文档**：[`docs/05`](docs/05-SpringBoot集成.md) §8.1（怎么切真库、权限要求、时区陷阱、手工清库）、
+    [`docs/04`](docs/04-接入与建表.md) §8.3/§10、[`docs/08`](docs/08-日志与合规.md) §3（为什么报文列是文本）
+
 ### Changed
 - **数字保真与数组语义严格化（本批）**：报文里的金额/数量是"看起来一样就行"的字符串，但**小数形态**过去是随底层 JSON 库（甚至随库版本）漂的 —— 同一个 `12345678.90`，Jackson 出 `1.23456789E7`、fastjson 出 `12345678.90`；`@sum@` 出的是无引号 number、而功能等价的 `numSum` 出字符串。本批把"数字出来长什么样"从"看库的实现"变成**写下来的契约**，并顺手把两处**静默出错**（既不报错也不抛异常，只是报文悄悄不对）变成可观测、可拒绝。**共 8 项破坏性变更**：
   - **B-1 `JsonOps.parse` 的小数返回 `BigDecimal`**（原 `Double`）：解析层保留源文字小数位（`"10.00"` → `10.00` 而不是 `10.0`），并避免 `Double` 二次转换的精度损失。**直接依赖 `parse()` 返回类型的宿主代码需要核对**；引擎层只受益不受影响

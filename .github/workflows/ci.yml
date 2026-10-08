@@ -79,34 +79,53 @@ jobs:
         run: mkdocs build --strict
 
   # ---------------------------------------------------------------
-  # 待启用：MySQL 5.7 与 8.0 双跑。
-  # W2 已交付 ifmap-provider-jdbc（建表脚本 + 仓储），但其自测走 H2 MODE=MySQL 执行生产 DDL
-  # （开发机无 Docker）。启用本 job 前请先补一个读 IFMAP_JDBC_URL 的真库测试类
-  # （建议加 @EnabledIfEnvironmentVariable 守卫，本地无变量时跳过），否则本 job 只是空跑。
+  # 真库双跑：MySQL 5.7 与 8.0。
+  # ifmap-testkit 提供单入口档位开关：
+  #   不设 IFMAP_JDBC_URL → 全部测试仍跑 H2（开发机/本 job 之外都走这条）
+  #   设了 IFMAP_JDBC_URL → 同一套用例改跑真库，表名换成本用例专属的 itt_<用例名>_<hex>_ 前缀
+  # 真库只提供「一个库」，所以隔离靠表前缀而不是建库（测试也不建库/不删库）。
+  # 残留表由 TestDataCleanupListener（JUnit 会话结束）+ 30 分钟陈旧表清扫兜底，
+  # job 结束前会再查一次 information_schema，确认没有 itt_* 漏网。
   # ---------------------------------------------------------------
-  # integration:
-  #   name: integration (MySQL ${{ matrix.mysql }})
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       mysql: [ '5.7', '8.0' ]
-  #   services:
-  #     mysql:
-  #       image: mysql:${{ matrix.mysql }}
-  #       env:
-  #         MYSQL_ROOT_PASSWORD: root
-  #         MYSQL_DATABASE: ifmap_test
-  #       ports: [ '3306:3306' ]
-  #       options: >-
-  #         --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -proot"
-  #         --health-interval=10s --health-timeout=5s --health-retries=10
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-java@v4
-  #       with: { distribution: temurin, java-version: '17', cache: maven }
-  #     - run: mvn -B -ntp -pl ifmap-provider-jdbc -am verify
-  #       env:
-  #         IFMAP_JDBC_URL: jdbc:mysql://127.0.0.1:3306/ifmap_test?useUnicode=true&characterEncoding=utf8
-  #         IFMAP_JDBC_USER: root
-  #         IFMAP_JDBC_PASSWORD: root
+  integration:
+    name: integration (MySQL ${{ matrix.mysql }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: [ '5.7', '8.0' ]
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ifmap_test
+        ports: [ '3306:3306' ]
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17', cache: maven }
+      # -am：testkit / 各 starter 直接从 reactor 构建，无需先 install
+      - name: run tests against MySQL
+        run: mvn -B -ntp -pl ifmap-testkit,ifmap-provider-jdbc,ifmap-spring-boot-starter,ifmap-admin-spring-boot-starter,ifmap-demo-spring-boot3 -am test
+        env:
+          IFMAP_JDBC_URL: jdbc:mysql://127.0.0.1:3306/ifmap_test
+          IFMAP_JDBC_USER: root
+          IFMAP_JDBC_PASSWORD: root
+      # 清理兜底必须真的生效：残留的 itt_* 表 = 只跑了半个生命周期，这里当门禁卡住
+      - name: assert no leftover itt_* tables
+        run: |
+          if ! command -v mysql >/dev/null; then
+            echo "::warning::runner 上没有 mysql 客户端，跳过残留表检查"
+            exit 0
+          fi
+          left=$(mysql -h127.0.0.1 -uroot -proot -N -B ifmap_test -e \
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='ifmap_test' AND table_name LIKE 'itt\\_%'")
+          if [ -n "$left" ]; then
+            echo "::error::真库测试残留表未清理：$left"
+            exit 1
+          fi
+          echo "OK：无 itt_* 残留表"

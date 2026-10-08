@@ -28,6 +28,7 @@ import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -37,7 +38,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.DefaultResourceLoader;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import javax.sql.DataSource;
 import java.util.List;
@@ -64,6 +64,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>宿主接入写法（与 {@link #SplitDatasourceConfig} 一致）见 {@code docs/05-SpringBoot集成.md} §3.5。</p>
  *
+ * <p>默认跑 H2：两个库是两块独立内存库，"物理分离"名副其实。若设了 {@code IFMAP_JDBC_URL} 跑真库，
+ * 本用例退化为"同一个库内的两套表前缀"（一个 MySQL 实例只能给一个库）—— 断言与代码路径不变。</p>
+ *
  * @author caijun
  */
 class IfmapSplitDatasourceTest {
@@ -74,11 +77,9 @@ class IfmapSplitDatasourceTest {
     private static final String LOG_DB = "ifmap_split_log_db";
     private static final String LOG_DB_NO_TABLES = "ifmap_split_log_db_no_tables";
 
-    private static DriverManagerDataSource h2(String dbName) {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource(
-                "jdbc:h2:mem:" + dbName + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
-        dataSource.setDriverClassName("org.h2.Driver");
-        return dataSource;
+    /** 当前档位下该"库"实际使用的表前缀（H2 = hint 本身；真库 = itt_<hint>_<hex>_）。 */
+    private static String prefixOf(String hint) {
+        return TestDatabases.prefixFor(hint);
     }
 
     /** 宿主侧最小接入：第二个 DataSource + 覆盖默认 sink（约 20 行，零新 API）。 */
@@ -88,38 +89,39 @@ class IfmapSplitDatasourceTest {
         @Bean(name = "dataSource")
         @Primary
         public DataSource configDataSource() {
-            return h2(CONFIG_DB);
+            return TestDatabases.fresh(CONFIG_DB).dataSource();
         }
 
         @Bean(name = "logDataSource")
         public DataSource logDataSource() {
-            return h2(LOG_DB);
+            return TestDatabases.fresh(LOG_DB).dataSource();
         }
 
         @Bean
         public ExecutionLogSink ifmapExecutionLogSink(@Qualifier("logDataSource") DataSource logDataSource) {
-            return new RepositoryExecutionLogSink(new JdbcConfigRepository(logDataSource));
+            return new RepositoryExecutionLogSink(new JdbcConfigRepository(logDataSource, prefixOf(LOG_DB)));
         }
     }
 
-    /** 同上，但日志库指向一个「没建表」的内存库：用来验证日志写失败不影响业务。 */
+    /** 同上，但日志库指向一个「没建表」的库/前缀：用来验证日志写失败不影响业务。 */
     @Configuration(proxyBeanMethods = false)
     static class BrokenLogDatasourceConfig {
 
         @Bean(name = "dataSource")
         @Primary
         public DataSource configDataSource() {
-            return h2(CONFIG_DB);
+            return TestDatabases.fresh(CONFIG_DB).dataSource();
         }
 
         @Bean(name = "logDataSource")
         public DataSource logDataSource() {
-            return h2(LOG_DB_NO_TABLES);
+            return TestDatabases.fresh(LOG_DB_NO_TABLES).dataSource();
         }
 
         @Bean
         public ExecutionLogSink ifmapExecutionLogSink(@Qualifier("logDataSource") DataSource logDataSource) {
-            return new RepositoryExecutionLogSink(new JdbcConfigRepository(logDataSource));
+            return new RepositoryExecutionLogSink(
+                    new JdbcConfigRepository(logDataSource, prefixOf(LOG_DB_NO_TABLES)));
         }
     }
 
@@ -134,6 +136,7 @@ class IfmapSplitDatasourceTest {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(IfmapAutoConfiguration.class))
                 .withUserConfiguration(splitConfig)
+                .withPropertyValues("ifmap.table-prefix=" + prefixOf(CONFIG_DB))
                 .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new);
     }
 
@@ -154,13 +157,13 @@ class IfmapSplitDatasourceTest {
     }
 
     /** 日志库的表由宿主自己建（自动建表只管主库）。 */
-    private static void createSchema(DataSource dataSource) {
-        new IfmapSchemaInitializer(dataSource, new TableNameResolver(TableNameResolver.DEFAULT_PREFIX),
+    private static void createSchema(DataSource dataSource, String prefix) {
+        new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),
                 new DefaultResourceLoader()).createTablesIfAbsent();
     }
 
-    private static List<ExecutionLog> logsOf(DataSource dataSource, String bizId) {
-        return new JdbcConfigRepository(dataSource).recentLogs("-1", bizId, 10);
+    private static List<ExecutionLog> logsOf(DataSource dataSource, String prefix, String bizId) {
+        return new JdbcConfigRepository(dataSource, prefix).recentLogs("-1", bizId, 10);
     }
 
     @Test
@@ -170,7 +173,7 @@ class IfmapSplitDatasourceTest {
             assertNull(context.getStartupFailure(), "上下文应正常启动");
             DataSource logDataSource = context.getBean("logDataSource", DataSource.class);
             DataSource configDataSource = context.getBean("dataSource", DataSource.class);
-            createSchema(logDataSource);
+            createSchema(logDataSource, prefixOf(LOG_DB));
 
             insertConfig(context.getBean(JdbcConfigWriter.class), "BIZ_SPLIT", "0000");
 
@@ -182,12 +185,13 @@ class IfmapSplitDatasourceTest {
             // 1) 配置来自主库：日志库里一条配置都没有，链路照样跑通
             assertTrue(result.isSuccess(), result.getErrorMessage());
             assertEquals("AP-SPLIT", result.getData().get("applyNo"));
-            assertTrue(logsOf(configDataSource, "BIZ-SPLIT").isEmpty(), "主库不该有执行日志");
-            assertTrue(new JdbcConfigRepository(logDataSource).queryConfigs("-1", "BIZ_SPLIT", "apply").isEmpty(),
+            assertTrue(logsOf(configDataSource, prefixOf(CONFIG_DB), "BIZ-SPLIT").isEmpty(), "主库不该有执行日志");
+            assertTrue(new JdbcConfigRepository(logDataSource, prefixOf(LOG_DB))
+                            .queryConfigs("-1", "BIZ_SPLIT", "apply").isEmpty(),
                     "日志库里没有配置（配置确实读的是主库）");
 
             // 2) 日志只写日志库：主库 0 行、日志库 1 行且已脱敏
-            List<ExecutionLog> logDbLogs = logsOf(logDataSource, "BIZ-SPLIT");
+            List<ExecutionLog> logDbLogs = logsOf(logDataSource, prefixOf(LOG_DB), "BIZ-SPLIT");
             assertEquals(1, logDbLogs.size());
             assertEquals("SUCCESS", logDbLogs.get(0).getExecutionResult());
             assertTrue(logDbLogs.get(0).getRequestParam().contains("张*"),
@@ -215,7 +219,7 @@ class IfmapSplitDatasourceTest {
 
             assertTrue(result.isSuccess(), "写日志失败不能影响业务结果：" + result.getErrorMessage());
             assertEquals("AP-SPLIT", result.getData().get("applyNo"));
-            assertTrue(logsOf(configDataSource, "BIZ-SPLIT-FAIL").isEmpty(),
+            assertTrue(logsOf(configDataSource, prefixOf(CONFIG_DB), "BIZ-SPLIT-FAIL").isEmpty(),
                     "日志库写失败时不许回落到主库，否则两库分离就失去意义");
         });
     }
@@ -223,9 +227,11 @@ class IfmapSplitDatasourceTest {
     @Test
     @DisplayName("不覆盖 sink（单库部署）时日志仍落主库：分离是可选能力，不是必需改造")
     void singleDatabaseStillWorks() {
+        final String hint = "ifmap_split_single_db";
         new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(IfmapAutoConfiguration.class))
-                .withBean("dataSource", DataSource.class, () -> h2("ifmap_split_single_db"))
+                .withBean("dataSource", DataSource.class, () -> TestDatabases.fresh(hint).dataSource())
+                .withPropertyValues("ifmap.table-prefix=" + prefixOf(hint))
                 .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new)
                 .run(context -> {
                     assertNotNull(context.getBean(ConfigRepository.class));
@@ -238,7 +244,7 @@ class IfmapSplitDatasourceTest {
                             "BIZ_SINGLE", "apply");
 
                     assertTrue(result.isSuccess(), result.getErrorMessage());
-                    assertEquals(1, logsOf(dataSource, "BIZ-SINGLE").size());
+                    assertEquals(1, logsOf(dataSource, prefixOf(hint), "BIZ-SINGLE").size());
                 });
     }
 }

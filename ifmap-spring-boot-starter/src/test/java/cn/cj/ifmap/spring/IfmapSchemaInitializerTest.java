@@ -17,12 +17,12 @@ package cn.cj.ifmap.spring;
 
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.jdbc.TableNameResolver;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.util.StreamUtils;
 
 import java.io.IOException;
@@ -32,7 +32,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,29 +44,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class IfmapSchemaInitializerTest {
 
-    private static DriverManagerDataSource h2(String dbName) {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource(
-                "jdbc:h2:mem:" + dbName + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
-        dataSource.setDriverClassName("org.h2.Driver");
-        return dataSource;
+    /**
+     * 当前档位下该用例真正使用的表前缀：H2 档就是传入的逻辑前缀；真库档是与用例名对应的 {@code itt_*} 前缀
+     * （同一个库里靠不同前缀隔离，互不踩表）。
+     */
+    private static String prefix(String caseName, String logicalPrefix) {
+        return TestDatabases.mysqlEnabled() ? TestDatabases.prefixFor(caseName) : logicalPrefix;
     }
 
-    private static IfmapSchemaInitializer initializer(String dbName, String prefix) {
-        return new IfmapSchemaInitializer(h2(dbName), new TableNameResolver(prefix),
-                new DefaultResourceLoader());
+    private static IfmapSchemaInitializer initializer(String caseName, String logicalPrefix) {
+        return new IfmapSchemaInitializer(TestDatabases.fresh(caseName).dataSource(),
+                new TableNameResolver(prefix(caseName, logicalPrefix)), new DefaultResourceLoader());
     }
 
     @Test
     @DisplayName("首次启动建 4 张表；再次启动全部跳过（幂等）")
     void createsThenSkips() {
-        IfmapSchemaInitializer initializer = initializer("ifmap_ddl_idempotent", TableNameResolver.DEFAULT_PREFIX);
+        final String caseName = "ifmap_ddl_idempotent";
+        String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
+        IfmapSchemaInitializer initializer = initializer(caseName, TableNameResolver.DEFAULT_PREFIX);
 
         List<String> created = initializer.createTablesIfAbsent();
         assertEquals(4, created.size(), "应新建 4 张表：" + created);
-        assertTrue(created.contains("ifmap_config"));
-        assertTrue(created.contains("ifmap_logic_branch_config"));
-        assertTrue(created.contains("ifmap_execution_log"));
-        assertTrue(created.contains("ifmap_config_history"));
+        assertTrue(created.contains(prefix + "config"));
+        assertTrue(created.contains(prefix + "logic_branch_config"));
+        assertTrue(created.contains(prefix + "execution_log"));
+        assertTrue(created.contains(prefix + "config_history"));
 
         assertEquals(0, initializer.createTablesIfAbsent().size(), "第二次启动不应再建表");
     }
@@ -75,19 +77,23 @@ class IfmapSchemaInitializerTest {
     @Test
     @DisplayName("表名前缀生效（复用存量 bankint_ 表）")
     void honoursPrefix() {
-        IfmapSchemaInitializer initializer = initializer("ifmap_ddl_prefix", "bankint_");
+        final String caseName = "ifmap_ddl_prefix";
+        String prefix = prefix(caseName, "bankint_");
+        IfmapSchemaInitializer initializer = initializer(caseName, "bankint_");
 
         assertEquals(4, initializer.createTablesIfAbsent().size());
-        assertTrue(initializer.tableExists("bankint_config"));
-        assertTrue(initializer.tableExists("bankint_execution_log"));
-        assertFalse(initializer.tableExists("ifmap_config"), "不应同时建出 ifmap_ 前缀的表");
+        assertTrue(initializer.tableExists(prefix + "config"));
+        assertTrue(initializer.tableExists(prefix + "execution_log"));
+        assertFalse(initializer.tableExists(prefix(caseName + "_default", TableNameResolver.DEFAULT_PREFIX) + "config"),
+                "不应同时建出默认前缀的表");
     }
 
     @Test
     @DisplayName("tableExists 对不存在的表返回 false（不抛异常）")
     void tableExistsIsSafe() {
-        IfmapSchemaInitializer initializer = initializer("ifmap_ddl_exists", "nope_");
-        assertFalse(initializer.tableExists("nope_config"));
+        final String caseName = "ifmap_ddl_exists";
+        IfmapSchemaInitializer initializer = initializer(caseName, "nope_");
+        assertFalse(initializer.tableExists(prefix(caseName, "nope_") + "config"));
     }
 
     @Test
@@ -107,7 +113,11 @@ class IfmapSchemaInitializerTest {
     @DisplayName("H2 会走「非 MySQL」分支：检测为 H2 且写盘 SQL 已剥表尾")
     void detectsH2AndStripsTail() {
         IfmapSchemaInitializer initializer = initializer("ifmap_ddl_dialect", TableNameResolver.DEFAULT_PREFIX);
-        assertFalse(initializer.isMysqlFamily(), "H2 不应被判定为 MySQL 系");
+        if (TestDatabases.mysqlEnabled()) {
+            assertTrue(initializer.isMysqlFamily(), "真库档应判定为 MySQL 系（脚本原样执行）");
+        } else {
+            assertFalse(initializer.isMysqlFamily(), "H2 不应被判定为 MySQL 系");
+        }
         assertEquals(4, initializer.createTablesIfAbsent().size(), "剥离表尾后 H2 也能建表");
     }
 
@@ -145,20 +155,30 @@ class IfmapSchemaInitializerTest {
         assertTrue(adapted.contains("json in comment"), "注释里的 json 不能被误伤：" + adapted);
         assertEquals(ddl, IfmapSchemaInitializer.adaptDdl(ddl, true), "MySQL 侧不改写");
 
-        // 真跑一遍：H2 建出来后 json 列已不存在（否则 setString 会被包成 JSON 字符串字面量）
-        javax.sql.DataSource dataSource = h2("ifmap_ddl_json");
+        // 真跑一遍：H2 必须把 json 列降级（否则 setString 会被包成 JSON 字符串字面量）；真库保留 json 列语义
+        final String caseName = "ifmap_ddl_json";
+        javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
+        String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        new IfmapSchemaInitializer(dataSource, new TableNameResolver(TableNameResolver.DEFAULT_PREFIX),
+        new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),
                 new DefaultResourceLoader()).createTablesIfAbsent();
+        String historyTable = prefix + "config_history";
         String type = jdbc.queryForObject("SELECT data_type FROM information_schema.columns "
-                + "WHERE lower(table_name) = 'ifmap_config_history' AND lower(column_name) = 'snapshot'", String.class);
+                + "WHERE lower(table_name) = ? AND lower(column_name) = 'snapshot'", String.class,
+                historyTable.toLowerCase(java.util.Locale.ROOT));
         assertNotNull(type);
-        assertNotEquals("JSON", type == null ? null : type.toUpperCase(), "H2 上 snapshot 不能还是 JSON 类型");
-        jdbc.update("INSERT INTO `ifmap_config_history` (`key_id`,`config_key_id`,`tenant_id`,`interface_no`,"
+        if (TestDatabases.mysqlEnabled()) {
+            assertEquals("json", type.toLowerCase(java.util.Locale.ROOT), "真库上 snapshot 保持 json 列");
+        } else {
+            assertFalse("JSON".equalsIgnoreCase(type), "H2 上 snapshot 不能还是 JSON 类型");
+        }
+        jdbc.update("INSERT INTO `" + historyTable + "` (`key_id`,`config_key_id`,`tenant_id`,`interface_no`,"
                 + "`change_type`,`snapshot`) VALUES (1, 1, 1, 'IF_A', 'CREATE', ?)", "{\"a\":1}");
-        assertEquals("{\"a\":1}", jdbc.queryForObject(
-                "SELECT `snapshot` FROM `ifmap_config_history` WHERE `key_id` = 1", String.class),
-                "H2 上写进去的 JSON 文本必须原样读回（MySQL 语义）");
+        // H2 是文本列，原样读回；MySQL 的 json 列会把文本规范化（这正是日志列改 mediumtext 的原因）
+        String expected = TestDatabases.mysqlEnabled() ? "{\"a\": 1}" : "{\"a\":1}";
+        assertEquals(expected, jdbc.queryForObject(
+                        "SELECT `snapshot` FROM `" + historyTable + "` WHERE `key_id` = 1", String.class),
+                "写进去的 JSON 文本必须按当前库的语义读回");
     }
 
     @Test
@@ -173,21 +193,26 @@ class IfmapSchemaInitializerTest {
     @Test
     @DisplayName("四张表列数与 W2 口径一致（28 / 17 / 17 / 11）")
     void columnCountsMatch() {
-        DriverManagerDataSource dataSource = h2("ifmap_ddl_columns");
-        new IfmapSchemaInitializer(dataSource, new TableNameResolver(TableNameResolver.DEFAULT_PREFIX),
+        final String caseName = "ifmap_ddl_columns";
+        javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
+        String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
+        new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),
                 new DefaultResourceLoader()).createTablesIfAbsent();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        assertEquals(28, columnsOf(jdbc, "ifmap_config"));
-        assertEquals(17, columnsOf(jdbc, "ifmap_logic_branch_config"));
-        assertEquals(17, columnsOf(jdbc, "ifmap_execution_log"));
-        assertEquals(11, columnsOf(jdbc, "ifmap_config_history"));
+        assertEquals(28, columnsOf(jdbc, prefix + "config"));
+        assertEquals(17, columnsOf(jdbc, prefix + "logic_branch_config"));
+        assertEquals(17, columnsOf(jdbc, prefix + "execution_log"));
+        assertEquals(11, columnsOf(jdbc, prefix + "config_history"));
     }
 
     private static int columnsOf(JdbcTemplate jdbc, String table) {
-        Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.columns WHERE lower(table_name) = ?",
-                Integer.class, table);
+        String sql = "SELECT COUNT(*) FROM information_schema.columns WHERE lower(table_name) = ?";
+        if (TestDatabases.mysqlEnabled()) {
+            // 真库里可能同时存在别的库的同名表，按当前库限定
+            sql += " AND table_schema = DATABASE()";
+        }
+        Integer count = jdbc.queryForObject(sql, Integer.class, table.toLowerCase(java.util.Locale.ROOT));
         return count == null ? -1 : count;
     }
 

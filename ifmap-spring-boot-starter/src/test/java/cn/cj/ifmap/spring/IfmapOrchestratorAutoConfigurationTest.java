@@ -45,13 +45,13 @@ import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.Collections;
@@ -131,10 +131,8 @@ class IfmapOrchestratorAutoConfigurationTest {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(DataSourceAutoConfiguration.class,
                         IfmapAutoConfiguration.class))
-                .withPropertyValues(
-                        "spring.datasource.url=jdbc:h2:mem:" + dbName + ";MODE=MySQL;DB_CLOSE_DELAY=-1",
-                        "spring.datasource.username=sa",
-                        "spring.datasource.driver-class-name=org.h2.Driver");
+                // 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL
+                .withPropertyValues(TestDatabases.springPropertyArray(dbName));
     }
 
     @Test
@@ -280,8 +278,7 @@ class IfmapOrchestratorAutoConfigurationTest {
         static final IfmapOrchestrator CUSTOM = IfmapOrchestrator.builder()
                 .engine(cn.cj.ifmap.core.IfmapEngine.builder().builtins(false).build())
                 .repository(new JdbcConfigRepository(
-                        new DriverManagerDataSource(
-                                "jdbc:h2:mem:ifmap_orc_custom;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")))
+                        TestDatabases.fresh("ifmap_orc_custom").dataSource()))
                 .tenantResolver(new HeaderTenantResolver())
                 .build();
 

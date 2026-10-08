@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ifmap 测试支持模块：一套开关同时支持 H2 内存库与真 MySQL，供各模块测试复用。
+
+  为什么单独成模块（而不是放某个模块的 src/test）：
+    · provider-jdbc / spring-boot-starter / admin 三个模块都要用，src/test 跨模块不可见；
+    · 也不能放 provider-jdbc 的 src/main —— 会把 H2 与 MySQL 驱动打进生产 jar。
+
+  刻意**不依赖 spring-jdbc**：连接的创建只用 JDK 自带的 DriverManager + 自写极简 DataSource，
+  这样测试库入口不会把某个版本的 spring-jdbc（provider-jdbc 是 5.3.x、Spring Boot 3 模块是 6.2.x）
+  传进使用方的依赖图，避免覆盖 spring-boot 管理的版本。
+
+  @author caijun
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>cn.cj</groupId>
+    <artifactId>ifmap-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>ifmap-testkit</artifactId>
+  <name>ifmap-testkit</name>
+  <description>ifmap 测试支持模块：H2 内存库 / 真 MySQL 双档切换（JDK8 基线）</description>
+
+  <dependencies>
+    <!--
+      H2 与 MySQL 驱动：本模块要按方言建连接，必须编译期可见。
+      父 POM 把两者都管成 test 作用域，这里显式放开成 compile —— 使用方以 test 作用域依赖本模块时，
+      它们只会以 test 传递依赖出现，不会进生产 jar。
+    -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      仅编译期用（provided + optional）：清理监听器实现 LauncherSessionListener，
+      运行时由 surefire 自己提供启动器，不会进使用方的依赖图。
+    -->
+    <dependency>
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>

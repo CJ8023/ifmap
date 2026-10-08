@@ -17,6 +17,7 @@ package cn.cj.ifmap.spring;
 
 import cn.cj.ifmap.jdbc.JdbcExecutionLogCleaner;
 import cn.cj.ifmap.jdbc.TableNameResolver;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -44,23 +45,27 @@ class IfmapLogCleanTaskTest {
     private static final long DAY = 24L * 60L * 60L * 1000L;
 
     private static ApplicationContextRunner runner(String dbName) {
+        // 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(DataSourceAutoConfiguration.class,
                         IfmapAutoConfiguration.class))
-                .withPropertyValues(
-                        "spring.datasource.url=jdbc:h2:mem:" + dbName + ";MODE=MySQL;DB_CLOSE_DELAY=-1",
-                        "spring.datasource.username=sa",
-                        "spring.datasource.driver-class-name=org.h2.Driver");
+                .withPropertyValues(TestDatabases.springPropertyArray(dbName));
+    }
+
+    /** 当前档位下该用例真正使用的表前缀（与 {@link TestDatabases#springProperties(String)} 一致）。 */
+    private static String prefix(String dbName) {
+        return TestDatabases.prefixFor(dbName);
     }
 
     @Test
     @DisplayName("默认装配：清理器 + 定时任务都就绪，保留期/批大小来自配置")
     void wiresCleanerAndTaskByDefault() {
-        runner("ifmap_clean_default").run(context -> {
+        final String dbName = "ifmap_clean_default";
+        runner(dbName).run(context -> {
             assertNull(context.getStartupFailure(), "上下文应正常启动");
 
             JdbcExecutionLogCleaner cleaner = context.getBean(JdbcExecutionLogCleaner.class);
-            assertEquals("ifmap_execution_log", cleaner.tables().executionLogTable());
+            assertEquals(prefix(dbName) + "execution_log", cleaner.tables().executionLogTable());
 
             IfmapLogCleanTask task = context.getBean(IfmapLogCleanTask.class);
             assertEquals(90, task.getRetentionDays(), "默认保留 90 天");
@@ -97,18 +102,20 @@ class IfmapLogCleanTaskTest {
     @Test
     @DisplayName("cron 真会触发（每秒一次）：过期日志被自动清掉")
     void cronActuallyTriggersCleanup() throws Exception {
-        runner("ifmap_clean_tick")
+        final String dbName = "ifmap_clean_tick";
+        final String logTable = prefix(dbName) + "execution_log";
+        runner(dbName)
                 .withPropertyValues("ifmap.log.clean-cron=*/1 * * * * *", "ifmap.log.clean-batch-sleep-millis=0")
                 .run(context -> {
                     assertNull(context.getStartupFailure());
                     JdbcTemplate jdbc = new JdbcTemplate(context.getBean(javax.sql.DataSource.class));
-                    insertLog(jdbc, 11L, System.currentTimeMillis() - 200L * DAY);
+                    insertLog(jdbc, logTable, 11L, System.currentTimeMillis() - 200L * DAY);
 
                     long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
-                    while (count(jdbc) > 0 && System.currentTimeMillis() < deadline) {
+                    while (count(jdbc, logTable) > 0 && System.currentTimeMillis() < deadline) {
                         Thread.sleep(200L);
                     }
-                    assertEquals(0, count(jdbc), "调度器应已自动清理过期日志");
+                    assertEquals(0, count(jdbc, logTable), "调度器应已自动清理过期日志");
                 });
     }
 
@@ -163,19 +170,21 @@ class IfmapLogCleanTaskTest {
     @Test
     @DisplayName("cleanNow 真删过期日志、保留未过期日志")
     void cleanNowDeletesExpiredLogs() {
-        runner("ifmap_clean_real")
+        final String dbName = "ifmap_clean_real";
+        final String logTable = prefix(dbName) + "execution_log";
+        runner(dbName)
                 .withPropertyValues("ifmap.log.retention-days=90")
                 .run(context -> {
                     assertNull(context.getStartupFailure());
                     JdbcTemplate jdbc = new JdbcTemplate(context.getBean(javax.sql.DataSource.class));
-                    insertLog(jdbc, 1L, System.currentTimeMillis() - 200L * DAY);
-                    insertLog(jdbc, 2L, System.currentTimeMillis() - 1L * DAY);
+                    insertLog(jdbc, logTable, 1L, System.currentTimeMillis() - 200L * DAY);
+                    insertLog(jdbc, logTable, 2L, System.currentTimeMillis() - 1L * DAY);
 
                     long deleted = context.getBean(IfmapLogCleanTask.class).cleanNow();
 
                     assertEquals(1L, deleted, "只应删除过期的那条");
-                    assertEquals(1, count(jdbc));
-                    assertEquals(2L, jdbc.queryForObject("SELECT `key_id` FROM `ifmap_execution_log`",
+                    assertEquals(1, count(jdbc, logTable));
+                    assertEquals(2L, jdbc.queryForObject("SELECT `key_id` FROM `" + logTable + "`",
                             Long.class).longValue(), "留下的必须是未过期那条");
                 });
     }
@@ -183,10 +192,11 @@ class IfmapLogCleanTaskTest {
     @Test
     @DisplayName("清理失败只 WARN 不抛异常（返回 -1）—— 不影响业务、下个周期重试")
     void cleanNowSwallowsFailure() {
+        String missing = TestDatabases.mysqlEnabled()
+                ? TestDatabases.prefixFor("ifmap_clean_absent_missing") : "absent_";
         JdbcExecutionLogCleaner onMissingTable = new JdbcExecutionLogCleaner(
-                new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
-                        "jdbc:h2:mem:ifmap_clean_absent;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "")),
-                new TableNameResolver("absent_"));
+                new JdbcTemplate(TestDatabases.fresh("ifmap_clean_absent").dataSource()),
+                new TableNameResolver(missing));
 
         IfmapLogCleanTask task = new IfmapLogCleanTask(onMissingTable, 90, 1000, 1000, 0L);
 
@@ -196,15 +206,17 @@ class IfmapLogCleanTaskTest {
     @Test
     @DisplayName("保留期配成 0：任务层返回 -1（拒绝执行），不会删全表")
     void rejectsZeroRetention() {
-        runner("ifmap_clean_zero")
+        final String dbName = "ifmap_clean_zero";
+        final String logTable = prefix(dbName) + "execution_log";
+        runner(dbName)
                 .withPropertyValues("ifmap.log.retention-days=0")
                 .run(context -> {
                     assertNull(context.getStartupFailure());
                     JdbcTemplate jdbc = new JdbcTemplate(context.getBean(javax.sql.DataSource.class));
-                    insertLog(jdbc, 9L, System.currentTimeMillis() - 999L * DAY);
+                    insertLog(jdbc, logTable, 9L, System.currentTimeMillis() - 999L * DAY);
 
                     assertEquals(-1L, context.getBean(IfmapLogCleanTask.class).cleanNow());
-                    assertEquals(1, count(jdbc), "拒绝执行后数据必须原样保留");
+                    assertEquals(1, count(jdbc, logTable), "拒绝执行后数据必须原样保留");
                 });
     }
 
@@ -230,15 +242,15 @@ class IfmapLogCleanTaskTest {
                 });
     }
 
-    private static void insertLog(JdbcTemplate jdbc, long keyId, long addTimeMillis) {
-        jdbc.update("INSERT INTO `ifmap_execution_log`"
+    private static void insertLog(JdbcTemplate jdbc, String logTable, long keyId, long addTimeMillis) {
+        jdbc.update("INSERT INTO `" + logTable + "`"
                         + " (`key_id`, `tenant_id`, `interface_no`, `biz_id`, `execution_result`, `add_time`)"
                         + " VALUES (?, ?, ?, ?, ?, ?)",
                 keyId, -1L, "IF_CLEAN", "BIZ-" + keyId, "SUCCESS", new Timestamp(addTimeMillis));
     }
 
-    private static int count(JdbcTemplate jdbc) {
-        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM `ifmap_execution_log`", Integer.class);
+    private static int count(JdbcTemplate jdbc, String logTable) {
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM `" + logTable + "`", Integer.class);
         return n == null ? 0 : n;
     }
 }

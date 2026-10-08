@@ -1,0 +1,21 @@
+# 真库档：java -jar ifmap-demo-spring-boot3.jar --spring.profiles.active=mysql
+#
+# 默认 profile（application.yml）用 H2 内存库，开箱即跑；本 profile 才连真 MySQL。
+# 连接信息走环境变量，别把库密码提交进仓库：
+#   IFMAP_JDBC_URL / IFMAP_JDBC_USER / IFMAP_JDBC_PASSWORD
+#
+# 注意 serverTimezone + sessionVariables=time_zone：驱动按 serverTimezone 解释返回的 datetime，
+# 而库里 CURRENT_TIMESTAMP(3) 用的是会话时区，两者必须成对配置，否则时间列会整体偏移。
+# time_zone 用数字偏移（如 '+08:00'）而不是 'Asia/Shanghai'，后者要求服务端装了时区表。
+spring:
+  datasource:
+    url: ${IFMAP_JDBC_URL:jdbc:mysql://localhost:3306/ifmap?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=+08:00&sessionVariables=time_zone='+08:00'}
+    username: ${IFMAP_JDBC_USER:root}
+    password: ${IFMAP_JDBC_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+ifmap:
+  # 复用存量 ECC 表时改成 bankint_；一套前缀对应一套表，多环境可共用一个库
+  table-prefix: ifmap_
+  ddl:
+    auto: true

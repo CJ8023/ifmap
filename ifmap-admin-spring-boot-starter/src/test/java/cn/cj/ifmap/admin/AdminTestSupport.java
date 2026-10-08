@@ -24,14 +24,17 @@ import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
 import cn.cj.ifmap.json.jackson.JacksonJsonOps;
 import cn.cj.ifmap.spring.IfmapSchemaInitializer;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import javax.sql.DataSource;
 
 /**
- * 管理端测试脚手架：H2 真库 + 直接用自动装配同一份建表脚本建表。
+ * 管理端测试脚手架：默认 H2，设了 {@code IFMAP_JDBC_URL} 后同一套用例跑真 MySQL。
+ *
+ * <p>两种档位的隔离方式不同（H2 每个用例一块内存库；真库同一库里每个用例一套 {@code itt_*} 前缀），
+ * 所以测试里<b>不能</b>再写死 {@code ifmap_config} 这类表名 —— 统一用 {@link Db} 拿表名。</p>
  *
  * @author caijun
  */
@@ -40,38 +43,67 @@ final class AdminTestSupport {
     private AdminTestSupport() {
     }
 
-    static DataSource dataSource(String name) {
-        DriverManagerDataSource ds = new DriverManagerDataSource(
-                "jdbc:h2:mem:" + name + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", "");
-        ds.setDriverClassName("org.h2.Driver");
-        return ds;
+    /** 一个用例的库句柄：数据源 + 当前档位可用的表前缀 + 三个仓储。 */
+    static final class Db {
+
+        private final String prefix;
+        private final DataSource dataSource;
+        private final JdbcTemplate jdbc;
+
+        Db(String name) {
+            this.prefix = TestDatabases.prefixFor(name);
+            this.dataSource = TestDatabases.fresh(name).dataSource();
+            this.jdbc = new JdbcTemplate(dataSource);
+        }
+
+        DataSource dataSource() {
+            return dataSource;
+        }
+
+        JdbcTemplate jdbc() {
+            return jdbc;
+        }
+
+        String configTable() {
+            return prefix + "config";
+        }
+
+        String logicBranchTable() {
+            return prefix + "logic_branch_config";
+        }
+
+        String historyTable() {
+            return prefix + "config_history";
+        }
+
+        TableNameResolver tables() {
+            return new TableNameResolver(prefix);
+        }
+
+        /** 用 starter 的建表脚本初始化（与生产同一份 DDL），并把三张表清空。 */
+        void createSchema() {
+            new IfmapSchemaInitializer(dataSource, tables(), new DefaultResourceLoader())
+                    .afterPropertiesSet();
+            jdbc.update("DELETE FROM `" + configTable() + "`");
+            jdbc.update("DELETE FROM `" + logicBranchTable() + "`");
+            jdbc.update("DELETE FROM `" + historyTable() + "`");
+        }
+
+        JdbcConfigRepository repository() {
+            return new JdbcConfigRepository(jdbc, tables(), SnowflakeIdGenerator.shared());
+        }
+
+        JdbcConfigWriter writer() {
+            return new JdbcConfigWriter(jdbc, tables(), SnowflakeIdGenerator.shared());
+        }
+
+        JdbcConfigHistoryRepository history() {
+            return new JdbcConfigHistoryRepository(jdbc, tables(), SnowflakeIdGenerator.shared());
+        }
     }
 
-    static JdbcTemplate jdbc(DataSource ds) {
-        return new JdbcTemplate(ds);
-    }
-
-    static TableNameResolver tables() {
-        return TableNameResolver.defaults();
-    }
-
-    /** 用 starter 的建表脚本初始化（与生产同一份 DDL）。 */
-    static void createSchema(DataSource ds) {
-        IfmapSchemaInitializer initializer =
-                new IfmapSchemaInitializer(ds, tables(), new DefaultResourceLoader());
-        initializer.afterPropertiesSet();
-    }
-
-    static JdbcConfigRepository repository(JdbcTemplate jdbc) {
-        return new JdbcConfigRepository(jdbc, tables(), SnowflakeIdGenerator.shared());
-    }
-
-    static JdbcConfigWriter writer(JdbcTemplate jdbc) {
-        return new JdbcConfigWriter(jdbc, tables(), SnowflakeIdGenerator.shared());
-    }
-
-    static JdbcConfigHistoryRepository history(JdbcTemplate jdbc) {
-        return new JdbcConfigHistoryRepository(jdbc, tables(), SnowflakeIdGenerator.shared());
+    static Db db(String name) {
+        return new Db(name);
     }
 
     static ConfigSnapshotMapper snapshots() {

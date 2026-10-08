@@ -33,7 +33,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import javax.sql.DataSource;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -49,19 +48,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ConfigValidatorTest {
 
+    private AdminTestSupport.Db db;
     private JdbcTemplate jdbc;
     private JdbcConfigWriter writer;
     private ConfigValidator validator;
 
     @BeforeEach
     void setUp() {
-        DataSource dataSource = AdminTestSupport.dataSource("ifmap_admin_validator");
-        AdminTestSupport.createSchema(dataSource);
-        jdbc = AdminTestSupport.jdbc(dataSource);
-        jdbc.update("DELETE FROM `ifmap_config`");
-        jdbc.update("DELETE FROM `ifmap_logic_branch_config`");
-        JdbcConfigRepository repository = AdminTestSupport.repository(jdbc);
-        writer = AdminTestSupport.writer(jdbc);
+        db = AdminTestSupport.db("ifmap_admin_validator");
+        db.createSchema();
+        jdbc = db.jdbc();
+        JdbcConfigRepository repository = db.repository();
+        writer = db.writer();
 
         SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
         specialDeals.register("demoStrategy", new DemoStrategy());
@@ -161,7 +159,7 @@ class ConfigValidatorTest {
         assertTrue(registered.isPassed(), String.valueOf(registered.getErrors()));
 
         ConfigValidator emptyStrategies = new ConfigValidator(null, new JacksonJsonOps(),
-                new SpecialDealStrategyRegistry(), new ActionRegistry(), AdminTestSupport.repository(jdbc));
+                new SpecialDealStrategyRegistry(), new ActionRegistry(), db.repository());
         ValidationResult warning = emptyStrategies.validate(config, true);
         assertTrue(warning.isPassed(), warning.getErrors().toString());
         assertTrue(warning.getWarnings().toString().contains("尚未注册任何特殊处理策略"),

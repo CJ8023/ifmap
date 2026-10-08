@@ -29,6 +29,7 @@ import cn.cj.ifmap.core.spi.IdGenerator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -70,22 +71,22 @@ class IfmapAutoConfigurationTest {
     }
 
     private static ApplicationContextRunner runner(String dbName) {
+        // 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL（同一套用例、同一个前缀隔离口径）
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(DataSourceAutoConfiguration.class,
                         IfmapAutoConfiguration.class))
-                .withPropertyValues(
-                        "spring.datasource.url=jdbc:h2:mem:" + dbName + ";MODE=MySQL;DB_CLOSE_DELAY=-1",
-                        "spring.datasource.username=sa",
-                        "spring.datasource.driver-class-name=org.h2.Driver");
+                .withPropertyValues(TestDatabases.springPropertyArray(dbName));
     }
 
     @Test
     @DisplayName("默认装配：建表 + 引擎 + 缓存装饰的仓储 + 写入器")
     void wiresByDefault() {
-        runner("ifmap_ac_default").run(context -> {
+        final String dbName = "ifmap_ac_default";
+        String prefix = TestDatabases.prefixFor(dbName);
+        runner(dbName).run(context -> {
             assertNull(context.getStartupFailure(), "上下文应正常启动");
 
-            assertEquals(TableNameResolver.DEFAULT_PREFIX, context.getBean(TableNameResolver.class).prefix());
+            assertEquals(prefix, context.getBean(TableNameResolver.class).prefix());
             assertNotNull(context.getBean(IfmapEngine.class));
             assertNotNull(context.getBean(RuleRegistry.class));
             assertNotNull(context.getBean(JdbcConfigWriter.class));
@@ -97,10 +98,10 @@ class IfmapAutoConfigurationTest {
 
             // 建表：4 张表都真实建出来了
             IfmapSchemaInitializer initializer = context.getBean(IfmapSchemaInitializer.class);
-            assertTrue(initializer.tableExists("ifmap_config"));
-            assertTrue(initializer.tableExists("ifmap_logic_branch_config"));
-            assertTrue(initializer.tableExists("ifmap_execution_log"));
-            assertTrue(initializer.tableExists("ifmap_config_history"));
+            assertTrue(initializer.tableExists(prefix + "config"));
+            assertTrue(initializer.tableExists(prefix + "logic_branch_config"));
+            assertTrue(initializer.tableExists(prefix + "execution_log"));
+            assertTrue(initializer.tableExists(prefix + "config_history"));
 
             // 内置规则可用（builtins(false) + registry 预注册，不应重复注册失败）
             IfmapEngine engine = context.getBean(IfmapEngine.class);
@@ -175,13 +176,19 @@ class IfmapAutoConfigurationTest {
     @Test
     @DisplayName("ifmap.table-prefix 生效")
     void customPrefix() {
-        runner("ifmap_ac_prefix")
-                .withPropertyValues("ifmap.table-prefix=bankint_")
+        final String dbName = "ifmap_ac_prefix";
+        // 真库档里自定义前缀也必须是本次运行独有的，否则会在共享库里留下清理不掉的表
+        final String custom = TestDatabases.mysqlEnabled()
+                ? TestDatabases.prefixFor("ifmap_ac_prefix_custom") : "bankint_";
+        final String untouched = TestDatabases.mysqlEnabled()
+                ? TestDatabases.prefixFor(dbName) : TableNameResolver.DEFAULT_PREFIX;
+        runner(dbName)
+                .withPropertyValues("ifmap.table-prefix=" + custom)
                 .run(context -> {
-                    assertEquals("bankint_", context.getBean(TableNameResolver.class).prefix());
+                    assertEquals(custom, context.getBean(TableNameResolver.class).prefix());
                     IfmapSchemaInitializer initializer = context.getBean(IfmapSchemaInitializer.class);
-                    assertTrue(initializer.tableExists("bankint_config"));
-                    assertFalse(initializer.tableExists("ifmap_config"));
+                    assertTrue(initializer.tableExists(custom + "config"));
+                    assertFalse(initializer.tableExists(untouched + "config"), "未配置的前缀不该有表");
                 });
     }
 

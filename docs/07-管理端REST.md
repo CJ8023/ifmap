@@ -217,7 +217,7 @@ POST /ifmap/admin/configs/dry-run
 |---|---|
 | `ConfigAdminServiceTest` | 14 个用例：CRUD / 乐观锁 / 回滚 / 分支 / 试跑 / 校验 |
 | `IfmapAdminWebEndpointTest` | 5 个用例：前缀、状态码语义、审计链、分支 + 试跑 |
-| `ConfigValidatorTest` | 11 个用例：§5 校验清单逐条正反例 |
+| `ConfigValidatorTest` | 13 个用例：§5 校验清单逐条正反例 |
 | `ConfigAuditorTest` | 3 个用例：巡检报告（含 Markdown） |
 | `IfmapAdminAutoConfigurationTest` | 7 个用例：三重门控（默认关闭）、字典 bean 两态 |
 | `ConfigSnapshotMapperTest` | 4 个用例：快照与差异序列化 |

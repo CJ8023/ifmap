@@ -17,6 +17,7 @@ package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.ittest.AdminTestApplication;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import java.util.List;
 import java.util.Map;
@@ -48,16 +51,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @SpringBootTest(classes = AdminTestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-                "ifmap.admin.enabled=true",
-                "spring.datasource.url=jdbc:h2:mem:ifmap_admin_web;MODE=MySQL;DB_CLOSE_DELAY=-1",
-                "spring.datasource.driver-class-name=org.h2.Driver",
-                "spring.datasource.username=sa",
-                "spring.datasource.password="
-        })
+        properties = {"ifmap.admin.enabled=true"})
 class IfmapAdminWebEndpointTest {
 
     private static final String BASE = "/ifmap/admin";
+    private static final String TEST_DB = "ifmap_admin_web";
+
+    /** 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL（表前缀也由它给出）。 */
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry registry) {
+        TestDatabases.springProperties(TEST_DB).forEach((key, value) -> registry.add(key, () -> value));
+    }
 
     @Autowired
     private TestRestTemplate rest;
@@ -68,8 +72,9 @@ class IfmapAdminWebEndpointTest {
     /** 同一个 H2 内存库被本类多个用例共用，逐个用例前清空，避免"列表总数"被上个用例污染。 */
     @BeforeEach
     void cleanTables() {
-        for (String table : new String[]{"ifmap_config_history", "ifmap_logic_branch_config", "ifmap_config"}) {
-            jdbc.execute("DELETE FROM `" + table + "`");
+        String prefix = TestDatabases.prefixFor(TEST_DB);
+        for (String suffix : new String[]{"config_history", "logic_branch_config", "config"}) {
+            jdbc.execute("DELETE FROM `" + prefix + suffix + "`");
         }
     }
 

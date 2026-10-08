@@ -44,7 +44,9 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLU
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- 期望：interface_order smallint；busi_node varchar(32)；add_user_id varchar(64)；
 --       add_time datetime(3)；status tinyint(1)；deleted_seq bigint；logic_branch_order smallint；
---       request_param json；response_param mediumtext；execution_result varchar(16)；error_msg varchar(1024)。
+--       request_param mediumtext；response_param mediumtext；execution_result varchar(16)；error_msg varchar(1024)。
+--       ⚠️ 两列都是文本类型是**刻意设计**：日志列必须"一定写得进去"（超长报文会被截断，截断结果不是合法 JSON，
+--          若是 json 列会报 3140 直接丢行），且不能被 json 规范化（10.00 → 10）。
 -- ⚠️ 已知可接受差异：`key_id` / `tenant_id` 可能仍是 `bigint(19)`（显示宽度）。
 --     显示宽度不影响功能（8.0.19+ 已弃用），本项目未强制对齐；
 --     若要完全一致，追加 `MODIFY COLUMN key_id bigint NOT NULL`（`execution_log.key_id`

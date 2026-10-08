@@ -16,6 +16,7 @@
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.ittest.AdminTestApplication;
+import cn.cj.ifmap.testkit.TestDatabases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -44,16 +47,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @SpringBootTest(classes = AdminTestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-                "ifmap.admin.enabled=true",
-                "spring.datasource.url=jdbc:h2:mem:ifmap_admin_ui;MODE=MySQL;DB_CLOSE_DELAY=-1",
-                "spring.datasource.driver-class-name=org.h2.Driver",
-                "spring.datasource.username=sa",
-                "spring.datasource.password="
-        })
+        properties = {"ifmap.admin.enabled=true"})
 class IfmapAdminUiEndpointTest {
 
     private static final String BASE = "/ifmap/admin";
+
+    /** 默认 H2；设了 IFMAP_JDBC_URL 就走真 MySQL（表前缀也由它给出）。 */
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry registry) {
+        TestDatabases.springProperties("ifmap_admin_ui").forEach((key, value) -> registry.add(key, () -> value));
+    }
 
     @Autowired
     private TestRestTemplate rest;

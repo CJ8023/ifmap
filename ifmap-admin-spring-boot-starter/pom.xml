@@ -74,5 +74,11 @@
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>
     </dependency>
+    <!-- 测试库开关：默认 H2，设 IFMAP_JDBC_URL 后可跑真 MySQL（同 ifmap-provider-jdbc） -->
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-testkit</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>

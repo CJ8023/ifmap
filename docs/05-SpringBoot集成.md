@@ -528,7 +528,7 @@ starter 与手工装配**可以混用**：宿主想要哪个 bean 就自己声�
 
 ```bash
 # starter 单测（含 H2 上真实执行生产 DDL、策略自动收集、编排器端到端）
-mvn -pl ifmap-spring-boot-starter -am test        # 29 个测试
+mvn -pl ifmap-spring-boot-starter -am test        # 44 个测试
 
 # 示例工程端到端（Spring 上下文 + H2 + 真实建表 + 真实仓储 + 真实引擎 + 真实编排）
 mvn -pl ifmap-demo-spring-boot3 -am test          # 4 个测试
@@ -540,3 +540,30 @@ java -jar ifmap-demo-spring-boot3/target/ifmap-demo-spring-boot3-0.1.0-SNAPSHOT.
 
 > Spring Boot 3 模块要求 JDK 17+。父 POM 用 `<jdk>[17,)</jdk>` 剖面自动装卸这两个模块，
 > 因此在 JDK 8/11 上执行 `mvn test` 不会失败（CI 矩阵见 `.github/workflows/ci.yml`）。
+
+### 8.1 把测试切到真 MySQL（可选，默认 H2）
+
+所有数据库相关测试都走同一个开关：**设置 `IFMAP_JDBC_URL` 即切成真库，不设置就是 H2 内存库**（开发机与
+公共 CI runner 零依赖，默认路径必须永远能跑）。开关由测试支持模块 `ifmap-testkit` 提供（`main` scope，
+但只在各模块以 `test` 依赖引入，所以 H2 / MySQL 驱动**不会进生产包**）。
+
+```bash
+# Windows / Linux 通用（三个变量都给上）
+export IFMAP_JDBC_URL='jdbc:mysql://127.0.0.1:3306/ifmap?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true'
+export IFMAP_JDBC_USER=root
+export IFMAP_JDBC_PASSWORD=root
+mvn -pl ifmap-testkit,ifmap-provider-jdbc,ifmap-spring-boot-starter,ifmap-admin-spring-boot-starter,ifmap-demo-spring-boot3 test
+```
+
+| 事项 | 说明 |
+| --- | --- |
+| 需要什么权限 | 只需要**已有库内的建表/删表权限**（不 `CREATE DATABASE`、不 `USE`）。库名由 URL 指定，例如 `.../ifmap` |
+| 表从哪来 | 测试直接执行**生产 DDL**（`db/changelog/v1.0.0/*.sql`），在真库上**原文执行**（保留 `ENGINE`/`ROW_FORMAT`/`COLLATE`） |
+| 会不会碰到已有表 | 不会：每处测试用各自唯一前缀 `itt_<hint≤18>_<hex8>_`（由 `ifmap.table-prefix` 传入），只操作自己建的表 |
+| 跑完会留垃圾吗 | 不会。清理三层兜底：JUnit 会话监听器（`META-INF/services` 自动装配）→ JVM 退出钩子 → 下次运行时清扫 30 分钟前的 `itt_*` 残表。CI 另有一条门禁断言跑完 `itt_*` 计数为 0 |
+| 真留了怎么办 | 手工清：`TestDatabases.dropAllTestTables()`（只删形如 `itt_..._` 的表），或 `DROP TABLE` 掉 `itt_%` |
+| 时区 | 连接 URL 会自动补齐 `serverTimezone` **与** `sessionVariables=time_zone='<JVM 偏移>'`，两者必须成对（服务器 `@@global.time_zone=SYSTEM` 且 `@@system_time_zone=UTC` 时，只设一个会让 `datetime(3)` 往返偏 8 小时）|
+| 迁移脚本也能试吗 | 能，但**必须另给一个可随便折腾的库**（`db/migration/ecc-to-ifmap/` 会改存量表；脚本内不含 `USE`，也不会碰其它库） |
+
+> `ifmap-demo-spring-boot3` 额外提供 `application-mysql.yml` 剖面：`--spring.profiles.active=mysql` +
+> 上面三个环境变量即可让示例工程连真库跑（默认仍是 H2 内存库）。

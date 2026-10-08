@@ -31,7 +31,7 @@
 | 项 | 状态 |
 | --- | --- |
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
-| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
+| 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-testkit`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
 | 测试 | **436 个**单元/端到端测试全绿（core 157 + json-jackson 46 + json-fastjson 53 + provider-jdbc 48 + **provider-remote 25** + starter 44 + admin 59 + demo-sb3 4；JDK 8 侧 329 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**10 个模块 0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |

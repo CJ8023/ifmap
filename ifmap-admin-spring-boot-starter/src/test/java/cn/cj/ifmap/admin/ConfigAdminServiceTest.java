@@ -50,7 +50,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import javax.sql.DataSource;
 import java.util.List;
 import java.util.Map;
 
@@ -70,7 +69,10 @@ class ConfigAdminServiceTest {
     private static final String REQ = "req-1";
     private static final String OPERATOR = "tester";
 
+    private AdminTestSupport.Db db;
     private JdbcTemplate jdbc;
+    private String configTable;
+    private String historyTable;
     private JdbcConfigWriter writer;
     private JdbcConfigRepository repository;
     private JdbcConfigHistoryRepository historyRepository;
@@ -79,15 +81,14 @@ class ConfigAdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        DataSource dataSource = AdminTestSupport.dataSource("ifmap_admin_service");
-        AdminTestSupport.createSchema(dataSource);
-        jdbc = AdminTestSupport.jdbc(dataSource);
-        jdbc.update("DELETE FROM `ifmap_config`");
-        jdbc.update("DELETE FROM `ifmap_logic_branch_config`");
-        jdbc.update("DELETE FROM `ifmap_config_history`");
-        writer = AdminTestSupport.writer(jdbc);
-        repository = AdminTestSupport.repository(jdbc);
-        historyRepository = AdminTestSupport.history(jdbc);
+        db = AdminTestSupport.db("ifmap_admin_service");
+        db.createSchema();
+        jdbc = db.jdbc();
+        configTable = db.configTable();
+        historyTable = db.historyTable();
+        writer = db.writer();
+        repository = db.repository();
+        historyRepository = db.history();
         engineRepository = new CachingConfigRepository(repository, new InMemoryConfigCache(1000, 60000L));
 
         JacksonJsonOps jsonOps = new JacksonJsonOps();
@@ -148,7 +149,7 @@ class ConfigAdminServiceTest {
                 () -> service.create(bad, null, OPERATOR, REQ));
         assertFalse(e.getResult().isPassed());
         assertEquals(0, ((Number) service.list(new ConfigQuery()).getTotal()).longValue());
-        assertEquals(0, ((Number) jdbc.queryForObject("SELECT COUNT(*) FROM `ifmap_config_history`", Long.class))
+        assertEquals(0, ((Number) jdbc.queryForObject("SELECT COUNT(*) FROM `" + historyTable + "`", Long.class))
                 .longValue());
     }
 

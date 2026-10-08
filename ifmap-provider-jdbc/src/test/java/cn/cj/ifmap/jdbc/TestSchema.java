@@ -15,156 +15,49 @@
  */
 package cn.cj.ifmap.jdbc;
 
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-
-import javax.sql.DataSource;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import cn.cj.ifmap.testkit.TestDatabases;
 
 /**
- * 测试用建表：读**生产 DDL**（{@code db/changelog/v1.0.0/*.sql}）并做最小确定性变换后在 H2(MySQL 模式) 执行。
+ * 本模块的测试库入口（名字保留历史叫法，实现全部委托给 {@link TestDatabases}）。
  *
- * <p>为什么要变换：H2 不支持表尾的 {@code ENGINE=InnoDB DEFAULT CHARSET=... COLLATE=... ROW_FORMAT=...}
- * 与表级 {@code COMMENT=...}（存储引擎选项）。<b>列定义、主键、唯一键、普通索引、列注释全部原样执行</b>，
- * 因此"用 H2 验证仓储 SQL 与约束"仍然有效；MySQL 专属选项本身由发布侧在真库验证。</p>
+ * <p>建表语句读**生产 DDL**（{@code db/changelog/v1.0.0/*.sql}）：
+ * 默认跑 H2 内存库（剥表尾存储引擎选项 + {@code json → text}），
+ * 设置 {@code IFMAP_JDBC_URL} 后跑**真 MySQL 并原样执行生产 DDL**（保留 {@code json} 列与表尾选项），
+ * 此时返回的 {@link TestDatabases.Schema#prefix()} 是带随机后缀的唯一前缀，避免碰到库里已有的表。</p>
  *
- * <p>变换是确定性断言式的：若某个 DDL 文件不再匹配预期的表尾模式，测试会失败而不是"静默跳过校验"。</p>
- *
- * <p>另一处变换与生产 {@code IfmapSchemaInitializer} 保持一致：非 MySQL 方言下把 {@code json} 列
- * 降级为 {@code text}。原因是 <b>H2 1.4.200 的 {@code JSON} 类型与 MySQL 的 {@code json} 语义不等价</b> ——
- * JDBC 写字符串会被包成 "JSON 字符串值"（读回来是 {@code "{\"a\":1}"}）。测试库若保留 {@code json}，
- * 测的就不是生产语义了。</p>
+ * <p>用法：<pre>
+ *   TestDatabases.Schema schema = TestSchema.fresh();          // 建好 4 张生产表
+ *   JdbcTemplate jdbc = new JdbcTemplate(schema.dataSource());
+ *   JdbcConfigRepository repo = new JdbcConfigRepository(schema.dataSource(), schema.prefix());
+ * </pre></p>
  *
  * @author caijun
  */
 final class TestSchema {
 
-    private static final List<String> FILES = Arrays.asList(
-            "db/changelog/v1.0.0/001-create-ifmap-config.sql",
-            "db/changelog/v1.0.0/002-create-logic-branch.sql",
-            "db/changelog/v1.0.0/003-create-execution-log.sql",
-            "db/changelog/v1.0.0/004-create-config-history.sql");
-
-    /** 执行日志归档冷表（可选运维脚本）：冷热分离测试要跑真实建表语句，见 {@link #freshDataSourceWithArchive}。 */
-    static final String ARCHIVE_DDL = "db/optional/execution-log-partition/04-create-archive-table.sql";
-
-    private static final AtomicInteger SEQ = new AtomicInteger();
+    /** 执行日志归档冷表（可选运维脚本，字面量前缀由实现按当前档位替换）。 */
+    static final String ARCHIVE_DDL = TestDatabases.ARCHIVE_DDL;
 
     private TestSchema() {
     }
 
-    /** 新建一个 H2 内存库并按指定前缀建表。 */
-    static DataSource freshDataSource(String tablePrefix) {
-        return create(tablePrefix, false);
+    /** 建 4 张生产表（默认逻辑前缀 {@code ifmap_}）。 */
+    static TestDatabases.Schema fresh() {
+        return TestDatabases.freshWithTables();
     }
 
-    /** 默认前缀（ifmap_）建表。 */
-    static DataSource freshDataSource() {
-        return freshDataSource(TableNameResolver.DEFAULT_PREFIX);
+    /** 按逻辑前缀建 4 张生产表（真库档下会加唯一后缀）。 */
+    static TestDatabases.Schema fresh(String hint) {
+        return TestDatabases.freshWithTables(hint);
     }
 
-    /** 建表并额外建执行日志归档冷表（冷热分离测试用）。 */
-    static DataSource freshDataSourceWithArchive(String tablePrefix) {
-        return create(tablePrefix, true);
+    /** 建 4 张生产表 + 归档冷表。 */
+    static TestDatabases.Schema freshWithArchive() {
+        return TestDatabases.freshWithArchive();
     }
 
-    /** 建表并额外建执行日志归档冷表（默认前缀）。 */
-    static DataSource freshDataSourceWithArchive() {
-        return freshDataSourceWithArchive(TableNameResolver.DEFAULT_PREFIX);
-    }
-
-    private static DataSource create(String tablePrefix, boolean withArchive) {
-        String url = "jdbc:h2:mem:ifmap_" + SEQ.incrementAndGet()
-                + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
-        DriverManagerDataSource ds = new DriverManagerDataSource(url, "sa", "");
-        ds.setDriverClassName("org.h2.Driver");
-        org.springframework.jdbc.core.JdbcTemplate jdbc = new org.springframework.jdbc.core.JdbcTemplate(ds);
-        jdbc.execute("/* warm up */ SELECT 1");
-        for (String file : FILES) {
-            jdbc.execute(toH2(read(file), tablePrefix));
-        }
-        if (withArchive) {
-            // 归档表脚本是给运维执行的普通 SQL（不是 ${tablePrefix} 的 changelog），
-            // 里面写的是字面量 ifmap_（并在注释里给了 sed 替换说明）→ 测试按同口径替换前缀
-            jdbc.execute(toH2(read(ARCHIVE_DDL).replace("ifmap_", tablePrefix), tablePrefix));
-        }
-        return ds;
-    }
-
-    /** 读取生产 DDL 原始文本（测试可直接断言，保证脚本存在且非空）。 */
-    static String read(String classpath) {
-        ClassPathResource res = new ClassPathResource(classpath);
-        if (!res.exists()) {
-            throw new IllegalStateException("建表脚本缺失：" + classpath);
-        }
-        try (InputStream in = res.getInputStream()) {
-            byte[] buf = new byte[8192];
-            StringBuilder sb = new StringBuilder();
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-            }
-            return sb.toString();
-        } catch (IOException e) {
-            throw new IllegalStateException("读取建表脚本失败：" + classpath, e);
-        }
-    }
-
-    /** 生产 DDL → H2 可执行 DDL（只剥离表尾存储引擎选项）。 */
-    static String toH2(String ddl, String tablePrefix) {
-        String s = ddl.replace("${tablePrefix}", tablePrefix);
-        String tail = ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC\n  COMMENT='";
-        int idx = s.indexOf(tail);
-        if (idx < 0) {
-            throw new IllegalStateException("DDL 未匹配预期的表尾存储引擎选项，请同步更新 TestSchema.toH2：" + tail);
-        }
-        int commentEnd = s.indexOf("';", idx);
-        if (commentEnd < 0) {
-            throw new IllegalStateException("DDL 表尾 COMMENT 未以 \"';\" 结束");
-        }
-        String stripped = s.substring(0, idx) + ")" + s.substring(commentEnd + 2);
-        String noJson = downgradeJsonColumns(stripped);
-        return noJson.replaceAll("(?m)^--.*$", "").trim().replaceAll(";$", "");
-    }
-
-    /**
-     * 把列定义里的 {@code json} 改成 {@code text}（与生产 {@code IfmapSchemaInitializer} 同口径）。
-     *
-     * <p>只匹配"反引号列名 + json"这种列定义位置，注释里出现的 json 不受影响，且改写是断言式的
-     * （匹配数必须与预期一致，否则测试失败）。</p>
-     */
-    static String downgradeJsonColumns(String ddl) {
-        Pattern pattern = Pattern.compile("(?i)(`[A-Za-z0-9_]+`[ \t]+)json(?=[ \t,])");
-        Matcher matcher = pattern.matcher(ddl);
-        int count = 0;
-        StringBuffer sb = new StringBuffer();
-        while (matcher.find()) {
-            count++;
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group(1) + "text"));
-        }
-        matcher.appendTail(sb);
-        if (count != expectedJsonColumns(ddl)) {
-            throw new IllegalStateException("json 列降级数量与预期不符：实际 " + count
-                    + " / 预期 " + expectedJsonColumns(ddl));
-        }
-        return sb.toString();
-    }
-
-    /** 各 DDL 文件里 json 列的预期个数（001/002 无，003 有 request_param，004 有 snapshot/diff）。 */
-    private static int expectedJsonColumns(String ddl) {
-        if (ddl.contains("config_history")) {
-            return 2;
-        }
-        if (ddl.contains("execution_log")) {
-            return 1;
-        }
-        return 0;
+    /** 按逻辑前缀建 4 张生产表 + 归档冷表。 */
+    static TestDatabases.Schema freshWithArchive(String hint) {
+        return TestDatabases.freshWithArchive(hint);
     }
 }

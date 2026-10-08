@@ -255,8 +255,10 @@ SELECT tenant_id, interface_no, COUNT(*) AS fallback_cnt,
 SELECT execution_result, COUNT(*) AS cnt
   FROM bankint_execution_log GROUP BY execution_result ORDER BY cnt DESC;
 
--- 10.5 日志表 request_param 是否都是合法 JSON（若现状是 text 而非 json 列）
-SELECT COUNT(*) AS invalid_json_cnt
+-- 10.5 日志表 request_param 的 JSON 合法性（**信息性统计，不是门禁**）
+-- 目标 schema 里 request_param 是 mediumtext（与 response_param 对齐，见 03-modify-and-index.sql）：
+-- 审计日志要求"一定写得进去 + 内容忠实"，所以历史上有非法 JSON（多为超长截断的报文）也不影响迁移。
+SELECT COUNT(*) AS non_json_cnt
   FROM bankint_execution_log
  WHERE request_param IS NOT NULL AND JSON_VALID(request_param) = 0;
 

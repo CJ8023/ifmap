@@ -26,6 +26,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import cn.cj.ifmap.testkit.TestDatabases;
 
 import java.util.List;
 
@@ -34,12 +38,29 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 端到端测试：真实 Spring Boot 上下文 + H2 + 生产建表脚本 + 生产仓储 + 生产引擎。
+ * 端到端测试：真实 Spring Boot 上下文 + 生产建表脚本 + 生产仓储 + 生产引擎。
+ *
+ * <p>默认跑 {@code application.yml} 里的 H2 内存库；设了 {@code IFMAP_JDBC_URL} 后同一套用例改跑真 MySQL
+ * （表前缀换成本用例专属前缀，避免污染示例默认的 {@code ifmap_} 表）。</p>
  *
  * @author caijun
  */
 @SpringBootTest
 class IfmapDemoApplicationTest {
+
+    private static final String TEST_DB = "ifmap_demo_sb3";
+
+    @DynamicPropertySource
+    static void datasource(DynamicPropertyRegistry registry) {
+        if (!TestDatabases.mysqlEnabled()) {
+            return;
+        }
+        registry.add("spring.datasource.url", TestDatabases::mysqlUrl);
+        registry.add("spring.datasource.username", TestDatabases::username);
+        registry.add("spring.datasource.password", TestDatabases::password);
+        registry.add("spring.datasource.driver-class-name", () -> "com.mysql.cj.jdbc.Driver");
+        registry.add("ifmap.table-prefix", () -> TestDatabases.prefixFor(TEST_DB));
+    }
 
     @Autowired
     private ConfigRepository repository;
@@ -56,8 +77,10 @@ class IfmapDemoApplicationTest {
     @Test
     @DisplayName("starter 自动建表：4 张表都在")
     void tablesCreatedByStarter() {
-        for (String table : new String[]{"ifmap_config", "ifmap_logic_branch_config",
-                "ifmap_execution_log", "ifmap_config_history"}) {
+        String prefix = TestDatabases.mysqlEnabled()
+                ? TestDatabases.prefixFor(TEST_DB) : "ifmap_";
+        for (String table : new String[]{prefix + "config", prefix + "logic_branch_config",
+                prefix + "execution_log", prefix + "config_history"}) {
             Integer count = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM information_schema.tables WHERE lower(table_name) = ?",
                     Integer.class, table);

@@ -34,11 +34,23 @@
       <artifactId>h2</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <!-- 同理：用 spring.profiles.active=mysql 要能直接连真库，驱动必须在运行期 classpath -->
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
       <version>${spring-boot.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- 测试库开关：默认 H2，设 IFMAP_JDBC_URL 后可跑真 MySQL（同 ifmap-provider-jdbc） -->
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-testkit</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

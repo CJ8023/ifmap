@@ -259,16 +259,17 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/11-远端配置源.md`](docs/11-远端配置源.md) | 配置在远端 HTTP 接口时怎么接（`ConfigFetcher` SPI、Feign/RestTemplate 三种写法、映射规则、与存量接口差异） |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南入口（三条底线 + 指向 `docs/09`） |
 
-**内部文档（仅本地，已在 `.gitignore` 中排除）**
+**内部档（含内部系统名与存量表结构；往这些文件新增内容前先按 [`docs/09`](docs/09-参与贡献.md) §5 的口径自查敏感度）**
 
-| 文档 | 内容 |
-| --- | --- |
-| `docs/ifmap-整体设计_v1.md` | 整体设计（分层、SPI、表结构、分期计划、ADR） |
-| `docs/ifmap-内置规则审计与优化_v1.md` | 存量规则审计、P0 缺陷实证、core 规则收敛清单 |
-| `docs/bankintconfig模块优化方案_v1.md` | 迁移前的现状分析与优化方案（前身文档） |
-| `docs/tools/` | 规则清单/审计脚本 |
+| 文档 | 内容 | 版本库 |
+| --- | --- | --- |
+| [`docs/ifmap-整体设计_v1.md`](docs/ifmap-整体设计_v1.md) | 整体设计（分层、SPI、表结构、分期计划、ADR） | **已入库** |
+| `docs/ifmap-内置规则审计与优化_v1.md` | 存量规则审计、P0 缺陷实证、core 规则收敛清单 | 未入库 |
+| `docs/bankintconfig模块优化方案_v1.md` | 迁移前的现状分析与优化方案（前身文档） | 未入库 |
+| `docs/tools/` | 规则清单/审计脚本 | 未入库 |
 
-> 内部文档含客户工商数据与银行合作细节，**推送公开仓前请确认未被纳入版本控制**（`git status` 应看不到它们）。
+> **哪些已入库**：`ifmap-整体设计_v1.md` 已纳入版本控制（`README` 与 `docs/09` 都引用它，排除它会让新克隆拿到死链）；
+> 其余三份含客户工商数据与银行合作细节，**推送公开仓前请确认未被纳入**（`git status` 应看不到它们）。
 
 ## 10. 文档站
 

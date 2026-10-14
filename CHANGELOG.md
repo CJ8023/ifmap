@@ -33,6 +33,14 @@
   而手册**完全不引用**它 —— 两份并存只会让运维不知道该照哪一份执行（单文件版还缺「存量表怎么改」与回滚）。
   统一由手册承载；`JdbcExecutionLogCleaner` 的类 javadoc 改为指向手册 README，避免留下悬空引用。
 
+### Fixed（审查 P1-3②：策略注册表）
+- **`SpecialDealStrategyRegistry.aliasHits` 的慢泄漏**：该字段记录"哪些配置用了宽松 key"，是普通
+  `ArrayList`，而 `lookup()` 命中宽松 key 时**无条件 `add`、不去重、无上界** —— 它在
+  `IfmapOrchestrator.applySpecialDeal()` 里**每笔请求**都会被调用，所以只要某个接口的 `strategy_name`
+  一直用宽松写法，每笔请求就会多留一个字符串，内存随流量线性增长（同类字段 `conflicts` 只在注册期
+  写入，不受影响）。改为 `LinkedHashSet`：记录值只可能取自 `aliases` 的 key，去重后**天然以
+  「已注册别名数」为上界**，不随请求量增长；`getAliasHits()` 的签名与返回形态不变，测试无需改动。
+
 ### Fixed（P3 真库迁移演练：ecc-to-ifmap kit）
 - **把迁移 kit 拿到真库跑了一遍，修掉 4 处「参考环境假设」**：在专用测试库 `ifmap` 内、以两套真实存量
   （`yfl_bill.bankint_config` 22 列 / `yfl_financing_scheme.bankint_config` 25 列）各建副本真数据，完整执行

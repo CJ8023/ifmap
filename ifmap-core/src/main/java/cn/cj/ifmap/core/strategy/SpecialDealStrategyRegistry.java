@@ -48,7 +48,13 @@ public final class SpecialDealStrategyRegistry {
     private final Map<String, SpecialDealStrategy> authoritative = new LinkedHashMap<String, SpecialDealStrategy>();
     private final Map<String, SpecialDealStrategy> aliases = new LinkedHashMap<String, SpecialDealStrategy>();
     private final Map<String, List<String>> conflicts = new LinkedHashMap<String, List<String>>();
-    private final List<String> aliasHits = new ArrayList<String>();
+    /**
+     * 命中过宽松 key 的记录（启动期审计用）。用 {@code Set} 而非 {@code List}：
+     * 记录值只可能取自 {@link #aliases} 的 key（{@link #lookup} 仅在
+     * {@code aliases.get(name) != null} 时记录），因此去重后**天然以「注册的别名数」为上界**，
+     * 不随请求量增长 —— 用 List 会让每笔命中宽松 key 的请求都追加一个字符串。
+     */
+    private final Set<String> aliasHits = new LinkedHashSet<String>();
 
     /**
      * 注册一个策略。

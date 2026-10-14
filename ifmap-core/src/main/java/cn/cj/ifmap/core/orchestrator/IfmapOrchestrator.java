@@ -79,6 +79,13 @@ public final class IfmapOrchestrator {
     /** 前置接口链的最大加载深度（防止配置成环时无限查库）。 */
     public static final int MAX_FRONT_DEPTH = 64;
 
+    /**
+     * 跨步骤共享池的保留根：请求模板里 {@code $.pool.{interface_no}.xxx} 取指定步骤的产物。
+     *
+     * <p>业务 payload 顶层不应有 {@code pool}；引擎的池会<b>覆盖</b>同名顶层键。</p>
+     */
+    public static final String POOL_KEY = "pool";
+
     private final IfmapEngine engine;
     private final JsonOps jsonOps;
     private final ConfigRepository repository;
@@ -178,16 +185,20 @@ public final class IfmapOrchestrator {
         return InterfaceOrdering.plan(collected);
     }
 
+    /**
+     * 顺序执行计划；<b>本方法持有跨步骤共享池</b>，逐步把成功的产物注入下一步的参数。
+     *
+     * <p>池只在步骤判定成功时写入 ⇒ 池的键集合 = 已成功步骤集合 = 断点续跑的进度。</p>
+     */
     private IfmapResult runPlan(IfmapRequest request, String tenantId, List<IfmapConfig> plan,
                                 String mockResponse, long start) {
         IfmapResult.Builder result = IfmapResult.builder();
-        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> pool = initialPool(request);
         boolean success = true;
         String errorMessage = null;
         for (IfmapConfig config : plan) {
-            StepOutcome outcome = executeOne(request, tenantId, config, mockResponse);
+            StepOutcome outcome = executeOne(request, tenantId, config, mockResponse, pool);
             result.executedInterface(config.getInterfaceNo());
-            data.putAll(outcome.data);
             if (outcome.matchedBranch != null) {
                 result.matchedBranch(outcome.matchedBranch);
             }
@@ -202,12 +213,26 @@ public final class IfmapOrchestrator {
                 }
             }
         }
+        // 既有扁平语义保留（调用方读 getData().get("applyNo") 不受影响），另加一个可往返的 pool 结构
+        Map<String, Object> data = flattenPool(pool);
+        data.put(POOL_KEY, pool);
         return result.success(success).data(data).errorMessage(errorMessage)
                 .elapsedMs(clock.currentTimeMillis() - start).build();
     }
 
-    /** 执行单条配置：渲染 → 出网 → 判定 → 分支动作 → 日志。 */
+    /**
+     * 执行单条配置：渲染 → 出网 → 判定 → 分支动作 → 日志。
+     *
+     * <p><b>独立调用</b>（不在计划里）时自建池，只服务本条步骤；跨步骤共享请用
+     * {@link #execute(IfmapRequest, String, String)}。</p>
+     */
     public StepOutcome executeOne(IfmapRequest request, String tenantId, IfmapConfig config, String mockResponse) {
+        return executeOne(request, tenantId, config, mockResponse, initialPool(request));
+    }
+
+    /** 执行单条配置；判定成功时把产物写进共享池 {@code pool}。 */
+    private StepOutcome executeOne(IfmapRequest request, String tenantId, IfmapConfig config,
+                                   String mockResponse, Map<String, Object> pool) {
         long start = clock.currentTimeMillis();
         RuleContext ruleContext = RuleContext.builder()
                 .tenantId(tenantId)
@@ -219,6 +244,9 @@ public final class IfmapOrchestrator {
                 .params(request.getPayload()).build();
         Map<String, Object> requestParams = new LinkedHashMap<String, Object>();
         requestParams.putAll(fullParams.assemble(config.getPartnerCode(), config.getBusiNode(), context));
+        // 池在后 ⇒ 覆盖 payload / 组包策略的同名顶层键（pool 是保留键，不是业务字段）
+        requestParams.putAll(flattenPool(pool));
+        requestParams.put(POOL_KEY, pool);
         context.putParams(requestParams);
         String requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
         context.setRequestJson(requestJson);
@@ -227,8 +255,12 @@ public final class IfmapOrchestrator {
         String response = mockResponse != null ? mockResponse : exchange(context, requestJson);
         context.setResponseJson(response);
 
-        Map<String, Object> data = renderResponse(config, response, ruleContext);
+        Map<String, Object> data = applyPostDeal(context, renderResponse(config, response, ruleContext));
+        // 判定读**原始回参**：后序策略只能加工产物，改不动成败
         Judgement judgement = judge.evaluate(config, response);
+        if (judgement.isSuccess()) {
+            pool.put(config.getInterfaceNo(), data);
+        }
         String matchedBranch = judgement.isSuccess() ? applyBranch(request, tenantId, config, context, response, judgement) : null;
         String errorMessage = judgement.isSuccess() ? null : judgement.getReason();
         long elapsed = clock.currentTimeMillis() - start;
@@ -237,6 +269,7 @@ public final class IfmapOrchestrator {
     }
 
     private String applySpecialDeal(StrategyContext context, RuleContext ruleContext, String requestJson) {
+        context.setPhase(StrategyContext.Phase.PRE);
         String strategyName = trimToNull(context.getConfig().getPreStrategyName());
         if (strategyName == null) {
             return requestJson;
@@ -259,6 +292,77 @@ public final class IfmapOrchestrator {
                 jsonOps.toJson(context.getParams()), ruleContext);
         context.setRequestJson(rendered);
         return rendered;
+    }
+
+    /**
+     * 后序策略：响应产物之后、成功判定之前加工本步产物。
+     *
+     * <p>策略可读 {@link StrategyContext#getResponseData()}（当前产物），用
+     * {@link StrategyContext#setResponseData(Object)} 整体替换产物（换成 Map 才生效），
+     * 或返回一个 Map 与产物合并（返回键覆盖同键的已有值）。判定读原始回参，故后序策略
+     * 影响不了成败判定。</p>
+     */
+    private Map<String, Object> applyPostDeal(StrategyContext context, Map<String, Object> data) {
+        String strategyName = trimToNull(context.getConfig().getPostStrategyName());
+        if (strategyName == null) {
+            return data;
+        }
+        SpecialDealStrategy strategy = specialDeals.lookup(strategyName);
+        if (strategy == null) {
+            if (failOnMissingStrategy) {
+                throw new IfmapStrategyException("后序策略未注册：post_strategy_name=" + strategyName
+                        + "（可查 " + specialDeals.keys() + "）");
+            }
+            LOG.warn("ifmap 后序策略未注册，已跳过：post_strategy_name={}", strategyName);
+            return data;
+        }
+        context.setPhase(StrategyContext.Phase.POST);
+        context.setResponseData(data);
+        Map<String, Object> extra = strategy.apply(context);
+        Map<String, Object> merged = new LinkedHashMap<String, Object>();
+        Object replaced = context.getResponseData();
+        if (replaced instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) replaced).entrySet()) {
+                merged.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        } else {
+            merged.putAll(data);
+        }
+        if (extra != null) {
+            merged.putAll(extra);
+        }
+        return merged;
+    }
+
+    /** 初始池：{@code payload.pool} 为 Map 时浅拷一份（不写回、不持有宿主对象）。 */
+    private Map<String, Object> initialPool(IfmapRequest request) {
+        Map<String, Object> pool = new LinkedHashMap<String, Object>();
+        Object preset = request == null ? null : request.getPayload().get(POOL_KEY);
+        if (preset instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) preset).entrySet()) {
+                pool.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return pool;
+    }
+
+    /**
+     * 把池里各步的产物摊平到一层（供 {@code $.applyNo} 这类「取最近值」写法使用）。
+     *
+     * <p>按池的插入顺序 reduce ⇒ 同名键后者胜：预置项（断点续跑回放）在前，本次成功的
+     * 步骤按计划顺序在后。要精确取某一步的字段请用 {@code $.pool.{interface_no}.xxx}。</p>
+     */
+    private Map<String, Object> flattenPool(Map<String, Object> pool) {
+        Map<String, Object> flat = new LinkedHashMap<String, Object>();
+        for (Object step : pool.values()) {
+            if (!(step instanceof Map)) {
+                continue;
+            }
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) step).entrySet()) {
+                flat.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return flat;
     }
 
     private String exchange(StrategyContext context, String requestJson) {

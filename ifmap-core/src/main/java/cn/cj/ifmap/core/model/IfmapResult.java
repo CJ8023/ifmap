@@ -66,7 +66,10 @@ public final class IfmapResult {
         return success;
     }
 
-    /** 按 {@code response_param_template} 渲染出的响应数据（多个接口按顺序合并）。 */
+    /**
+     * 按 {@code response_param_template} 渲染出的响应数据：各步骤产物按顺序摊平合并，
+     * 另有 {@code pool} 键（{@code {interface_no: 该步产物}}）承载可往返的断点状态。
+     */
     public Map<String, Object> getData() {
         return data;
     }

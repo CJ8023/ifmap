@@ -33,6 +33,14 @@ import java.util.Map;
  */
 public final class StrategyContext {
 
+    /** 策略执行相位：同一个策略类同时挂前序 / 后序两列时用它自辨。 */
+    public enum Phase {
+        /** 前序：请求渲染之后、出网之前。 */
+        PRE,
+        /** 后序：响应产物之后、成功判定之前。 */
+        POST
+    }
+
     private final IfmapRequest request;
     private final IfmapConfig config;
     private final Map<String, Object> params = new LinkedHashMap<String, Object>();
@@ -42,6 +50,7 @@ public final class StrategyContext {
     private String responseJson;
     private Object responseData;
     private String matchedBranch;
+    private Phase phase = Phase.PRE;
 
     private StrategyContext(Builder builder) {
         this.request = builder.request;
@@ -50,6 +59,7 @@ public final class StrategyContext {
         this.requestJson = builder.requestJson;
         this.responseJson = builder.responseJson;
         this.responseData = builder.responseData;
+        this.phase = builder.phase == null ? Phase.PRE : builder.phase;
         if (builder.params != null) {
             this.params.putAll(builder.params);
         }
@@ -71,7 +81,6 @@ public final class StrategyContext {
         return ruleContext;
     }
 
-    /** 当前参数（只读视图；写入用 {@link #putParam}）。 */
     /** 当前接口号（来自配置）；无配置时为 null。 */
     public String getInterfaceNo() {
         return config == null ? null : config.getInterfaceNo();
@@ -82,6 +91,7 @@ public final class StrategyContext {
         return request == null ? null : request.getBizId();
     }
 
+    /** 当前参数（只读视图；写入用 {@link #putParam}）。 */
     public Map<String, Object> getParams() {
         return Collections.unmodifiableMap(params);
     }
@@ -143,6 +153,16 @@ public final class StrategyContext {
         this.matchedBranch = matchedBranch;
     }
 
+    /** 当前相位（默认 {@link Phase#PRE}）。 */
+    public Phase getPhase() {
+        return phase;
+    }
+
+    /** 由编排器在调用策略前设置，策略侧一般只读。 */
+    public void setPhase(Phase phase) {
+        this.phase = phase == null ? Phase.PRE : phase;
+    }
+
     @Override
     public String toString() {
         return "StrategyContext{interfaceNo=" + (config == null ? null : config.getInterfaceNo())
@@ -159,6 +179,7 @@ public final class StrategyContext {
         private String requestJson;
         private String responseJson;
         private Object responseData;
+        private Phase phase;
 
         public Builder request(IfmapRequest request) {
             this.request = request;
@@ -192,6 +213,11 @@ public final class StrategyContext {
 
         public Builder responseData(Object responseData) {
             this.responseData = responseData;
+            return this;
+        }
+
+        public Builder phase(Phase phase) {
+            this.phase = phase;
             return this;
         }
 

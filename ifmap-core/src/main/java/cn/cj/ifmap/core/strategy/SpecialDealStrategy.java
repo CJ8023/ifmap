@@ -28,9 +28,22 @@ import java.util.Map;
 public interface SpecialDealStrategy {
 
     /**
-     * 执行特殊处理，可修改 {@code context} 里的参数。
+     * 执行特殊处理；用 {@link StrategyContext#getPhase()} 区分前序 / 后序。
      *
-     * @return 需要替换的参数（null 表示不改动）；返回的键值会被合并进 {@code context}
+     * <table border="1">
+     *   <caption>前后序差异</caption>
+     *   <tr><th></th><th>{@code PRE}</th><th>{@code POST}</th></tr>
+     *   <tr><td>时机</td><td>渲染请求后、出网前</td><td>响应产物后、判定前</td></tr>
+     *   <tr><td>可见</td><td>{@code params} / {@code requestJson}</td>
+     *       <td>再加 {@code responseJson} / {@code responseData}</td></tr>
+     *   <tr><td>返回值去向</td><td>合并进 {@code params}，请求模板<b>重渲染</b></td>
+     *       <td>合并进本步产物 {@code data}（也会入池供后续步骤引用）</td></tr>
+     * </table>
+     *
+     * <p>后序额外可用 {@link StrategyContext#setResponseData(Object)} 整体替换产物（传 Map）。
+     * 前后序共用同一注册表，成败判定始终读<b>原始回参</b>，后序策略影响不了判定。</p>
+     *
+     * @return 要合并的键值（null / 空表示不改动）
      */
     Map<String, Object> apply(StrategyContext context);
 }

@@ -43,6 +43,7 @@ import cn.cj.ifmap.core.testkit.TestJsonOps;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,6 +72,19 @@ class IfmapOrchestratorTest {
         public Map<String, Object> apply(StrategyContext context) {
             Map<String, Object> extra = new LinkedHashMap<String, Object>();
             extra.put("extra", "FROM_STRATEGY");
+            return extra;
+        }
+    }
+
+    /** 记录相位；后序返回 {@code postApplied}，前序返回 {@code preApplied}。 */
+    static final class PhaseRecordingStrategy implements SpecialDealStrategy {
+        final List<StrategyContext.Phase> phases = new ArrayList<StrategyContext.Phase>();
+
+        @Override
+        public Map<String, Object> apply(StrategyContext context) {
+            phases.add(context.getPhase());
+            Map<String, Object> extra = new LinkedHashMap<String, Object>();
+            extra.put(context.getPhase() == StrategyContext.Phase.POST ? "postApplied" : "preApplied", "YES");
             return extra;
         }
     }
@@ -176,6 +190,11 @@ class IfmapOrchestratorTest {
     private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions) {
         SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
         specialDeals.register("extraParamStrategy", new ExtraParamStrategy());
+        return orchestrator(gateway, actions, specialDeals);
+    }
+
+    private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions,
+                                           SpecialDealStrategyRegistry specialDeals) {
         FullParamStrategyRegistry fullParams = new FullParamStrategyRegistry();
         fullParams.register(new CmbFullParam());
         return IfmapOrchestrator.builder()
@@ -264,6 +283,140 @@ class IfmapOrchestratorTest {
                 .engine(engine()).repository(repository).tenantResolver(new HeaderTenantResolver())
                 .gateway(new CapturingGateway("{\"a\":1}")).failOnMissingStrategy(false).build();
         assertTrue(orchestrator.execute(IfmapRequest.builder().put("a", "1").build(), "IF_C2", "GP81").isSuccess());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> poolOf(IfmapResult result) {
+        return (Map<String, Object>) result.getData().get(IfmapOrchestrator.POOL_KEY);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> stepOf(IfmapResult result, String interfaceNo) {
+        Object step = poolOf(result).get(interfaceNo);
+        return step instanceof Map ? (Map<String, Object>) step : null;
+    }
+
+    @Test
+    void preAndPostStrategiesSeeTheirOwnPhase() {
+        IfmapConfig config = TestConfigs.config("IF_P1", "GP81", 1, 1L);
+        config.setPreStrategyName("phaseRecording");
+        config.setPostStrategyName("phaseRecording");
+        config.setRequestParamTemplate("{\"pre\":\"$.preApplied\"}");
+        config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
+        config.setResultFlag(null);
+        repository.add(config);
+
+        PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
+        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
+        specialDeals.register("phaseRecording", strategy);
+
+        CapturingGateway gateway = new CapturingGateway("{\"data\":{\"applyNo\":\"AP1\"}}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry(), specialDeals)
+                .execute(IfmapRequest.empty(), "IF_P1", "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals(Arrays.asList(StrategyContext.Phase.PRE, StrategyContext.Phase.POST), strategy.phases,
+                "同一策略类挂两列时必须能靠 phase 自辨");
+        assertTrue(gateway.requests.get(0).contains("\"pre\":\"YES\""),
+                "前序返回值合并进 params 后请求模板要重渲染：" + gateway.requests.get(0));
+        assertEquals("YES", result.getData().get("postApplied"), "后序返回值合并进产物");
+        assertEquals("YES", stepOf(result, "IF_P1").get("postApplied"), "入池的是加工后的产物");
+    }
+
+    @Test
+    void postStrategyCannotFlipJudgementAndFailedStepStaysOutOfPool() {
+        IfmapConfig config = TestConfigs.config("IF_P2", "GP81", 1, 1L);
+        config.setPostStrategyName("phaseRecording");
+        config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
+        config.setResultFlag("$.code");
+        config.setSuccessValue("0000");
+        repository.add(config);
+
+        PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
+        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
+        specialDeals.register("phaseRecording", strategy);
+
+        CapturingGateway gateway = new CapturingGateway("{\"code\":\"9999\",\"data\":{\"applyNo\":\"AP1\"}}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry(), specialDeals)
+                .execute(IfmapRequest.empty(), "IF_P2", "GP81");
+
+        assertFalse(result.isSuccess(), "判定读原始回参，后序策略加字段不能把失败洗成成功");
+        assertEquals(Collections.singletonList(StrategyContext.Phase.POST), strategy.phases,
+                "后序策略照常执行；只是失败步骤的产物不进池，因此也进不了 data");
+        assertTrue(poolOf(result).isEmpty(), "D10：失败步骤不入池，池键集合 = 已成功步骤集合");
+    }
+
+    @Test
+    void poolCarriesEarlierStepOutputToLaterStep() {
+        IfmapConfig first = TestConfigs.config("IF_1", "GP81", 1, 1L);
+        first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
+        first.setResultFlag(null);
+        IfmapConfig second = TestConfigs.config("IF_2", "GP81", 2, 2L);
+        second.setFrontInterfaceNo("IF_1");
+        second.setRequestParamTemplate("{\"exact\":\"$.pool.IF_1.firstKey\",\"flat\":\"$.firstKey\"}");
+        second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
+        second.setResultFlag(null);
+        repository.add(first).add(second);
+
+        CapturingGateway gateway = new CapturingGateway("{\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry())
+                .execute(IfmapRequest.empty(), "IF_2", "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals(2, gateway.requests.size());
+        assertTrue(gateway.requests.get(1).contains("\"exact\":\"AP1\""),
+                "$.pool.{interface_no}.xxx 精确取前序产物：" + gateway.requests.get(1));
+        assertTrue(gateway.requests.get(1).contains("\"flat\":\"AP1\""),
+                "$.xxx 取最近值：" + gateway.requests.get(1));
+        assertEquals("AP1", result.getData().get("firstKey"));
+        assertEquals("E1", result.getData().get("secondKey"));
+        assertEquals(Arrays.asList("IF_1", "IF_2"), new ArrayList<String>(poolOf(result).keySet()));
+    }
+
+    @Test
+    void failedStepStaysOutOfFlatData() {
+        IfmapConfig first = TestConfigs.config("IF_3", "GP81", 1, 1L);
+        first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
+        first.setResultFlag(null);
+        IfmapConfig second = TestConfigs.config("IF_4", "GP81", 2, 2L);
+        second.setFrontInterfaceNo("IF_3");
+        second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
+        second.setResultFlag("$.code");
+        second.setSuccessValue("0000");
+        repository.add(first).add(second);
+
+        CapturingGateway gateway = new CapturingGateway("{\"code\":\"9999\",\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry())
+                .execute(IfmapRequest.empty(), "IF_4", "GP81");
+
+        assertFalse(result.isSuccess());
+        assertEquals("AP1", result.getData().get("firstKey"));
+        assertNull(result.getData().get("secondKey"), "失败步骤的产物不进 data（不给下游留半成品）");
+        assertEquals(Collections.singletonList("IF_3"), new ArrayList<String>(poolOf(result).keySet()));
+    }
+
+    @Test
+    void presetPoolFromPayloadSeedsThePoolAndIsNotWrittenBack() {
+        IfmapConfig config = TestConfigs.config("IF_S", "GP81", 2, 2L);
+        config.setRequestParamTemplate("{\"exact\":\"$.pool.IF_0.old\",\"flat\":\"$.old\"}");
+        config.setResultFlag(null);
+        repository.add(config);
+
+        Map<String, Object> presetStep = new LinkedHashMap<String, Object>();
+        presetStep.put("old", "V0");
+        Map<String, Object> presetPool = new LinkedHashMap<String, Object>();
+        presetPool.put("IF_0", presetStep);
+
+        CapturingGateway gateway = new CapturingGateway("{}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry())
+                .execute(IfmapRequest.builder().put("pool", presetPool).build(), "IF_S", "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertTrue(gateway.requests.get(0).contains("\"exact\":\"V0\""), gateway.requests.get(0));
+        assertTrue(gateway.requests.get(0).contains("\"flat\":\"V0\""), gateway.requests.get(0));
+        assertEquals(Arrays.asList("IF_0", "IF_S"), new ArrayList<String>(poolOf(result).keySet()),
+                "预置池要保留，且新成功的步骤追加在后（断点续跑往返）");
+        assertFalse(presetPool.containsKey("IF_S"), "引擎不得写回宿主传入的 pool 对象");
     }
 
     @Test

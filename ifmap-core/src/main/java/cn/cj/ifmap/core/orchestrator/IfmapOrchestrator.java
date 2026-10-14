@@ -29,7 +29,6 @@ import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.rule.RuleContext;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
-import cn.cj.ifmap.core.spi.ConditionValueResolver;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
 import cn.cj.ifmap.core.spi.LogMasker;
 import cn.cj.ifmap.core.spi.SystemClockProvider;
@@ -93,7 +92,6 @@ public final class IfmapOrchestrator {
     private final ExecutionLogSink logSink;
     private final LogMasker logMasker;
     private final ClockProvider clock;
-    private final ConditionValueResolver conditionResolver;
     private final ResponseJudge judge;
     private final boolean stopOnFailure;
     private final boolean failOnMissingStrategy;
@@ -113,7 +111,6 @@ public final class IfmapOrchestrator {
         this.logSink = builder.logSink;
         this.logMasker = builder.logMasker;
         this.clock = builder.clock == null ? SystemClockProvider.INSTANCE : builder.clock;
-        this.conditionResolver = builder.conditionResolver;
         this.judge = new ResponseJudge(this.jsonOps);
         this.stopOnFailure = builder.stopOnFailure;
         this.failOnMissingStrategy = builder.failOnMissingStrategy;
@@ -492,7 +489,6 @@ public final class IfmapOrchestrator {
         private ExecutionLogSink logSink;
         private LogMasker logMasker;
         private ClockProvider clock;
-        private ConditionValueResolver conditionResolver;
         private boolean stopOnFailure = true;
         private boolean failOnMissingStrategy = true;
         private int truncateThreshold;
@@ -562,11 +558,6 @@ public final class IfmapOrchestrator {
             return this;
         }
 
-        public Builder conditionResolver(ConditionValueResolver conditionResolver) {
-            this.conditionResolver = conditionResolver;
-            return this;
-        }
-
         public Builder stopOnFailure(boolean stopOnFailure) {
             this.stopOnFailure = stopOnFailure;
             return this;
@@ -606,9 +597,6 @@ public final class IfmapOrchestrator {
             }
             if (callbacks == null) {
                 this.callbacks = new CallbackRegistry();
-            }
-            if (conditionResolver == null) {
-                this.conditionResolver = new cn.cj.ifmap.core.spi.AttributeConditionValueResolver();
             }
             return new IfmapOrchestrator(this);
         }

@@ -16,6 +16,22 @@
   收敛为 **`M0 → M1 → M2 → M3 切换与回滚`**；[`docs/10-迁移指南.md`](docs/10-迁移指南.md) 的 M3 章节、
   迁移 kit 的前置条件与 checklist、README / `docs/index.md` / 整体设计文档 §10.2 §11.0.7 同步删除；
   数字保真的破坏性变更清单由 **B-1 ~ B-8** 收敛为 **B-1 ~ B-7**（原 B-8「影子比对会报 diff」随框架一起消失）
+- **移除 `ConditionValueResolver` SPI 及其唯一实现 `AttributeConditionValueResolver`（死代码）**：这两个类
+  只有「被声明」没有「被调用」—— `IfmapOrchestrator` 里的 `conditionResolver` 字段**只被赋值、从不被读**
+  （import / 字段声明 / 构造赋值 / Builder 字段 / Builder setter / 构造末尾的 null 兜底，共 6 处引用全是写），
+  而 `IfmapRequest.getAttributes()` 的 javadoc 却写着「可供 `ConditionValueResolver` 使用」，属**注释与实现不符**
+  —— 这种注释比没有注释更误导。该 SPI 的解析语法（`payload:x` / `attr:x` / `header:x` 前缀）在 docs/README 里
+  **0 命中**，从未对外承诺过。**能力没有丢**：`IfmapOrchestrator` 执行时会把 `request.getAttributes()` 整份灌进
+  `RuleContext`（`RuleContext.builder().attributes(...)`），规则方法把 `RuleContext` 声明为第一个形参即可读
+  —— 文档 [`docs/03`](docs/03-规则清单与扩展.md) 的「上下文注入」、`BuiltinRulesTest` 的上下文注入用例、
+  `DateRules` 的 `workday*` 都在用这条路；`ConditionValueResolver` 只是同一份数据上一条**从未接通**的第二条
+  存取路径。连带删除公开装配入口 `IfmapOrchestrator.Builder.conditionResolver(...)`，并修正 `IfmapRequest`
+  的 javadoc 与 [`docs/06`](docs/06-执行编排与策略扩展.md) 的「未配置组件退化」说明。
+- **删除早期的单文件分区模板 `db/mysql8/partition-execution-log.sql`（51 行，重复）**：它与 W10 的手册
+  [`db/optional/execution-log-partition/`](ifmap-provider-jdbc/src/main/resources/db/optional/execution-log-partition/README.md)
+  （6 个编号脚本 + README，696 行）做的是同一件事（`ifmap_execution_log` 按月分区，**默认不启用**），
+  而手册**完全不引用**它 —— 两份并存只会让运维不知道该照哪一份执行（单文件版还缺「存量表怎么改」与回滚）。
+  统一由手册承载；`JdbcExecutionLogCleaner` 的类 javadoc 改为指向手册 README，避免留下悬空引用。
 
 ### Fixed（P3 真库迁移演练：ecc-to-ifmap kit）
 - **把迁移 kit 拿到真库跑了一遍，修掉 4 处「参考环境假设」**：在专用测试库 `ifmap` 内、以两套真实存量
@@ -218,7 +234,7 @@
   - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`PartnerCall`
   - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `strategy_name`）、`FullParamStrategy`（`partner|busi` 查找顺序：精确 → `partner|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
   - `ifmap-core`：注解 `@IfmapAction` / `@FullParam` / `@LogicBranch` / `@IfmapCallback` + `CallbackRegistry` / `ActionRegistry` / 三个策略注册表（含冲突与别名诊断）
-  - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `PartnerServiceGateway` / `ConditionValueResolver`
+  - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `PartnerServiceGateway`
   - `ifmap-core`：**合规脱敏** `DefaultLogMasker`（手机 / 证件 / 卡号按值形态保留 6+4 或 3+4、姓名字段按字段名、`excludeFields` 整体 `***`、幂等、非 JSON 安全）+ `Logs.truncate`（超出阈值尾部打标 `...truncated`）
   - `ifmap-core`：**判定器 `ResponseJudge`**（`result_flag` 为空 = 成功；`success_value` 多值 `;`/`,`、忽略大小写；响应非 JSON 只判失败不抛异常）
   - `ifmap-core`：**契约自检 `ContractValidator` / `ContractReport`**（模板 JSON 合法性 + `@FUN` 规则名存在 + 参数个数/类型可匹配重载，输出可直接贴工单的 Markdown）
@@ -256,7 +272,6 @@
   - `ifmap-provider-jdbc`：管理端写操作 `JdbcConfigWriter`（新增 / 乐观锁更新 / 原子软删除）
   - `ifmap-provider-jdbc`：**建表脚本 ×4**（`ifmap_config` 28 列 / `ifmap_logic_branch_config` 17 列 / `ifmap_execution_log` 17 列 / `ifmap_config_history` 11 列），MySQL 5.7 与 8.0 兼容（`bigint` 无显示宽度、显式 `COLLATE=utf8mb4_general_ci`、`datetime(3)`、不用 `DEFAULT (expr)`）
   - `ifmap-provider-jdbc`：Liquibase `db.changelog-master.yaml`（`${tablePrefix}` 参数，默认 `ifmap_`；复用存量表时填 `bankint_`）
-  - `ifmap-provider-jdbc`：`db/mysql8/partition-execution-log.sql`（执行日志按月分区模板，**默认不启用**）
   - `ifmap-core`：`SnowflakeIdGenerator`（10 位 workerId / 12 位序列号 / 2020 纪元 / 时钟回拨保护）+ JVM 共享单例 `shared()`
   - 文档：[`docs/04-接入与建表.md`](docs/04-接入与建表.md)
 

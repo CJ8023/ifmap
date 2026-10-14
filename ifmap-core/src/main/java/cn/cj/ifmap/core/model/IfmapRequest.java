@@ -89,7 +89,8 @@ public final class IfmapRequest {
         return payload;
     }
 
-    /** 扩展属性（如工作日历、自定义上下文），可供 {@code ConditionValueResolver} 使用。 */
+    /** 扩展属性（如工作日历、自定义上下文）；执行时整份作为 {@code RuleContext} 的 attributes
+     * 注入，规则方法把 {@code RuleContext} 声明为第一个形参即可读。 */
     public Map<String, Object> getAttributes() {
         return attributes;
     }

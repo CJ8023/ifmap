@@ -29,7 +29,7 @@ import java.util.List;
  *
  * <p><b>为什么是"保留期 + 分批删除"而不是分区</b>：分区要求分区列进主键（主键要从 {@code key_id}
  * 改成 {@code (key_id, add_time)}），开源产品不该强制用户先做这套运维改造；需要"按月秒级归档"
- * 的场景见 {@code db/mysql8/partition-execution-log.sql}（默认不启用）。</p>
+ * 的场景见手册 {@code db/optional/execution-log-partition/README.md}（默认不启用）。</p>
  *
  * <p><b>为什么"先查 key_id 再按 id 删"而不是 {@code DELETE ... LIMIT}</b>：{@code DELETE ... LIMIT}
  * 是 MySQL 方言（H2 不接受），而 {@code DELETE ... WHERE key_id IN (SELECT ... LIMIT)}

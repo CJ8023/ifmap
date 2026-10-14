@@ -278,7 +278,6 @@
     { name: 'partnerCode', label: '合作机构代码', dict: 'partnerCode' },
     { name: 'partnerName', label: '合作机构名称' },
     { name: 'financingMode', label: '融资模式', dict: 'financingMode' },
-    { name: 'frontInterfaceNo', label: '前置接口编号' },
     { name: 'interfaceOrder', label: '执行顺序', type: 'number' },
     { name: 'resultFlag', label: '结果标识字段' },
     { name: 'successValue', label: '成功值' },

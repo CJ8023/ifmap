@@ -89,6 +89,18 @@ public final class TestConfigs {
         }
 
         @Override
+        public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+            queried.add(busiNode);
+            List<IfmapConfig> result = new ArrayList<IfmapConfig>();
+            for (IfmapConfig config : configs) {
+                if (busiNode == null || busiNode.equals(config.getBusiNode())) {
+                    result.add(config);
+                }
+            }
+            return result;
+        }
+
+        @Override
         public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
             queried.add(interfaceNo);
             List<IfmapConfig> result = new ArrayList<IfmapConfig>();

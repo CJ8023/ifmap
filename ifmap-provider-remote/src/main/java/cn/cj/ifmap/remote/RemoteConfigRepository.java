@@ -122,6 +122,17 @@ public final class RemoteConfigRepository implements ConfigRepository {
         this.baseUri = trimmed;
     }
 
+    /**
+     * 引擎取执行计划：远端接口按 {@code busiNode} 过滤（省略 {@code interfaceNo} = 要该节点全部接口）。
+     *
+     * <p>远端返回已按 {@code interfaceOrder} 排好序，这里走的仍是 {@link #queryConfigs}
+     * 那一套「过滤停用/删除 + 再排一次」的兜底逻辑。</p>
+     */
+    @Override
+    public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+        return queryConfigs(tenantId, null, busiNode);
+    }
+
     @Override
     public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
         Map<String, String> query = new LinkedHashMap<String, String>();

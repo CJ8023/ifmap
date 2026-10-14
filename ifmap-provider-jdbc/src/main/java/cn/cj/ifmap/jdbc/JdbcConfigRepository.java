@@ -145,7 +145,7 @@ public class JdbcConfigRepository implements ConfigRepository {
     }
 
     /**
-     * 按接口号查询该接口下<b>所有业务节点</b>的配置（管理端分支维护与前置链校验用）。
+     * 按接口号查询该接口下<b>所有业务节点</b>的配置（管理端分支维护用）。
      *
      * <p>返回包含停用与已删除行（管理端视角），按 {@code interface_order} 升序。</p>
      */
@@ -180,14 +180,20 @@ public class JdbcConfigRepository implements ConfigRepository {
         return list.isEmpty() ? java.util.Optional.<LogicBranchConfig>empty() : java.util.Optional.of(list.get(0));
     }
 
-    /** 按业务节点查询该节点下的全部配置（管理端列表/审计用）。 */
+    /**
+     * 引擎取执行计划：该节点下全部启用配置，按 {@code interface_order} 升序（SPI 契约的落地）。
+     *
+     * <p>与 {@link #queryConfigs(ConfigQuery)} 的区别：这里<b>强制</b>只取启用且未删除的行，
+     * 且排序口径是「节点内的步骤顺序」而不是管理端列表的「先按接口号」。</p>
+     */
+    @Override
     public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
         if (busiNode == null || busiNode.trim().isEmpty()) {
             return java.util.Collections.emptyList();
         }
         String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
-                + " WHERE `tenant_id` = ? AND `busi_node` = ?"
-                + " ORDER BY `interface_no` ASC, `interface_order` ASC, `key_id` ASC";
+                + " WHERE `tenant_id` = ? AND `busi_node` = ? AND `del_status` = 0 AND `status` = 1"
+                + " ORDER BY `interface_order` ASC, `key_id` ASC";
         return jdbc.query(sql, IfmapRowMappers.config(), tenant(tenantId), busiNode);
     }
 

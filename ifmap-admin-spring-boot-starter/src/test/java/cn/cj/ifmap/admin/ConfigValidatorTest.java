@@ -172,31 +172,30 @@ class ConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("前置接口：不存在 → error；指向自己 → error；成环 → error")
-    void frontInterfaceChainIsChecked() {
-        IfmapConfig missing = AdminTestSupport.config("IF_A", "apply", 1);
-        missing.setFrontInterfaceNo("IF_NOT_EXISTS");
-        ValidationResult missingResult = validator.validate(missing, true);
-        assertTrue(missingResult.getErrors().toString().contains("前置接口不存在"),
-                missingResult.getErrors().toString());
+    @DisplayName("唯一维度一：interface_no 必须租户内全局唯一（换个业务节点也拦）")
+    void interfaceNoMustBeUniqueWithinTenant() {
+        assertTrue(writer.insert(AdminTestSupport.config("IF_A", "apply", 1)) > 0);
 
-        IfmapConfig self = AdminTestSupport.config("IF_A", "apply", 1);
-        self.setFrontInterfaceNo("IF_A");
-        assertTrue(validator.validate(self, true).getErrors().toString().contains("不能指向自己"));
+        // 同名接口换到另一个业务节点 —— DDL 里 interface_no 是业务唯一键，管理端必须与之一致
+        ValidationResult otherNode = validator.validate(AdminTestSupport.config("IF_A", "loan", 9), true);
+        assertFalse(otherNode.isPassed());
+        assertTrue(otherNode.getErrors().toString().contains("interface_no 在租户内必须全局唯一"),
+                otherNode.getErrors().toString());
+    }
 
-        // 落库：IF_A → IF_B → IF_A 的环
-        IfmapConfig a = AdminTestSupport.config("IF_A", "apply", 1);
-        a.setFrontInterfaceNo("IF_B");
-        assertTrue(writer.insert(a) > 0);
-        IfmapConfig b = AdminTestSupport.config("IF_B", "apply", 1);
-        b.setFrontInterfaceNo("IF_A");
-        assertTrue(writer.insert(b) > 0);
+    @Test
+    @DisplayName("唯一维度二：interface_order 在同一 busi_node 内必须唯一")
+    void interfaceOrderMustBeUniqueWithinBusiNode() {
+        assertTrue(writer.insert(AdminTestSupport.config("IF_A", "apply", 1)) > 0);
 
-        IfmapConfig edit = AdminTestSupport.config("IF_A", "apply", 1);
-        edit.setKeyId(a.getKeyId());
-        edit.setFrontInterfaceNo("IF_B");
-        ValidationResult cyclic = validator.validate(edit, false);
-        assertTrue(cyclic.getErrors().toString().contains("成环"), cyclic.getErrors().toString());
+        ValidationResult clash = validator.validate(AdminTestSupport.config("IF_B", "apply", 1), true);
+        assertFalse(clash.isPassed());
+        assertTrue(clash.getErrors().toString().contains("interface_order 在 busi_node 内必须唯一"),
+                clash.getErrors().toString());
+
+        // 同一个接口号换到别的节点用同一个顺序 → 顺序维度不冲突（接口号维度才有话说，这里换个号）
+        ValidationResult otherNode = validator.validate(AdminTestSupport.config("IF_C", "loan", 1), true);
+        assertTrue(otherNode.isPassed(), otherNode.getErrors().toString());
     }
 
     @Test

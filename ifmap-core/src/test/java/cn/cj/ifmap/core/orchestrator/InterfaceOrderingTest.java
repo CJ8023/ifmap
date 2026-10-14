@@ -16,7 +16,6 @@
 package cn.cj.ifmap.core.orchestrator;
 
 import cn.cj.ifmap.core.config.IfmapConfig;
-import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.testkit.TestConfigs;
 import org.junit.jupiter.api.Test;
 
@@ -25,10 +24,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 执行顺序：启用过滤 / interface_order 排序 / 前置接口拓扑排序 + 环检测。 */
+/** 执行顺序：启用过滤 + interface_order 升序（同值 key_id 兜底）。 */
 class InterfaceOrderingTest {
 
     @Test
@@ -51,56 +48,32 @@ class InterfaceOrderingTest {
     }
 
     @Test
-    void disabledConfigsAreFiltered() {
+    void enabledFiltersDisabledAndDeleted() {
         IfmapConfig disabled = TestConfigs.config("B", "GP81", 2, 2L);
         disabled.setStatus(Integer.valueOf(0));
         IfmapConfig deleted = TestConfigs.config("C", "GP81", 3, 3L);
         deleted.setDelStatus(Integer.valueOf(1));
 
-        List<String> ordered = names(InterfaceOrdering.plan(
-                Arrays.asList(TestConfigs.config("A", "GP81", 1, 1L), disabled, deleted)));
+        List<String> ordered = names(InterfaceOrdering.sort(InterfaceOrdering.enabled(
+                Arrays.asList(TestConfigs.config("A", "GP81", 1, 1L), disabled, deleted))));
         assertEquals(Arrays.asList("A"), ordered);
     }
 
     @Test
-    void frontInterfaceExecutesFirstEvenWhenOrderIsLater() {
-        IfmapConfig main = TestConfigs.config("MAIN", "GP81", 1, 10L);
-        main.setFrontInterfaceNo("PRE");
-        IfmapConfig pre = TestConfigs.config("PRE", "GP81", 9, 90L);
+    void enabledKeepsRowsWithNullStatusAndNullDelStatus() {
+        // null 视为启用/未删除：老行（DDL 之前建的）不会因为字段没填就消失
+        IfmapConfig legacy = TestConfigs.config("A", "GP81", 1, 1L);
+        legacy.setStatus(null);
+        legacy.setDelStatus(null);
 
-        List<String> ordered = names(InterfaceOrdering.plan(Arrays.asList(main, pre)));
-        assertEquals(Arrays.asList("PRE", "MAIN"), ordered);
+        assertEquals(Arrays.asList("A"), names(InterfaceOrdering.enabled(Arrays.asList(legacy))));
     }
 
     @Test
-    void cycleIsRejectedWithPath() {
-        IfmapConfig a = TestConfigs.config("A", "GP81", 1, 1L);
-        a.setFrontInterfaceNo("B");
-        IfmapConfig b = TestConfigs.config("B", "GP81", 2, 2L);
-        b.setFrontInterfaceNo("A");
-
-        IfmapConfigException e = assertThrows(IfmapConfigException.class,
-                () -> InterfaceOrdering.plan(Arrays.asList(a, b)));
-        assertTrue(e.getMessage().contains("循环依赖"), e.getMessage());
-        assertTrue(e.getMessage().contains("A"), e.getMessage());
-        assertTrue(e.getMessage().contains("B"), e.getMessage());
-    }
-
-    @Test
-    void unknownFrontInterfaceIsIgnored() {
-        IfmapConfig main = TestConfigs.config("MAIN", "GP81", 1, 1L);
-        main.setFrontInterfaceNo("NOT_PRESENT");
-        assertEquals(Arrays.asList("MAIN"), names(InterfaceOrdering.plan(Arrays.asList(main))));
-    }
-
-    @Test
-    void topologicalKeepsUnrelatedOrder() {
-        IfmapConfig a = TestConfigs.config("A", "GP81", 1, 1L);
-        IfmapConfig b = TestConfigs.config("B", "GP81", 2, 2L);
-        IfmapConfig c = TestConfigs.config("C", "GP81", 3, 3L);
-        c.setFrontInterfaceNo("A");
-        // 深度优先：A 已因顺序先访问，C 的前置已满足，故 B、C 的相对顺序保持不变
-        assertEquals(Arrays.asList("A", "B", "C"), names(InterfaceOrdering.topological(Arrays.asList(a, b, c))));
+    void emptyInputYieldsEmptyPlan() {
+        assertEquals(0, InterfaceOrdering.sort(InterfaceOrdering.enabled(null)).size());
+        assertEquals(0, InterfaceOrdering.sort(InterfaceOrdering.enabled(
+                Arrays.<IfmapConfig>asList())).size());
     }
 
     private static List<String> names(List<IfmapConfig> configs) {

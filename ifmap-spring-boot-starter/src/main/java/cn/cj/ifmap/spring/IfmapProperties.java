@@ -37,7 +37,7 @@ import java.util.List;
  *   tenant-header: X-Tenant-Id    # 租户解析请求头
  *   default-tenant-id: '-1'       # 取不到租户时的默认值
  *   orchestrator:
- *     stop-on-failure: true       # 前置接口链中失败即停止
+ *     stop-on-failure: true       # 计划中某个接口失败后是否继续跑完
  *     fail-on-missing-strategy: true   # 前/后序策略未注册时抛异常（不再静默跳过）
  *   log:
  *     truncate-threshold: 65536   # 超过则截断并追加 ...truncated
@@ -236,7 +236,7 @@ public class IfmapProperties {
     /** {@code ifmap.orchestrator.*}。 */
     public static class Orchestrator {
 
-        /** 前置接口链中某接口失败后是否立即停止（false 则继续跑完并合并成功字段）。 */
+        /** 计划中某接口失败后是否立即停止（false 则继续跑完并合并成功步骤的产物）。 */
         private boolean stopOnFailure = true;
 
         /** {@code pre_strategy_name} / {@code post_strategy_name} 对应的策略 bean 未注册时是否抛异常（true 表示不再静默跳过，P0-7）。 */

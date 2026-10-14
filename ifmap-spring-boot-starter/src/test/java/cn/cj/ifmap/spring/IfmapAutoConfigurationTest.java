@@ -127,6 +127,11 @@ class IfmapAutoConfigurationTest {
     void userRepositoryWins() {
         ConfigRepository custom = new ConfigRepository() {
             @Override
+            public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+                return Collections.emptyList();
+            }
+
+            @Override
             public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
                 return Collections.emptyList();
             }

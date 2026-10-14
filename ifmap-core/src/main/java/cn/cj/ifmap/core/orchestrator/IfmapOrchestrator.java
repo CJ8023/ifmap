@@ -44,14 +44,11 @@ import cn.cj.ifmap.core.util.Logs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 接口执行编排器：把 §7.1 的主流程串起来，语义与存量引擎一致。
@@ -59,7 +56,7 @@ import java.util.Set;
  * <pre>
  * IfmapRequest
  *   → 租户解析（含 tenantId 的缓存键在仓储/缓存层）
- *   → 配置查询 + 启用过滤 + interface_order 排序 + front_interface_no 拓扑排序（含环检测）
+ *   → 按 busi_node 取整条计划 + 启用过滤 + interface_order 升序 + 按起点截断
  *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 特殊处理 SpecialDealStrategy
  *   → 出网调用 PartnerServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
  *   → 响应模板解析 → 结果判定 result_flag + success_value
@@ -67,17 +64,14 @@ import java.util.Set;
  *   → 执行日志（脱敏 + 截断后落库）
  * </pre>
  *
- * <p>与存量的行为差异（均已在上方标注）：排序兜底、环检测、分支/动作未命中不静默、
- * 写日志失败只 WARN、异常不强制转换。</p>
+ * <p>与存量的行为差异（均已在上方标注）：步骤顺序只有 interface_order 一个来源、起点缺失即报错、
+ * 分支/动作未命中不静默、写日志失败只 WARN、异常不强制转换、跨步骤共享池（后序步骤能读到前序产物）。</p>
  *
  * @author caijun
  */
 public final class IfmapOrchestrator {
 
     private static final Logger LOG = LoggerFactory.getLogger(IfmapOrchestrator.class);
-
-    /** 前置接口链的最大加载深度（防止配置成环时无限查库）。 */
-    public static final int MAX_FRONT_DEPTH = 64;
 
     /**
      * 跨步骤共享池的保留根：请求模板里 {@code $.pool.{interface_no}.xxx} 取指定步骤的产物。
@@ -150,39 +144,31 @@ public final class IfmapOrchestrator {
     }
 
     /**
-     * 加载执行计划：本接口 + {@code front_interface_no} 递归前置链，再统一排序（含环检测）。
+     * 加载执行计划：该业务节点下的<b>全部</b>启用配置，按 {@code interface_order} 升序。
      *
-     * <p>存在加载深度上限（{@value #MAX_FRONT_DEPTH}），防止配置把链写成环时无限查库。</p>
+     * <p>{@code interfaceNo} 只作为这条流水线上的<b>起点</b>：从它开始往后跑。
+     * 传 null / 空串表示从第一步跑完整个节点。为什么不做隐式截断（比如只跑一步）？
+     * 因为一个 {@code busi_node} 就是一条流水线，「起点的位置」就是「进度」——
+     * 断点续跑只需要把上次最后成功的接口号当起点传进来即可，不需要额外字段或状态表。</p>
+     *
+     * @throws IfmapConfigException {@code interfaceNo} 非空但不在该节点的计划内（配置被停用/删除，
+     *                              或接口号写错）—— 这种情况静默跑一半比报错危险得多
      */
     private List<IfmapConfig> loadPlan(String tenantId, String interfaceNo, String busiNode) {
-        List<IfmapConfig> collected = new java.util.ArrayList<IfmapConfig>();
-        Set<String> loaded = new LinkedHashSet<String>();
-        Deque<String> pending = new ArrayDeque<String>();
-        pending.add(interfaceNo);
-        while (!pending.isEmpty()) {
-            String current = pending.poll();
-            if (current == null || !loaded.add(current)) {
-                continue;
-            }
-            if (loaded.size() > MAX_FRONT_DEPTH) {
-                throw new IfmapConfigException("前置接口链过深（>" + MAX_FRONT_DEPTH + "），疑似存在循环依赖");
-            }
-            List<IfmapConfig> configs = repository.queryConfigs(tenantId, current, busiNode);
-            if (configs == null) {
-                continue;
-            }
-            collected.addAll(configs);
-            for (IfmapConfig config : configs) {
-                if (config == null) {
-                    continue;
-                }
-                String front = trimToNull(config.getFrontInterfaceNo());
-                if (front != null && !loaded.contains(front)) {
-                    pending.add(front);
-                }
+        List<IfmapConfig> plan = InterfaceOrdering.sort(InterfaceOrdering.enabled(
+                repository.queryConfigsByBusiNode(tenantId, busiNode)));
+        String start = trimToNull(interfaceNo);
+        if (start == null || plan.isEmpty()) {
+            // 空计划交给 runPlan 那侧的「未找到可执行的接口配置」统一报错（消息里带 tenantId/busiNode 更全）
+            return plan;
+        }
+        for (int i = 0; i < plan.size(); i++) {
+            if (start.equals(plan.get(i).getInterfaceNo())) {
+                return new ArrayList<IfmapConfig>(plan.subList(i, plan.size()));
             }
         }
-        return InterfaceOrdering.plan(collected);
+        throw new IfmapConfigException("起点接口不在该业务节点的执行计划内（已停用/已删除/编号写错？）：tenantId="
+                + tenantId + ", interfaceNo=" + start + ", busiNode=" + busiNode);
     }
 
     /**

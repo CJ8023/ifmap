@@ -81,6 +81,11 @@ public final class CachingConfigRepository implements ConfigRepository {
     }
 
     @Override
+    public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+        return delegate.queryConfigsByBusiNode(tenantId, busiNode);
+    }
+
+    @Override
     public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
         return delegate.queryConfigs(tenantId, interfaceNo, busiNode);
     }

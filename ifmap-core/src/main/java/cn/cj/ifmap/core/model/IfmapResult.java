@@ -79,7 +79,7 @@ public final class IfmapResult {
         return rawResponse;
     }
 
-    /** 实际执行过的接口号（前置接口链 + 主接口，按执行顺序）。 */
+    /** 实际执行过的接口号（从起点接口起算，按执行顺序）。 */
     public List<String> getExecutedInterfaces() {
         return executedInterfaces;
     }

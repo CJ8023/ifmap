@@ -66,48 +66,77 @@ class JdbcConfigRepositoryTest {
     // ------------------------------------------------------------------ 查询
 
     @Test
-    @DisplayName("queryConfigs 按 interfaceOrder 升序返回（不再依赖 DB 返回顺序）")
-    void queryConfigsOrderedByInterfaceOrder() {
-        insert("IF_A", "GP81", 30, 3001L);
-        insert("IF_A", "GP81", 10, 1001L);
-        insert("IF_A", "GP81", 20, 2001L);
+    @DisplayName("queryConfigsByBusiNode 是引擎取计划的口径：一个节点多步，按 interfaceOrder 升序")
+    void queryConfigsByBusiNodeOrderedByInterfaceOrder() {
+        // interface_no 租户内唯一 ⇒ 一个节点里的每一步必须是不同接口号，顺序才是它的位置
+        insert("IF_A3", "GP81", 30, 3001L);
+        insert("IF_A1", "GP81", 10, 1001L);
+        insert("IF_A2", "GP81", 20, 2001L);
 
-        List<IfmapConfig> list = repo.queryConfigs(TENANT, "IF_A", "GP81");
+        List<IfmapConfig> list = repo.queryConfigsByBusiNode(TENANT, "GP81");
 
         assertEquals(3, list.size());
-        assertEquals(10, ((Number) list.get(0).getInterfaceOrder()).intValue());
-        assertEquals(20, ((Number) list.get(1).getInterfaceOrder()).intValue());
-        assertEquals(30, ((Number) list.get(2).getInterfaceOrder()).intValue());
+        assertEquals("IF_A1", list.get(0).getInterfaceNo());
+        assertEquals("IF_A2", list.get(1).getInterfaceNo());
+        assertEquals("IF_A3", list.get(2).getInterfaceNo());
     }
 
     @Test
-    @DisplayName("唯一键语义：(租户+接口+业务节点+顺序) 唯一 —— 同节点同顺序无法重复，不同节点同顺序可共存")
-    void uniqueKeyScopeIsPerBusiNode() {
-        long gp81 = insert("IF_B", "GP81", 5, 9001L);
-        // 同接口、同顺序但不同业务节点 → 允许
-        long gp85 = insert("IF_B", "GP85", 5, 8001L);
-        // 同节点同顺序再来一条 → 唯一键拦截
-        assertThrows(IfmapConfigException.class, () -> insert("IF_B", "GP81", 5, 7001L));
+    @DisplayName("queryConfigsByBusiNode 忽略别节点；busiNode 空串返回空列表（不是全表）")
+    void queryConfigsByBusiNodeScopesToNode() {
+        insert("IF_N1", "GP81", 1, 4001L);
+        insert("IF_N2", "GP85", 1, 4002L);
 
-        List<IfmapConfig> gp81List = repo.queryConfigs(TENANT, "IF_B", "GP81");
-        assertEquals(1, gp81List.size());
-        assertEquals(gp81, gp81List.get(0).getKeyId().longValue());
-        assertEquals(gp85, repo.queryConfigs(TENANT, "IF_B", "GP85").get(0).getKeyId().longValue());
+        assertEquals(1, repo.queryConfigsByBusiNode(TENANT, "GP81").size());
+        assertEquals(0, repo.queryConfigsByBusiNode(TENANT, "  ").size());
+        assertEquals(0, repo.queryConfigsByBusiNode(TENANT, null).size());
     }
 
     @Test
-    @DisplayName("queryConfigs 过滤停用（status=0）与已删除（del_status=1）的行")
-    void queryConfigsFiltersDisabledAndDeleted() {
-        insert("IF_C", "GP81", 1, 101L);
-        IfmapConfig disabled = config("IF_C", "GP81", 2, 102L);
+    @DisplayName("唯一维度一：interface_no 在租户内全局唯一（换个业务节点也不行）")
+    void interfaceNoIsUniqueWithinTenant() {
+        long first = insert("IF_B", "GP81", 5, 9001L);
+
+        // 同接口号换个业务节点 → 仍然拦截（queryLogicBranches 只按 tenant+interface_no 查，跨节点同名会串分支）
+        assertThrows(IfmapConfigException.class, () -> insert("IF_B", "GP85", 5, 8001L));
+        // 同节点换个顺序 → 同样拦截（重复的是接口号，不是位置）
+        assertThrows(IfmapConfigException.class, () -> insert("IF_B", "GP81", 6, 7001L));
+
+        assertEquals(1, repo.queryConfigs(TENANT, "IF_B", "GP81").size());
+        assertEquals(first, repo.queryConfigs(TENANT, "IF_B", "GP81").get(0).getKeyId().longValue());
+        assertEquals(0, repo.queryConfigs(TENANT, "IF_B", "GP85").size());
+    }
+
+    @Test
+    @DisplayName("唯一维度二：interface_order 在 busi_node 内唯一；换个节点/换个顺序互不影响")
+    void interfaceOrderIsUniqueWithinBusiNode() {
+        insert("IF_O1", "GP81", 5, 9101L);
+
+        // 同节点同顺序、不同接口号 → 拦截（顺序是流水线上的位置，一个位置只能站一个接口）
+        assertThrows(IfmapConfigException.class, () -> insert("IF_O2", "GP81", 5, 9102L));
+        // 同节点换顺序 → 允许
+        insert("IF_O3", "GP81", 6, 9103L);
+        // 换节点同顺序 → 允许（两个节点是两条独立流水线）
+        insert("IF_O4", "GP85", 5, 9104L);
+
+        assertEquals(2, repo.queryConfigsByBusiNode(TENANT, "GP81").size());
+        assertEquals(1, repo.queryConfigsByBusiNode(TENANT, "GP85").size());
+    }
+
+    @Test
+    @DisplayName("queryConfigsByBusiNode 过滤停用（status=0）与已删除（del_status=1）的行")
+    void queryConfigsByBusiNodeFiltersDisabledAndDeleted() {
+        insert("IF_C1", "GP81", 1, 101L);
+        IfmapConfig disabled = config("IF_C2", "GP81", 2, 102L);
         disabled.setStatus(0);
         writer.insert(disabled);
-        insert("IF_C", "GP81", 3, 103L);
+        insert("IF_C3", "GP81", 3, 103L);
         assertTrue(writer.softDelete(103L, "tester", "req-del"));
 
-        List<IfmapConfig> list = repo.queryConfigs(TENANT, "IF_C", "GP81");
+        List<IfmapConfig> list = repo.queryConfigsByBusiNode(TENANT, "GP81");
 
         assertEquals(1, list.size());
+        assertEquals("IF_C1", list.get(0).getInterfaceNo());
         assertEquals(101L, list.get(0).getKeyId().longValue());
     }
 
@@ -213,7 +242,7 @@ class JdbcConfigRepositoryTest {
     }
 
     @Test
-    @DisplayName("insert 唯一键冲突（同租户+接口+节点+顺序）抛出 IfmapConfigException")
+    @DisplayName("insert 唯一键冲突（同租户内 interface_no 重复）抛出 IfmapConfigException")
     void insertDuplicateBusinessKeyFails() {
         insert("IF_H", "GP81", 1, 401L);
         IfmapConfig dup = config("IF_H", "GP81", 1, 402L);
@@ -283,6 +312,21 @@ class JdbcConfigRepositoryTest {
         Integer rows = jdbc.queryForObject("SELECT COUNT(*) FROM `" + prefix + "config` WHERE `interface_no` = 'IF_K'", Integer.class);
         assertEquals(3, ((Number) rows).intValue());
         assertEquals(third, 703L);
+    }
+
+    @Test
+    @DisplayName("软删后同节点同顺序也能重建（deleted_seq 进唯一键，两个维度都放行）")
+    void canReuseOrderAfterSoftDelete() {
+        long first = insert("IF_O5", "GP81", 1, 7051L);
+        assertTrue(writer.softDelete(first, "tester", "req-1"));
+
+        // 顺序维度：新接口号占回同一个 order
+        long second = insert("IF_O6", "GP81", 1, 7052L);
+        assertEquals(7052L, second);
+
+        List<IfmapConfig> live = repo.queryConfigsByBusiNode(TENANT, "GP81");
+        assertEquals(1, live.size());
+        assertEquals("IF_O6", live.get(0).getInterfaceNo());
     }
 
     // ------------------------------------------------------------------ 日志

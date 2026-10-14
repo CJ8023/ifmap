@@ -102,7 +102,7 @@ class ConfigAuditorTest {
     @DisplayName("超过 auditMaxConfigs → truncated=true（不静默漏检）")
     void truncatedFlag() {
         writer.insert(AdminTestSupport.config("IF_1", "apply", 1));
-        writer.insert(AdminTestSupport.config("IF_2", "apply", 1));
+        writer.insert(AdminTestSupport.config("IF_2", "apply", 2));
         ConfigAuditor small = new ConfigAuditor(db.repository(),
                 new ConfigValidator(null, new JacksonJsonOps(), new SpecialDealStrategyRegistry(),
                         new ActionRegistry(), db.repository()), 1);

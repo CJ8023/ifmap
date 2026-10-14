@@ -81,7 +81,6 @@ public class ConfigSnapshotMapper {
         config.setPartnerCode(asString(map.get("partnerCode")));
         config.setPartnerName(asString(map.get("partnerName")));
         config.setFinancingMode(asString(map.get("financingMode")));
-        config.setFrontInterfaceNo(asString(map.get("frontInterfaceNo")));
         config.setInterfaceOrder(asInt(map.get("interfaceOrder")));
         config.setRequestParamTemplate(asString(map.get("requestParamTemplate")));
         config.setResponseParamTemplate(asString(map.get("responseParamTemplate")));
@@ -131,7 +130,6 @@ public class ConfigSnapshotMapper {
         map.put("partnerCode", config.getPartnerCode());
         map.put("partnerName", config.getPartnerName());
         map.put("financingMode", config.getFinancingMode());
-        map.put("frontInterfaceNo", config.getFrontInterfaceNo());
         map.put("interfaceOrder", config.getInterfaceOrder());
         map.put("requestParamTemplate", config.getRequestParamTemplate());
         map.put("responseParamTemplate", config.getResponseParamTemplate());

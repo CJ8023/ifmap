@@ -54,7 +54,7 @@ class JsonConfigMapperTest {
     void camelCaseAndSnakeCaseAreEquivalent() {
         String camel = "[{\"keyId\":1001,\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
                 + "\"projectCode\":\"P1\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\",\"partnerName\":\"甲行\","
-                + "\"financingMode\":\"0\",\"frontInterfaceNo\":\"IF_0\",\"interfaceOrder\":3,"
+                + "\"financingMode\":\"0\",\"interfaceOrder\":3,"
                 + "\"requestParamTemplate\":\"{\\\"a\\\":\\\"@a\\\"}\",\"responseParamTemplate\":\"@resp\","
                 + "\"resultFlag\":\"$.code\",\"successValue\":\"0000|SUCCESS\",\"preStrategyName\":\"strategyA\",\"postStrategyName\":\"strategyB\","
                 + "\"status\":1,\"version\":2,\"remark\":\"备注\",\"delStatus\":0,\"deletedSeq\":0,"
@@ -69,7 +69,6 @@ class JsonConfigMapperTest {
                 .replace("\"partnerCode\"", "\"partner_code\"")
                 .replace("\"partnerName\"", "\"partner_name\"")
                 .replace("\"financingMode\"", "\"financing_mode\"")
-                .replace("\"frontInterfaceNo\"", "\"front_interface_no\"")
                 .replace("\"interfaceOrder\"", "\"interface_order\"")
                 .replace("\"requestParamTemplate\"", "\"request_param_template\"")
                 .replace("\"responseParamTemplate\"", "\"response_param_template\"")
@@ -93,7 +92,6 @@ class JsonConfigMapperTest {
         assertEquals("BANK_A", fromCamel.getPartnerCode());
         assertEquals("甲行", fromCamel.getPartnerName());
         assertEquals("0", fromCamel.getFinancingMode());
-        assertEquals("IF_0", fromCamel.getFrontInterfaceNo());
         assertEquals(Integer.valueOf(3), fromCamel.getInterfaceOrder());
         assertEquals("{\"a\":\"@a\"}", fromCamel.getRequestParamTemplate());
         assertEquals("@resp", fromCamel.getResponseParamTemplate());

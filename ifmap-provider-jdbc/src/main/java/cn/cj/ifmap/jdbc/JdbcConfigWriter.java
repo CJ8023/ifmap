@@ -88,18 +88,17 @@ public class JdbcConfigWriter {
         JdbcValues.require(config.getPartnerCode(), "partnerCode");
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
-                + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
+                + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
                 + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,"
                 + "`pre_strategy_name`,`post_strategy_name`,`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
                 + "`add_user_id`,`add_request_id`)"
-                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
         try {
             jdbc.update(sql, id,
                     JdbcValues.orDefault(config.getTenantId(), -1L),
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
-                    config.getFinancingMode(), config.getFrontInterfaceNo(),
-                    JdbcValues.orDefault(config.getInterfaceOrder(), 0),
+                    config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
                     JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
@@ -171,7 +170,7 @@ public class JdbcConfigWriter {
         String sql = "UPDATE `" + tables.configTable() + "` SET"
                 + " `interface_no` = ?, `interface_code` = ?, `project_code` = ?, `interface_name` = ?,"
                 + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
-                + " `front_interface_no` = ?, `interface_order` = ?,"
+                + " `interface_order` = ?,"
                 + " `request_param_template` = ?, `response_param_template` = ?,"
                 + " `result_flag` = ?, `success_value` = ?,"
                 + " `pre_strategy_name` = ?, `post_strategy_name` = ?,"
@@ -183,8 +182,7 @@ public class JdbcConfigWriter {
             int rows = jdbc.update(sql,
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
-                    config.getFinancingMode(), config.getFrontInterfaceNo(),
-                    JdbcValues.orDefault(config.getInterfaceOrder(), 0),
+                    config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
                     JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),

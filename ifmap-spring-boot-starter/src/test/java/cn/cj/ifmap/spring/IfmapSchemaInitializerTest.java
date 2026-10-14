@@ -191,7 +191,7 @@ class IfmapSchemaInitializerTest {
     }
 
     @Test
-    @DisplayName("四张表列数与 W2 口径一致（29 / 17 / 17 / 11）")
+    @DisplayName("四张表列数与 W2 口径一致（28 / 17 / 17 / 11）")
     void columnCountsMatch() {
         final String caseName = "ifmap_ddl_columns";
         javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
@@ -200,7 +200,7 @@ class IfmapSchemaInitializerTest {
                 new DefaultResourceLoader()).createTablesIfAbsent();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        assertEquals(29, columnsOf(jdbc, prefix + "config"));
+        assertEquals(28, columnsOf(jdbc, prefix + "config"));
         assertEquals(17, columnsOf(jdbc, prefix + "logic_branch_config"));
         assertEquals(17, columnsOf(jdbc, prefix + "execution_log"));
         assertEquals(11, columnsOf(jdbc, prefix + "config_history"));

@@ -23,8 +23,9 @@ import java.util.Optional;
  *
  * <p>实现方约定（违反会导致"看似随机"的行为）：</p>
  * <ol>
- *   <li>{@link #queryConfigs} <b>必须</b>按 {@code interfaceOrder} 升序返回，同值按 {@code keyId} 兜底
- *       —— 引擎不再自行排序（对比现状：原实现依赖 DB 返回顺序，且顺序字段从未被使用）。</li>
+ *   <li>{@link #queryConfigsByBusiNode} <b>必须</b>按 {@code interfaceOrder} 升序返回，同值按 {@code keyId} 兜底
+ *       —— 它是引擎取执行计划的唯一入口（对比现状：原实现按前置链 BFS 拼计划，现已删除）。</li>
+ *   <li>{@link #queryConfigs} 同样按 {@code interfaceOrder} 升序返回（管理端单条查询与 demo 用）。</li>
  *   <li>{@link #queryLogicBranches} <b>必须</b>按 {@code logicBranchOrder} 升序返回，同值按 {@code keyId} 兜底。</li>
  *   <li>只返回未删除（{@code del_status = 0}）且未停用的配置；停用配置由管理端维护，不应进入执行链路。</li>
  * </ol>
@@ -39,6 +40,19 @@ import java.util.Optional;
  * @author caijun
  */
 public interface ConfigRepository {
+
+    /**
+     * 查询某业务节点下<b>全部</b>启用配置（按 {@code interfaceOrder} 升序，同值 {@code keyId} 兜底）。
+     *
+     * <p>引擎用它取执行计划：一个 {@code busi_node} 就是一条完整流水线，
+     * {@code interfaceNo} 只是这条流水线上的<b>起点</b>（见 {@code IfmapOrchestrator.loadPlan}）。</p>
+     *
+     * <p><b>必须只返回未删除（{@code del_status = 0}）且未停用（{@code status = 1}）的行</b>，
+     * 且<b>必须已排好序</b> —— 引擎只在本地再兜底排一次，顺序错了不会被拓扑纠正。</p>
+     *
+     * <p>{@code busiNode} 为空时返回空列表（而不是全表）。</p>
+     */
+    List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode);
 
     /** 按业务键查询接口配置（按 interfaceOrder 升序）。 */
     List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode);

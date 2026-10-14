@@ -27,7 +27,7 @@ import java.util.Set;
 /**
  * 配置巡检（设计 §8.2 {@code GET /audit}）：把"部署前契约自检"变成"随时可跑的全量体检"。
  *
- * <p>逐个接口跑 {@link ConfigValidator}（模板契约 + JsonPath + 前/后序策略 + 前置链），
+ * <p>逐个接口跑 {@link ConfigValidator}（模板契约 + JsonPath + 前/后序策略 + 池引用），
  * 再对每个接口跑一次分支校验（默认兜底 ≤ 1 / 顺序唯一 / method_flag 已注册）。</p>
  *
  * @author caijun

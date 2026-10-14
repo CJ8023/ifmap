@@ -41,17 +41,15 @@ import java.util.Set;
  *   <li><b>模板契约</b>：模板必须是合法 JSON；{@code @FUN} 规则必须已注册且参数可匹配重载
  *       （复用引擎的 {@link ContractValidator}，与启动期自检同一套逻辑）；</li>
  *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；{@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的
- *       特殊处理策略里；{@code front_interface_no} 必须存在且不成环；</li>
- *   <li><b>结构约束</b>：{@code (tenant_id, interface_no, busi_node, interface_order)} 不能重复；
- *       分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、{@code method_flag} 必须是已注册动作。</li>
+ *       特殊处理策略里；</li>
+ *   <li><b>结构约束</b>：{@code (tenant_id, interface_no)} 与 {@code (tenant_id, busi_node, interface_order)}
+ *       两组唯一键都不能重复；分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、
+ *       {@code method_flag} 必须是已注册动作。</li>
  * </ol>
  *
  * @author caijun
  */
 public class ConfigValidator {
-
-    /** 前置接口链最大深度（与编排器护栏一致）。 */
-    private static final int MAX_FRONT_DEPTH = 64;
 
     private final ContractValidator contractValidator;
     private final JsonOps jsonOps;
@@ -94,7 +92,6 @@ public class ConfigValidator {
         checkTemplateContract(config, result);
         checkJsonPaths(config, result);
         checkStrategyName(config, result);
-        checkFrontChain(config, result);
         checkUniqueKey(config, result);
         return result;
     }
@@ -280,82 +277,65 @@ public class ConfigValidator {
         }
     }
 
-    /** 前置接口必须存在，且整条链不能成环 / 不能过深。 */
-    private void checkFrontChain(IfmapConfig config, ValidationResult result) {
-        String front = config.getFrontInterfaceNo();
-        if (isBlank(front)) {
-            return;
-        }
-        String self = config.getInterfaceNo();
-        if (front.equals(self)) {
-            result.error("前置接口不能指向自己：" + front);
-            return;
-        }
-        String tenantId = asTenantId(config.getTenantId());
-        Set<String> visited = new LinkedHashSet<String>();
-        if (!isBlank(self)) {
-            visited.add(self);
-        }
-        String current = front;
-        List<String> chain = new ArrayList<String>();
-        int depth = 0;
-        while (!isBlank(current)) {
-            chain.add(current);
-            if (!visited.add(current)) {
-                result.error("前置接口链成环：" + chain);
-                return;
-            }
-            if (++depth > MAX_FRONT_DEPTH) {
-                result.error("前置接口链过深（>" + MAX_FRONT_DEPTH + "）：" + chain);
-                return;
-            }
-            List<IfmapConfig> rows = liveConfigs(tenantId, current);
-            if (rows.isEmpty()) {
-                result.error("前置接口不存在或已删除：" + current);
-                return;
-            }
-            current = rows.get(0).getFrontInterfaceNo();
-        }
-    }
-
     private List<IfmapConfig> liveConfigs(String tenantId, String interfaceNo) {
-        ConfigQuery query = new ConfigQuery()
+        return liveRows(new ConfigQuery()
                 .setTenantId(tenantId)
                 .setInterfaceNo(interfaceNo)
-                .setSize(ConfigQuery.MAX_SIZE);
-        List<IfmapConfig> rows = repository.queryConfigs(query);
+                .setSize(ConfigQuery.MAX_SIZE));
+    }
+
+    private List<IfmapConfig> liveRows(ConfigQuery query) {
         List<IfmapConfig> live = new ArrayList<IfmapConfig>();
-        for (IfmapConfig row : rows) {
-            if (row.getDelStatus() == 0) {
+        for (IfmapConfig row : repository.queryConfigs(query)) {
+            if (row.getDelStatus() == null || row.getDelStatus().intValue() == 0) {
                 live.add(row);
             }
         }
         return live;
     }
 
-    /** 唯一维度：同 (tenant, interface_no, busi_node, interface_order) 不能有第二条未删除配置。 */
+    private static boolean isSelf(IfmapConfig config, IfmapConfig row) {
+        return config.getKeyId() != null && config.getKeyId().equals(row.getKeyId());
+    }
+
+    /**
+     * 唯一维度（两条，分别对应 DDL 上的两个唯一键）：
+     *
+     * <ol>
+     *   <li>{@code interface_no} 在租户内<b>全局唯一</b> —— DDL 注释早就宣称它是业务唯一键，
+     *       且 {@code queryLogicBranches(tenantId, interfaceNo)} 没有 {@code busi_node} 也必须自洽；</li>
+     *   <li>{@code interface_order} 在 {@code busi_node} 内<b>唯一</b> —— 顺序是流水线上的位置，
+     *       同节点同序号只能有一条，否则「同值按 key_id 兜底」会退化成静默的不确定行为。</li>
+     * </ol>
+     *
+     * <p>两条都排除自身（编辑场景），都只看未删除行（软删后可以重建同一个接口号/顺序）。</p>
+     */
     private void checkUniqueKey(IfmapConfig config, ValidationResult result) {
-        if (isBlank(config.getInterfaceNo()) || isBlank(config.getBusiNode())) {
+        if (isBlank(config.getInterfaceNo())) {
+            return;
+        }
+        String tenantId = asTenantId(config.getTenantId());
+        for (IfmapConfig row : liveConfigs(tenantId, config.getInterfaceNo())) {
+            if (!isSelf(config, row)) {
+                result.error("唯一维度冲突：interface_no 在租户内必须全局唯一，已存在 (tenant_id=" + tenantId
+                        + ", interface_no=" + config.getInterfaceNo()
+                        + ", busi_node=" + row.getBusiNode() + ") 的配置 #" + row.getKeyId());
+            }
+        }
+        if (isBlank(config.getBusiNode())) {
             return;
         }
         ConfigQuery query = new ConfigQuery()
-                .setTenantId(asTenantId(config.getTenantId()))
-                .setInterfaceNo(config.getInterfaceNo())
+                .setTenantId(tenantId)
                 .setBusiNode(config.getBusiNode())
                 .setSize(ConfigQuery.MAX_SIZE);
-        List<IfmapConfig> rows = repository.queryConfigs(query);
-        for (IfmapConfig row : rows) {
-            if (row.getDelStatus() != null && row.getDelStatus() != 0) {
+        for (IfmapConfig row : liveRows(query)) {
+            if (isSelf(config, row) || !sameOrder(row.getInterfaceOrder(), config.getInterfaceOrder())) {
                 continue;
             }
-            boolean sameOrder = sameOrder(row.getInterfaceOrder(), config.getInterfaceOrder());
-            boolean sameRow = config.getKeyId() != null && config.getKeyId().equals(row.getKeyId());
-            if (sameOrder && !sameRow) {
-                result.error("唯一维度冲突：已存在 (tenant_id=" + asTenantId(config.getTenantId())
-                        + ", interface_no=" + config.getInterfaceNo()
-                        + ", busi_node=" + config.getBusiNode()
-                        + ", interface_order=" + config.getInterfaceOrder() + ") 的配置 #" + row.getKeyId());
-            }
+            result.error("唯一维度冲突：interface_order 在 busi_node 内必须唯一，已存在 (tenant_id=" + tenantId
+                    + ", busi_node=" + config.getBusiNode()
+                    + ", interface_order=" + config.getInterfaceOrder() + ") 的配置 #" + row.getKeyId());
         }
     }
 

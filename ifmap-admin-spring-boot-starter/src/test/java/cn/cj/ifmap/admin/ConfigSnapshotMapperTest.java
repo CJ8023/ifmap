@@ -45,7 +45,6 @@ class ConfigSnapshotMapperTest {
         config.setKeyId(1001L);
         config.setPreStrategyName("demoStrategy");
         config.setPostStrategyName("auditStrategy");
-        config.setFrontInterfaceNo("IF_B");
 
         String snapshot = mapper.toSnapshot(config);
         assertTrue(snapshot.contains("\"interfaceNo\":\"IF_A\""), snapshot);
@@ -64,7 +63,6 @@ class ConfigSnapshotMapperTest {
         assertEquals("0000", restored.getSuccessValue());
         assertEquals("demoStrategy", restored.getPreStrategyName());
         assertEquals("auditStrategy", restored.getPostStrategyName());
-        assertEquals("IF_B", restored.getFrontInterfaceNo());
         assertEquals(1, ((Number) restored.getStatus()).intValue());
     }
 

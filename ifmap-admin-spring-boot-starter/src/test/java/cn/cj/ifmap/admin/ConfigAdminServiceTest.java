@@ -128,7 +128,7 @@ class ConfigAdminServiceTest {
     @DisplayName("分页查询：条件过滤 + total 与 rows 口径一致")
     void listPaging() {
         service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
-        service.create(AdminTestSupport.config("IF_B", "apply", 1), null, OPERATOR, REQ);
+        service.create(AdminTestSupport.config("IF_B", "apply", 2), null, OPERATOR, REQ);
 
         PageResult<IfmapConfig> all = service.list(new ConfigQuery().setTenantId("1").setSize(10));
         assertEquals(2, ((Number) all.getTotal()).longValue());
@@ -242,7 +242,7 @@ class ConfigAdminServiceTest {
     @DisplayName("回滚：历史不属于该配置 / 版本不匹配 → 拒绝")
     void rollbackGuards() {
         long a = service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
-        long b = service.create(AdminTestSupport.config("IF_B", "apply", 1), null, OPERATOR, REQ);
+        long b = service.create(AdminTestSupport.config("IF_B", "apply", 2), null, OPERATOR, REQ);
         long bHistory = service.history(b, null).get(0).getKeyId();
 
         IfmapConfigException e = assertThrows(IfmapConfigException.class,

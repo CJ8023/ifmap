@@ -40,6 +40,7 @@ import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.testkit.TestConfigs;
 import cn.cj.ifmap.core.testkit.TestJsonOps;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -352,7 +353,6 @@ class IfmapOrchestratorTest {
         first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
         first.setResultFlag(null);
         IfmapConfig second = TestConfigs.config("IF_2", "GP81", 2, 2L);
-        second.setFrontInterfaceNo("IF_1");
         second.setRequestParamTemplate("{\"exact\":\"$.pool.IF_1.firstKey\",\"flat\":\"$.firstKey\"}");
         second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
         second.setResultFlag(null);
@@ -360,7 +360,7 @@ class IfmapOrchestratorTest {
 
         CapturingGateway gateway = new CapturingGateway("{\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
         IfmapResult result = orchestrator(gateway, new ActionRegistry())
-                .execute(IfmapRequest.empty(), "IF_2", "GP81");
+                .execute(IfmapRequest.empty(), "IF_1", "GP81");
 
         assertTrue(result.isSuccess(), result.getErrorMessage());
         assertEquals(2, gateway.requests.size());
@@ -379,7 +379,6 @@ class IfmapOrchestratorTest {
         first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
         first.setResultFlag(null);
         IfmapConfig second = TestConfigs.config("IF_4", "GP81", 2, 2L);
-        second.setFrontInterfaceNo("IF_3");
         second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
         second.setResultFlag("$.code");
         second.setSuccessValue("0000");
@@ -387,7 +386,7 @@ class IfmapOrchestratorTest {
 
         CapturingGateway gateway = new CapturingGateway("{\"code\":\"9999\",\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
         IfmapResult result = orchestrator(gateway, new ActionRegistry())
-                .execute(IfmapRequest.empty(), "IF_4", "GP81");
+                .execute(IfmapRequest.empty(), "IF_3", "GP81");
 
         assertFalse(result.isSuccess());
         assertEquals("AP1", result.getData().get("firstKey"));
@@ -494,7 +493,6 @@ class IfmapOrchestratorTest {
         IfmapConfig failing = mainConfig("IF_F", 1, 1L);
         repository.add(failing);
         IfmapConfig later = TestConfigs.config("IF_F2", "GP81", 2, 2L);
-        later.setFrontInterfaceNo("IF_F");
         later.setResultFlag(null);
         repository.add(later);
 
@@ -508,23 +506,71 @@ class IfmapOrchestratorTest {
     }
 
     @Test
-    void frontInterfacesExecuteInTopologicalOrderAndDataMerges() {
-        IfmapConfig main = mainConfig("MAIN", 1, 10L);
-        main.setFrontInterfaceNo("PRE");
-        IfmapConfig pre = TestConfigs.config("PRE", "GP81", 9, 90L);
+    @DisplayName("起点是第一站 → 按 interface_order 跑完整条计划，各步产物扁平合并")
+    void planRunsFromOrderAndDataMerges() {
+        IfmapConfig pre = TestConfigs.config("PRE", "GP81", 1, 10L);
         pre.setResponseParamTemplate("{\"preField\":\"$.data.applyNo\"}");
         pre.setResultFlag(null);
-        repository.add(main);
+        IfmapConfig main = mainConfig("MAIN", 2, 20L);
         repository.add(pre);
+        repository.add(main);
 
         IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\",\"data\":{\"applyNo\":\"AP7\"}}"),
                 new ActionRegistry())
-                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "MAIN", "GP81");
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "PRE", "GP81");
 
-        assertTrue(result.isSuccess());
-        assertEquals(java.util.Arrays.asList("PRE", "MAIN"), result.getExecutedInterfaces());
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals(Arrays.asList("PRE", "MAIN"), result.getExecutedInterfaces());
         assertEquals("AP7", result.getData().get("applyNo"));
         assertEquals("AP7", result.getData().get("preField"));
+    }
+
+    @Test
+    @DisplayName("起点在中间 → 前面已成功的步骤不再重跑（断点续跑就是这么用的）")
+    void startPointSkipsEarlierSteps() {
+        IfmapConfig first = TestConfigs.config("S1", "GP81", 1, 1L);
+        first.setResponseParamTemplate("{\"k1\":\"$.data.applyNo\"}");
+        first.setResultFlag(null);
+        IfmapConfig second = TestConfigs.config("S2", "GP81", 2, 2L);
+        second.setResponseParamTemplate("{\"k2\":\"$.data.echo\"}");
+        second.setResultFlag(null);
+        repository.add(first).add(second);
+
+        CapturingGateway gateway = new CapturingGateway("{\"data\":{\"echo\":\"E2\"}}");
+        IfmapResult result = orchestrator(gateway, new ActionRegistry())
+                .execute(IfmapRequest.empty(), "S2", "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals(1, gateway.requests.size(), "S1 已在上次跑完，这次不该再出网");
+        assertEquals(Collections.singletonList("S2"), result.getExecutedInterfaces());
+        assertNull(result.getData().get("k1"), "没跑的步骤没有产物");
+        assertEquals("E2", result.getData().get("k2"));
+        assertEquals(Collections.singletonList("S2"), new ArrayList<String>(poolOf(result).keySet()));
+    }
+
+    @Test
+    @DisplayName("起点不在计划内（停用/删除/编号写错）→ 报错而不是静默跑一半")
+    void startPointNotInPlanThrows() {
+        repository.add(mainConfig("ONLY", 1, 1L));
+
+        IfmapConfigException e = assertThrows(IfmapConfigException.class,
+                () -> orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), new ActionRegistry())
+                        .execute(IfmapRequest.empty(), "OTHER", "GP81"));
+        assertTrue(e.getMessage().contains("起点接口不在"), e.getMessage());
+        assertTrue(e.getMessage().contains("OTHER"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("接口号传 null → 从第一步跑完整个业务节点")
+    void nullStartRunsWholeNode() {
+        repository.add(mainConfig("W1", 1, 1L));
+        repository.add(mainConfig("W2", 2, 2L));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), new ActionRegistry())
+                .execute(IfmapRequest.empty(), null, "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals(Arrays.asList("W1", "W2"), result.getExecutedInterfaces());
     }
 
     @Test

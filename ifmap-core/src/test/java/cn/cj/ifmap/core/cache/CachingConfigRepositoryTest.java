@@ -49,6 +49,12 @@ class CachingConfigRepositoryTest {
         private int logCalls;
 
         @Override
+        public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+            configCalls++;
+            return Collections.singletonList(new IfmapConfig());
+        }
+
+        @Override
         public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
             configCalls++;
             return Collections.singletonList(new IfmapConfig());

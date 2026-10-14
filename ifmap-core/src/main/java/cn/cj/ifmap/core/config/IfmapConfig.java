@@ -63,9 +63,7 @@ public class IfmapConfig implements Serializable {
     private String partnerName;
     /** 融资模式（见文档数据字典）。 */
     private String financingMode;
-    /** 前置接口编号：本接口执行前必须先执行的接口，空=无前置。 */
-    private String frontInterfaceNo;
-    /** 接口执行顺序，升序；同值按 keyId 兜底。 */
+    /** 接口执行顺序（本业务节点内的步骤序号），升序；同值按 keyId 兜底，租户+节点内唯一。 */
     private Integer interfaceOrder;
     /** 请求参数模板（DSL），可为 null（纯回调接口无请求体）。 */
     private String requestParamTemplate;
@@ -194,14 +192,6 @@ public class IfmapConfig implements Serializable {
 
     public void setFinancingMode(String financingMode) {
         this.financingMode = financingMode;
-    }
-
-    public String getFrontInterfaceNo() {
-        return frontInterfaceNo;
-    }
-
-    public void setFrontInterfaceNo(String frontInterfaceNo) {
-        this.frontInterfaceNo = frontInterfaceNo;
     }
 
     public Integer getInterfaceOrder() {

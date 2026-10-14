@@ -107,7 +107,6 @@ public final class JsonConfigMapper {
         c.setProjectCode(text(row, "projectCode"));
         c.setPartnerName(textAny(row, "partnerName", "bankName"));
         c.setFinancingMode(text(row, "financingMode"));
-        c.setFrontInterfaceNo(text(row, "frontInterfaceNo"));
         c.setInterfaceOrder(integer(row, "interfaceOrder", source, 0));
         c.setRequestParamTemplate(text(row, "requestParamTemplate"));
         c.setResponseParamTemplate(text(row, "responseParamTemplate"));

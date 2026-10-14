@@ -237,17 +237,17 @@ public final class IfmapOrchestrator {
     }
 
     private String applySpecialDeal(StrategyContext context, RuleContext ruleContext, String requestJson) {
-        String strategyName = trimToNull(context.getConfig().getStrategyName());
+        String strategyName = trimToNull(context.getConfig().getPreStrategyName());
         if (strategyName == null) {
             return requestJson;
         }
         SpecialDealStrategy strategy = specialDeals.lookup(strategyName);
         if (strategy == null) {
             if (failOnMissingStrategy) {
-                throw new IfmapStrategyException("特殊处理策略未注册：strategy_name=" + strategyName
+                throw new IfmapStrategyException("前序策略未注册：pre_strategy_name=" + strategyName
                         + "（可查 " + specialDeals.keys() + "）");
             }
-            LOG.warn("ifmap 特殊处理策略未注册，已跳过：strategy_name={}", strategyName);
+            LOG.warn("ifmap 前序策略未注册，已跳过：pre_strategy_name={}", strategyName);
             return requestJson;
         }
         Map<String, Object> extra = strategy.apply(context);

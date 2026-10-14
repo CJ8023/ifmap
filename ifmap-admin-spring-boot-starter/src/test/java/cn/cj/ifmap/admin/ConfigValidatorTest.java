@@ -146,17 +146,22 @@ class ConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("strategy_name 必须在已注册策略里；注册表为空只给 warning")
+    @DisplayName("pre/post 策略都必须在已注册策略里；注册表为空只给 warning")
     void strategyNameMustBeRegistered() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);
-        config.setStrategyName("notRegistered");
+        config.setPreStrategyName("notRegistered");
         ValidationResult result = validator.validate(config, true);
         assertFalse(result.isPassed());
-        assertTrue(result.getErrors().toString().contains("strategy_name 未注册"), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("pre_strategy_name 未注册"), result.getErrors().toString());
 
-        config.setStrategyName("demoStrategy");
+        config.setPreStrategyName("demoStrategy");
         ValidationResult registered = validator.validate(config, true);
         assertTrue(registered.isPassed(), String.valueOf(registered.getErrors()));
+
+        config.setPostStrategyName("notRegistered");
+        assertTrue(validator.validate(config, true).getErrors().toString().contains("post_strategy_name 未注册"),
+                String.valueOf(validator.validate(config, true).getErrors()));
+        config.setPostStrategyName("demoStrategy");
 
         ConfigValidator emptyStrategies = new ConfigValidator(null, new JacksonJsonOps(),
                 new SpecialDealStrategyRegistry(), new ActionRegistry(), db.repository());

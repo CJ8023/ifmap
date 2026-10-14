@@ -56,7 +56,7 @@ class JsonConfigMapperTest {
                 + "\"projectCode\":\"P1\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\",\"partnerName\":\"甲行\","
                 + "\"financingMode\":\"0\",\"frontInterfaceNo\":\"IF_0\",\"interfaceOrder\":3,"
                 + "\"requestParamTemplate\":\"{\\\"a\\\":\\\"@a\\\"}\",\"responseParamTemplate\":\"@resp\","
-                + "\"resultFlag\":\"$.code\",\"successValue\":\"0000|SUCCESS\",\"strategyName\":\"strategyA\","
+                + "\"resultFlag\":\"$.code\",\"successValue\":\"0000|SUCCESS\",\"preStrategyName\":\"strategyA\",\"postStrategyName\":\"strategyB\","
                 + "\"status\":1,\"version\":2,\"remark\":\"备注\",\"delStatus\":0,\"deletedSeq\":0,"
                 + "\"addTime\":\"2026-01-02 03:04:05\"}]";
         String snake = camel
@@ -75,7 +75,8 @@ class JsonConfigMapperTest {
                 .replace("\"responseParamTemplate\"", "\"response_param_template\"")
                 .replace("\"resultFlag\"", "\"result_flag\"")
                 .replace("\"successValue\"", "\"success_value\"")
-                .replace("\"strategyName\"", "\"strategy_name\"")
+                .replace("\"preStrategyName\"", "\"pre_strategy_name\"")
+                .replace("\"postStrategyName\"", "\"post_strategy_name\"")
                 .replace("\"delStatus\"", "\"del_status\"")
                 .replace("\"deletedSeq\"", "\"deleted_seq\"")
                 .replace("\"addTime\"", "\"add_time\"");
@@ -98,7 +99,8 @@ class JsonConfigMapperTest {
         assertEquals("@resp", fromCamel.getResponseParamTemplate());
         assertEquals("$.code", fromCamel.getResultFlag());
         assertEquals("0000|SUCCESS", fromCamel.getSuccessValue());
-        assertEquals("strategyA", fromCamel.getStrategyName());
+        assertEquals("strategyA", fromCamel.getPreStrategyName());
+        assertEquals("strategyB", fromCamel.getPostStrategyName());
         assertEquals(Integer.valueOf(2), fromCamel.getVersion());
         assertEquals("备注", fromCamel.getRemark());
         assertEquals(LocalDateTime.of(2026, 1, 2, 3, 4, 5), fromCamel.getAddTime());
@@ -124,7 +126,8 @@ class JsonConfigMapperTest {
         assertEquals(Long.valueOf(0L), config.getDeletedSeq());
         assertEquals("", config.getResultFlag());
         assertEquals("", config.getSuccessValue());
-        assertEquals("", config.getStrategyName());
+        assertEquals("", config.getPreStrategyName());
+        assertEquals("", config.getPostStrategyName());
         assertEquals("", config.getRemark());
         assertEquals("", config.getAddUserId());
         assertEquals("", config.getAddRequestId());

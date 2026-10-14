@@ -85,7 +85,7 @@ public class IfmapMetaAdminController {
         return actions.keys();
     }
 
-    /** 已注册策略与回调（{@code strategy_name} / 分支判定 key / 全量参数 key）。 */
+    /** 已注册策略与回调（{@code pre_strategy_name} / {@code post_strategy_name} / 分支判定 key / 全量参数 key）。 */
     @GetMapping("/strategies")
     public Map<String, Object> strategies() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();

@@ -282,7 +282,8 @@
     { name: 'interfaceOrder', label: '执行顺序', type: 'number' },
     { name: 'resultFlag', label: '结果标识字段' },
     { name: 'successValue', label: '成功值' },
-    { name: 'strategyName', label: '策略名', dict: 'strategyName' },
+    { name: 'preStrategyName', label: '前序策略', dict: 'strategyName' },
+    { name: 'postStrategyName', label: '后序策略', dict: 'strategyName' },
     { name: 'status', label: '状态', type: 'number', dict: 'status' },
     { name: 'remark', label: '备注' },
     { name: 'requestParamTemplate', label: '请求参数模板', type: 'textarea' },
@@ -337,14 +338,15 @@
         '<td>' + esc(config.busiNode) + '</td>' +
         '<td>' + esc(config.partnerCode) + '</td>' +
         '<td>' + esc(config.interfaceOrder) + '</td>' +
-        '<td>' + esc(config.strategyName) + '</td>' +
+        '<td>' + esc(config.preStrategyName) + '</td>' +
+        '<td>' + esc(config.postStrategyName) + '</td>' +
         '<td>' + statusLabel(config.status) + '</td>' +
         '<td>' + esc(config.version) + '</td>' +
         '<td><button type="button" class="mini danger" data-act="delete" data-keyid="' + esc(config.keyId) +
         '">删除</button></td></tr>';
     });
     setHtml('config-list', table(
-      ['keyId', '租户', '接口编号', '业务节点', '银行', '顺序', '策略', '状态', '版本', ''],
+      ['keyId', '租户', '接口编号', '业务节点', '银行', '顺序', '前序策略', '后序策略', '状态', '版本', ''],
       rows));
   }
 

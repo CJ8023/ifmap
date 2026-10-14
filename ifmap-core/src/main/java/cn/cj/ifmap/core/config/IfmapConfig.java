@@ -75,8 +75,10 @@ public class IfmapConfig implements Serializable {
     private String resultFlag;
     /** 成功判断值，多值以 {@code |} 分隔（大小写不敏感）。 */
     private String successValue;
-    /** 特殊处理策略标识（= Spring bean 名）。 */
-    private String strategyName;
+    /** 前序策略标识（= Spring bean 名）：渲染请求后、出网前执行。 */
+    private String preStrategyName;
+    /** 后序策略标识（= Spring bean 名）：回参产物之后、成功判定之前执行。 */
+    private String postStrategyName;
     /** 状态：1 启用 / 0 停用。 */
     private Integer status;
     /** 乐观锁版本。 */
@@ -242,12 +244,20 @@ public class IfmapConfig implements Serializable {
         this.successValue = successValue;
     }
 
-    public String getStrategyName() {
-        return strategyName;
+    public String getPreStrategyName() {
+        return preStrategyName;
     }
 
-    public void setStrategyName(String strategyName) {
-        this.strategyName = strategyName;
+    public void setPreStrategyName(String preStrategyName) {
+        this.preStrategyName = preStrategyName;
+    }
+
+    public String getPostStrategyName() {
+        return postStrategyName;
+    }
+
+    public void setPostStrategyName(String postStrategyName) {
+        this.postStrategyName = postStrategyName;
     }
 
     public Integer getStatus() {

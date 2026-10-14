@@ -20,7 +20,7 @@ import cn.cj.ifmap.core.exception.IfmapConfigException;
 /**
  * JDBC 取值归一化工具。
  *
- * <p><b>为什么需要它</b>：表里 {@code result_flag}/{@code success_value}/{@code strategy_name}/{@code remark}
+ * <p><b>为什么需要它</b>：表里 {@code result_flag}/{@code success_value}/{@code pre_strategy_name}/{@code post_strategy_name}/{@code remark}
  * 等列都是 {@code NOT NULL DEFAULT ''}，而 SQL 默认值**只在 INSERT 省略该列时**生效。若语句显式列出该列
  * 却绑定 {@code null}，MySQL（默认 {@code STRICT_TRANS_TABLES}）会直接报
  * {@code Column 'xxx' cannot be null}，H2 报 {@code NULL not allowed for column}。

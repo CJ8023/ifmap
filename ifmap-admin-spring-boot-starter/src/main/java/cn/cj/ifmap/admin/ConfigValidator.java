@@ -40,7 +40,7 @@ import java.util.Set;
  * <ol>
  *   <li><b>模板契约</b>：模板必须是合法 JSON；{@code @FUN} 规则必须已注册且参数可匹配重载
  *       （复用引擎的 {@link ContractValidator}，与启动期自检同一套逻辑）；</li>
- *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；{@code strategy_name} 必须在已注册的
+ *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；{@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的
  *       特殊处理策略里；{@code front_interface_no} 必须存在且不成环；</li>
  *   <li><b>结构约束</b>：{@code (tenant_id, interface_no, busi_node, interface_order)} 不能重复；
  *       分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、{@code method_flag} 必须是已注册动作。</li>
@@ -262,16 +262,21 @@ public class ConfigValidator {
     }
 
     private void checkStrategyName(IfmapConfig config, ValidationResult result) {
-        String strategyName = config.getStrategyName();
+        checkStrategy("pre_strategy_name", config.getPreStrategyName(), result);
+        checkStrategy("post_strategy_name", config.getPostStrategyName(), result);
+    }
+
+    /** 前序 / 后序策略共用同一注册表，只有列名不同。 */
+    private void checkStrategy(String column, String strategyName, ValidationResult result) {
         if (isBlank(strategyName) || specialDeals == null) {
             return;
         }
         if (specialDeals.size() == 0) {
-            result.warning("尚未注册任何特殊处理策略（SpecialDealStrategy），strategy_name 无法校验");
+            result.warning("尚未注册任何特殊处理策略（SpecialDealStrategy），" + column + " 无法校验");
             return;
         }
         if (!specialDeals.contains(strategyName)) {
-            result.error("strategy_name 未注册：" + strategyName + "（已注册：" + specialDeals.keys() + "）");
+            result.error(column + " 未注册：" + strategyName + "（已注册：" + specialDeals.keys() + "）");
         }
     }
 

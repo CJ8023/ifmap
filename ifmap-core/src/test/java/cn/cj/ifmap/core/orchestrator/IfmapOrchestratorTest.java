@@ -227,7 +227,7 @@ class IfmapOrchestratorTest {
     @Test
     void specialDealStrategyAddsParamAndRequestIsRenderedAgain() {
         IfmapConfig config = TestConfigs.config("IF_B", "GP81", 1, 1L);
-        config.setStrategyName("extraParamStrategy");
+        config.setPreStrategyName("extraParamStrategy");
         config.setRequestParamTemplate("{\"extra\":\"$.extra\"}");
         config.setResultFlag(null);
         repository.add(config);
@@ -243,7 +243,7 @@ class IfmapOrchestratorTest {
     @Test
     void missingSpecialDealStrategyFailsLoudly() {
         IfmapConfig config = TestConfigs.config("IF_C", "GP81", 1, 1L);
-        config.setStrategyName("notRegistered");
+        config.setPreStrategyName("notRegistered");
         repository.add(config);
 
         IfmapOrchestrator orchestrator = orchestrator(new CapturingGateway("{}"), new ActionRegistry());
@@ -255,7 +255,7 @@ class IfmapOrchestratorTest {
     @Test
     void missingStrategyCanBeTolerated() {
         IfmapConfig config = TestConfigs.config("IF_C2", "GP81", 1, 1L);
-        config.setStrategyName("notRegistered");
+        config.setPreStrategyName("notRegistered");
         config.setRequestParamTemplate("{\"a\":\"$.a\"}");
         config.setResultFlag(null);
         repository.add(config);

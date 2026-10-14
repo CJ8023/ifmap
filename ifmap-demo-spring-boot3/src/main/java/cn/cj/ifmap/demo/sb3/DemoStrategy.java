@@ -31,7 +31,7 @@ import java.util.Map;
  *
  * <ul>
  *   <li>{@link SpecialDealStrategy}：按 <b>bean 名</b> 注册 —— 类名 {@code DemoStrategy} 的
- *       bean 名是 {@code demoStrategy}，配置里 {@code strategy_name} 直接写它</li>
+ *       bean 名是 {@code demoStrategy}，配置里 {@code pre_strategy_name} 直接写它</li>
  *   <li>{@link FullParamStrategy}：按 {@link FullParam} 的 (partnerCode, busiNode) 注册</li>
  *   <li>{@link IfmapActionHandler}：见 {@code DemoSubmitAction}（按 {@code @IfmapAction} 的值注册，
  *       对应 {@code ifmap_logic_branch_config.method_flag}）</li>

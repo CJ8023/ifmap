@@ -87,7 +87,8 @@ public class ConfigSnapshotMapper {
         config.setResponseParamTemplate(asString(map.get("responseParamTemplate")));
         config.setResultFlag(asString(map.get("resultFlag")));
         config.setSuccessValue(asString(map.get("successValue")));
-        config.setStrategyName(asString(map.get("strategyName")));
+        config.setPreStrategyName(asString(map.get("preStrategyName")));
+        config.setPostStrategyName(asString(map.get("postStrategyName")));
         config.setStatus(asInt(map.get("status")));
         config.setRemark(asString(map.get("remark")));
         return config;
@@ -136,7 +137,8 @@ public class ConfigSnapshotMapper {
         map.put("responseParamTemplate", config.getResponseParamTemplate());
         map.put("resultFlag", config.getResultFlag());
         map.put("successValue", config.getSuccessValue());
-        map.put("strategyName", config.getStrategyName());
+        map.put("preStrategyName", config.getPreStrategyName());
+        map.put("postStrategyName", config.getPostStrategyName());
         map.put("status", config.getStatus());
         map.put("remark", config.getRemark());
         return map;

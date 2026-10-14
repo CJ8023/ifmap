@@ -182,7 +182,8 @@ class JdbcConfigRepositoryTest {
         IfmapConfig c = config("IF_G2", "GP81", 1, 1501L);
         c.setResultFlag(null);
         c.setSuccessValue(null);
-        c.setStrategyName(null);
+        c.setPreStrategyName(null);
+        c.setPostStrategyName(null);
         c.setRemark(null);
         c.setAddUserId(null);
         c.setAddRequestId(null);
@@ -191,7 +192,8 @@ class JdbcConfigRepositoryTest {
         IfmapConfig saved = writer.findByKeyId(id).orElseThrow(IllegalStateException::new);
         assertEquals("", saved.getResultFlag());
         assertEquals("", saved.getSuccessValue());
-        assertEquals("", saved.getStrategyName());
+        assertEquals("", saved.getPreStrategyName());
+        assertEquals("", saved.getPostStrategyName());
         assertEquals("", saved.getRemark());
         assertEquals("", saved.getAddUserId());
         assertEquals("", saved.getAddRequestId());

@@ -89,9 +89,10 @@ public class JdbcConfigWriter {
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
                 + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
-                + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,`strategy_name`,"
-                + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,`add_user_id`,`add_request_id`)"
-                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
+                + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,"
+                + "`pre_strategy_name`,`post_strategy_name`,`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
+                + "`add_user_id`,`add_request_id`)"
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
         try {
             jdbc.update(sql, id,
                     JdbcValues.orDefault(config.getTenantId(), -1L),
@@ -101,7 +102,7 @@ public class JdbcConfigWriter {
                     JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
-                    JdbcValues.orEmpty(config.getStrategyName()),
+                    JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
                     JdbcValues.orDefault(config.getStatus(), 1), JdbcValues.orEmpty(config.getRemark()),
                     JdbcValues.orEmpty(config.getAddUserId()), JdbcValues.orEmpty(config.getAddRequestId()));
         } catch (DuplicateKeyException e) {
@@ -172,7 +173,8 @@ public class JdbcConfigWriter {
                 + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
                 + " `front_interface_no` = ?, `interface_order` = ?,"
                 + " `request_param_template` = ?, `response_param_template` = ?,"
-                + " `result_flag` = ?, `success_value` = ?, `strategy_name` = ?,"
+                + " `result_flag` = ?, `success_value` = ?,"
+                + " `pre_strategy_name` = ?, `post_strategy_name` = ?,"
                 + " `status` = ?, `remark` = ?,"
                 + " `version` = `version` + 1, `modify_user_id` = ?, `modify_time` = CURRENT_TIMESTAMP(3),"
                 + " `modify_request_id` = ?"
@@ -185,7 +187,7 @@ public class JdbcConfigWriter {
                     JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
-                    JdbcValues.orEmpty(config.getStrategyName()),
+                    JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
                     JdbcValues.orDefault(config.getStatus(), 1), JdbcValues.orEmpty(config.getRemark()),
                     JdbcValues.orEmpty(operatorId), JdbcValues.orEmpty(requestId),
                     config.getKeyId(), expectedVersion);

@@ -38,7 +38,7 @@ import java.util.List;
  *   default-tenant-id: '-1'       # 取不到租户时的默认值
  *   orchestrator:
  *     stop-on-failure: true       # 前置接口链中失败即停止
- *     fail-on-missing-strategy: true   # strategy_name 未注册时抛异常（不再静默跳过）
+ *     fail-on-missing-strategy: true   # 前/后序策略未注册时抛异常（不再静默跳过）
  *   log:
  *     truncate-threshold: 65536   # 超过则截断并追加 ...truncated
  *     mask-fields: [acctName]     # 按字段名脱敏（留空用内置默认）
@@ -239,7 +239,7 @@ public class IfmapProperties {
         /** 前置接口链中某接口失败后是否立即停止（false 则继续跑完并合并成功字段）。 */
         private boolean stopOnFailure = true;
 
-        /** {@code strategy_name} 对应的策略 bean 未注册时是否抛异常（true 表示不再静默跳过，P0-7）。 */
+        /** {@code pre_strategy_name} / {@code post_strategy_name} 对应的策略 bean 未注册时是否抛异常（true 表示不再静默跳过，P0-7）。 */
         private boolean failOnMissingStrategy = true;
 
         /** 逻辑分支动作未注册时是否抛异常。 */

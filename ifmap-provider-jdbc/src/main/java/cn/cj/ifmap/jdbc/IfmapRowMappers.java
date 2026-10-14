@@ -40,7 +40,8 @@ public final class IfmapRowMappers {
     static final String CONFIG_COLUMNS =
             "`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
             + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`front_interface_no`,`interface_order`,"
-            + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,`strategy_name`,"
+            + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,"
+            + "`pre_strategy_name`,`post_strategy_name`,"
             + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
             + "`add_user_id`,`add_time`,`add_request_id`,`modify_user_id`,`modify_time`,`modify_request_id`";
 
@@ -79,7 +80,8 @@ public final class IfmapRowMappers {
                 c.setResponseParamTemplate(rs.getString("response_param_template"));
                 c.setResultFlag(rs.getString("result_flag"));
                 c.setSuccessValue(rs.getString("success_value"));
-                c.setStrategyName(rs.getString("strategy_name"));
+                c.setPreStrategyName(rs.getString("pre_strategy_name"));
+                c.setPostStrategyName(rs.getString("post_strategy_name"));
                 c.setStatus(rs.getInt("status"));
                 c.setVersion(rs.getInt("version"));
                 c.setRemark(rs.getString("remark"));

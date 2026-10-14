@@ -123,7 +123,7 @@ public class DemoRunner implements ApplicationRunner {
         config.setResultFlag("$.resultCode");
         config.setSuccessValue("0000");
         // 按 bean 名指定特殊处理策略（DemoStrategy 的 bean 名 = demoStrategy）
-        config.setStrategyName("demoStrategy");
+        config.setPreStrategyName("demoStrategy");
         config.setStatus(Integer.valueOf(1));
         long keyId = writer.insert(config);
         log.info("已写入演示配置 keyId={}", keyId);

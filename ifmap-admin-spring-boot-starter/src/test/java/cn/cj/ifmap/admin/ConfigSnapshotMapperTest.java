@@ -43,7 +43,8 @@ class ConfigSnapshotMapperTest {
     void snapshotRoundTripKeepsBusinessFields() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 2);
         config.setKeyId(1001L);
-        config.setStrategyName("demoStrategy");
+        config.setPreStrategyName("demoStrategy");
+        config.setPostStrategyName("auditStrategy");
         config.setFrontInterfaceNo("IF_B");
 
         String snapshot = mapper.toSnapshot(config);
@@ -61,7 +62,8 @@ class ConfigSnapshotMapperTest {
         assertEquals(config.getResponseParamTemplate(), restored.getResponseParamTemplate());
         assertEquals("$.resultCode", restored.getResultFlag());
         assertEquals("0000", restored.getSuccessValue());
-        assertEquals("demoStrategy", restored.getStrategyName());
+        assertEquals("demoStrategy", restored.getPreStrategyName());
+        assertEquals("auditStrategy", restored.getPostStrategyName());
         assertEquals("IF_B", restored.getFrontInterfaceNo());
         assertEquals(1, ((Number) restored.getStatus()).intValue());
     }

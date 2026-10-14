@@ -143,6 +143,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 ### 3.1 全部可覆盖
 
 starter 里**每一个 bean 都带 `@ConditionalOnMissingBean`**：宿主声明同类型 bean 即完全接管。
+**全部扩展点清单 + 每种扩展点「不提供时的行为」，见 [`docs/06`](06-执行编排与策略扩展.md) §11。**
 
 ```java
 @Configuration

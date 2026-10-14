@@ -4,6 +4,57 @@
 
 ## [Unreleased]
 
+### Changed（编排定序、跨步骤共享池与前后序策略 —— 破坏性）
+- **`ifmap_config` 删 1 列 / 拆 1 列**：删 `front_interface_no`（连带索引 `idx_config_front`）—— 它和
+  `interface_order` 表达的是同一件事（步骤先后），两套机制并存让「谁是前序」有了两个答案；
+  `strategy_name` 拆成 **`pre_strategy_name`**（出网前）与 **`post_strategy_name`**（回参产物之后、判定之前）。
+  `IfmapConfig` 字段与访问器、`IfmapRowMappers`、`JdbcConfigWriter` 的 INSERT/UPDATE、admin 内嵌页表单与表格同步。
+- **不走兼容别名**：`JsonConfigMapper` 的远端键随之改为 `preStrategyName` / `postStrategyName`（键名先归一化，
+  `pre_strategy_name` / `preStrategyName` 等价），不再识别旧键 `strategyName`。
+- **唯一键由一把拆成两把**：`uk_config_biz (tenant_id, interface_no, deleted_seq)`（接口号**租户内**唯一）+
+  `uk_config_order (tenant_id, busi_node, interface_order, deleted_seq)`（顺序**节点内**唯一）。
+  接口号是 `queryLogicBranches(tenantId, interfaceNo)` 的键（只有租户 + 接口号，没有 `busi_node`），
+  所以「同号跨节点」不再合法。
+- **`ConfigRepository` SPI 破坏性变更**：新增 `queryConfigsByBusiNode(tenantId, busiNode)`
+  （返回该节点内按 `interface_order` 升序、同值 `key_id` 兜底，且只含启用且未删除的行）；
+  `queryConfigs` / `findConfig` / `queryLogicBranches` 签名不变。三个实现（JDBC / 远端 / 缓存装饰器）
+  与 testkit 的内存实现同步；`JdbcConfigRepository` 里原先那段**从未被调用的**管理端变体被这个 `@Override` 取代。
+- **编排器语义变化**：第二个参数 `interfaceNo` 从「要查哪个接口的前置链」变为「**从哪一步开始跑**」——
+  取该 `busi_node` 的整张有序计划后**截断到起点**；传 `null` / `""` = 从第一步跑全节点；
+  起点不在计划内（停用 / 已删除 / 编号打错）抛 `IfmapConfigException`，不静默退化成"什么都没跑"。
+  随之删除：`InterfaceOrdering` 的 `plan` / `topological` / `visit` / `cycle` / `byInterface`（只剩
+  `enabled` + `sort`）、`MAX_FRONT_DEPTH`、`ConfigValidator.checkFrontChain`。
+- **`ConfigValidator` 校验清单调整**：删「前置链自指 / 成环」；`strategy_name` 一项拆成前 / 后两列；
+  新增 **池引用校验（T2）**：请求模板里的 `$.pool.<接口号>` 必须是本节点内 `interface_order` **更小**的步骤
+  （自引用 / 同序 / 后续步骤 / 拼错的接口号一律 `error`；响应模板不判 —— 它的根是对方原始回参，
+  里面可能真有个叫 `pool` 的业务字段；任一侧 `interface_order` 为空则跳过，宁可漏报不误报）；
+  唯一键校验改为两个维度。管理端新增 / 修改 / 回滚 / `POST /configs/validate` 走同一套。
+- **迁移 kit 与文档口径同步（D16）**：`00-precheck.sql` 唯一键体检拆成 6.1（接口号）/ 6.2（顺序）两个维度、
+  3.1 列清单删 `front_interface_no` 补两列新列、8.1/8.2 列清单同步；`01-add-columns.sql` 新增 **1.0 段**
+  （`ADD COLUMN` 两列新列，必须排在 `1)` 之前 —— `1)` 里 `status` 的 `AFTER` 锚点就是 `post_strategy_name`；
+  **旧 `strategy_name` 的值不搬**，由人工决定该策略属于前序还是后序）；`03-modify-and-index.sql` 不再
+  `MODIFY front_interface_no`、`strategy_name` 拆两条、索引改为两把唯一键并删 `idx_ifmap_config_front`；
+  `05-verify.sql` 列清单与重复检查同步；kit `README.md` §1/§9.4 与
+  [`docs/04`](docs/04-接入与建表.md) / [`docs/05`](docs/05-SpringBoot集成.md) /
+  [`docs/06`](docs/06-执行编排与策略扩展.md) / [`docs/07`](docs/07-管理端REST.md) /
+  [`docs/10`](docs/10-迁移指南.md) / [`docs/11`](docs/11-远端配置源.md) / `README.md` 同步。
+
+### Added（编排定序、跨步骤共享池与前后序策略）
+- **跨步骤共享池**：编排器在 `runPlan` 生命周期内持有一个 `LinkedHashMap` 池，键 = 步骤的 `interface_no`、
+  值 = 该步骤响应模板渲染出的 Map；每步组包时把池**展平**注入渲染参数（模板里写 `$.pool.IF_AUTH.token` 即可取值）；
+  **只有判定成功的步骤入池** ⇒「池里的键集合」=「本轮已成功的步骤集合」= **断点续跑的进度标记**。
+  宿主可用 `payload.pool` 预置初始池（引擎只**读**、不写回 `payload`）；回程 `IfmapResult.data` = 展平池 +
+  `pool` 键（既有调用方读扁平键不受影响）。`IfmapResult.getExecutedInterfaces()` 语义不变（实际发起过调用的接口）。
+- **`SpecialDealStrategy` 相位**：新增 `StrategyContext.Phase.PRE` / `POST` 与 `getPhase()` / `setPhase()`；
+  引擎在出网前调 `pre_strategy_name`、响应渲染后调 `post_strategy_name`；后序策略改的是**产物**
+  （`setResponseData`），判定仍读原始回参 —— 后序改不动成败。两列写同一个 bean 名合法，按相位区分。
+- **测试**：core 新增 `IfmapOrchestratorTest` 8 个（前 / 后序相位可见、后序不翻转判定且失败步骤不入池、
+  池把前面步骤的产物带给后面步骤、失败步骤不进展平数据、`payload.pool` 预置且不写回、起点截断跳过前面步骤、
+  起点不在计划内抛异常、`null` 起点跑全节点）+ `InterfaceOrderingTest` 重写为 5 个（order 排序 / `null` 排最后 /
+  启用过滤 / `null` 状态与删除标记 / 空输入）；admin 新增 `ConfigValidatorTest` 5 个（引用更早步骤放行、
+  引用后续步骤拒绝、自引用拒绝、未知接口号拒绝、诚实边界：非 `$.pool` 前缀与响应模板不误报）；
+  provider-jdbc 新增/改写 4 个（按节点查询只返回该节点、接口号租户内唯一、顺序节点内唯一、软删后可复用同一顺序）。
+
 ### Removed
 - **移除影子运行框架（`cn.cj.ifmap.core.shadow`，12 个类 / 1247 行 + 27 个单测）**：该框架只为存量迁移的
   「M3 影子运行」阶段而写 —— 同一笔业务双跑新旧链路，主链路结果原样返回、差异只记录不影响主链路
@@ -36,7 +87,7 @@
 ### Fixed（审查 P1-3②：策略注册表）
 - **`SpecialDealStrategyRegistry.aliasHits` 的慢泄漏**：该字段记录"哪些配置用了宽松 key"，是普通
   `ArrayList`，而 `lookup()` 命中宽松 key 时**无条件 `add`、不去重、无上界** —— 它在
-  `IfmapOrchestrator.applySpecialDeal()` 里**每笔请求**都会被调用，所以只要某个接口的 `strategy_name`
+  `IfmapOrchestrator.applySpecialDeal()` / `applyPostDeal()` 里**每笔请求**都会被调用，所以只要某个接口的 `pre_strategy_name` / `post_strategy_name`
   一直用宽松写法，每笔请求就会多留一个字符串，内存随流量线性增长（同类字段 `conflicts` 只在注册期
   写入，不受影响）。改为 `LinkedHashSet`：记录值只可能取自 `aliases` 的 key，去重后**天然以
   「已注册别名数」为上界**，不随请求量增长；`getAliasHits()` 的签名与返回形态不变，测试无需改动。
@@ -214,7 +265,7 @@
   - 新模块 `ifmap-admin-spring-boot-starter`：把"改资方接口配置"从**改库 + 发版**变成**页面点点 + 留痕 + 可回滚**（设计 §8）。**默认关闭**（`ifmap.admin.enabled=true` 才装配）+ 三重门控（Web + `JdbcTemplate` + `DataSource`）；**不内置鉴权**，需宿主自行把前缀挂到网关/`SecurityFilterChain`
   - 配置端点：分页列表 / 详情 / 新增 / 修改（乐观锁）/ 逻辑删除 / 启停 / **保存前校验**（`POST /configs/validate`，不过则 422 + `errors`/`warnings` 明细）/ **试跑**（`POST /configs/dry-run`，与线上同一条链路，只把出网换成假应答）/ 变更历史 / **一键回滚**
   - 逻辑分支端点：`GET/POST/PUT/DELETE /branches`；元数据端点：`/rules`（`@FUN` 可用清单）、`/actions`、`/strategies`、`/audit`（全量巡检，可返回 Markdown 报告）
-  - `ConfigValidator`：11 项保存前校验（必填列 / 模板 JSON 合法 / `$.path` 合法 / `@FUN` 规则与重载可匹配 / `strategy_name` 已注册 / 前置链成环 / 唯一键冲突 / 分支默认兜底 ≤ 1、顺序唯一、动作已注册）
+  - `ConfigValidator`：保存前校验（必填列 / 模板 JSON 合法 / `$.path` 合法 / `@FUN` 规则与重载可匹配 / `pre_/post_strategy_name` 已注册 / **池引用只能指向本节点更早的步骤** / 唯一键冲突（接口号 + 顺序两个维度）/ 分支默认兜底 ≤ 1、顺序唯一、动作已注册）；其中「前置链成环」一项已随 `front_interface_no` 删除，见「Changed（编排定序、跨步骤共享池与前后序策略）」
   - `ConfigSnapshotMapper`：历史快照用**显式业务列 → 有序 Map → `JsonOps.toJson`**（不用 Bean 反射序列化：少 JSR-310 模块依赖、不写进 `version`/审计列、字段增删不静默丢字段），并给出字段级 diff
   - `ConfigAuditor`：运行期全量巡检（跨租户），`audit-max-configs` 上限 + `truncated` 标记"报告不完整"
   - `ConfigAdminService`：每次写操作 = 校验 → 落库（乐观锁）→ **回读** → 写历史 → **失效缓存**；回滚 = 读快照 → **先校验** → 走乐观锁写回 → 再记一条 `UPDATE` 历史
@@ -255,9 +306,9 @@
 
 ### Added
 - **W4 执行编排与策略 SPI**（本版本）：
-  - `ifmap-core`：**编排器 `IfmapOrchestrator`** —— 租户解析 → 配置加载（**递归前置接口** `front_interface_no`，深度护栏 64 + 环检测）→ 拓扑排序（`interface_order`）→ 组包 → 渲染 → 特殊处理 → 出网 → 判定 → 分支动作 → 落执行日志；`stopOnFailure` 控制失败即停；第四参数 `mockResponse` 支持 **dry-run 试跑（不出网）**
+  - `ifmap-core`：**编排器 `IfmapOrchestrator`** —— 租户解析 → 取该业务节点内的有序步骤（`interface_order`）并从起点 `interfaceNo` 截断 → 组包（含跨步骤共享池）→ 渲染 → **前序**策略 → 出网 → 响应渲染 → **后序**策略 → 判定 → 入池 → 分支动作 → 落执行日志；`stopOnFailure` 控制失败即停；第四参数 `mockResponse` 支持 **dry-run 试跑（不出网）**（定序与共享池的最终形态见「Changed（编排定序、跨步骤共享池与前后序策略）」）
   - `ifmap-core`：公开模型 `IfmapRequest`（不可变 + Builder，租户/业务号/操作人/请求头/attributes）与 `IfmapResult`（`executedInterfaces` / `matchedBranch` / `elapsedMs`），`PartnerCall`
-  - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `strategy_name`）、`FullParamStrategy`（`partner|busi` 查找顺序：精确 → `partner|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
+  - `ifmap-core`：**策略 SPI** —— `SpecialDealStrategy`（按 bean 名，对应 `pre_strategy_name` / `post_strategy_name`）、`FullParamStrategy`（`partner|busi` 查找顺序：精确 → `partner|*` → `*|busi` → `*|*`）、`LogicBranchStrategy`（`match(context)`）、`IfmapActionHandler`（`@IfmapAction`，替代 `method_flag` 反射调用）、`IfmapCallbackHandler`（`@IfmapCallback`，替代 17 个回调方法）
   - `ifmap-core`：注解 `@IfmapAction` / `@FullParam` / `@LogicBranch` / `@IfmapCallback` + `CallbackRegistry` / `ActionRegistry` / 三个策略注册表（含冲突与别名诊断）
   - `ifmap-core`：SPI `TenantResolver`（`HeaderTenantResolver`：上下文 > 请求头 > 默认 `-1`）/ `ClockProvider` / `LogMasker` / `ExecutionLogSink` / `PartnerServiceGateway`
   - `ifmap-core`：**合规脱敏** `DefaultLogMasker`（手机 / 证件 / 卡号按值形态保留 6+4 或 3+4、姓名字段按字段名、`excludeFields` 整体 `***`、幂等、非 JSON 安全）+ `Logs.truncate`（超出阈值尾部打标 `...truncated`）
@@ -275,7 +326,7 @@
 ### Fixed（W4）
 - `DefaultLogMasker` 的默认字段集误含 `mobile` / `phone` / `telephone`，会把手机号按姓名规则脱敏成 `1**********` → 默认只保留姓名类字段，手机/证件/卡号统一走值形态识别
 - `DefaultLogMasker(maskFields, excludeFields)` 传空集合时会**把默认脱敏整体关掉**（原始姓名落库）→ 空/null 一律回退内置默认（要关闭请自定义 `LogMasker` bean）
-- 编排器原先**不递归加载** `front_interface_no` 前置链（仓储按单一 `interface_no` 查询，前置接口是另一个接口号）→ 改为广度递归收集 + 深度护栏
+- 编排器原先**不递归加载** `front_interface_no` 前置链（仓储按单一 `interface_no` 查询，前置接口是另一个接口号）→ 当时改为广度递归收集 + 深度护栏（`MAX_FRONT_DEPTH = 64`）；**该机制随后被整体删除** —— 「谁是前序」改由 `interface_order` 单一定序表达，见「Changed（编排定序、跨步骤共享池与前后序策略）」
 - 策略注册表用 `getClass().getAnnotation(...)` 查注解，**Spring CGLIB 代理类取不到类注解** → 统一改为 `Annotations.find`（父类链 + 接口链）
 - `ContractValidator` 漏检「模板不是合法 JSON」→ 补检并报「模板非法：不是合法 JSON 文本」
 

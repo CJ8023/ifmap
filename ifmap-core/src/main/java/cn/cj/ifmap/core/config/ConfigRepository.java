@@ -48,7 +48,8 @@ public interface ConfigRepository {
      * {@code interfaceNo} 只是这条流水线上的<b>起点</b>（见 {@code IfmapOrchestrator.loadPlan}）。</p>
      *
      * <p><b>必须只返回未删除（{@code del_status = 0}）且未停用（{@code status = 1}）的行</b>，
-     * 且<b>必须已排好序</b> —— 引擎只在本地再兜底排一次，顺序错了不会被拓扑纠正。</p>
+     * 且<b>必须已排好序</b> —— 引擎只在本地再兜底排一次（{@code InterfaceOrdering.sort}），
+     * 没有别的机制会替你纠正顺序。</p>
      *
      * <p>{@code busiNode} 为空时返回空列表（而不是全表）。</p>
      */

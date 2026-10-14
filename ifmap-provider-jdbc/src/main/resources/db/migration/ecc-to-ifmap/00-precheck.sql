@@ -72,8 +72,8 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE,
 --        而真实存量环境未必有 —— 本步一跑就知道差哪几列，不必等到 03 才 1054。）
 --
 --      处置规则：
---        · 缺的是「目标 DDL 有、存量没有」的列（如 `financing_mode`）→ 它是**新增列**，
---          01-add-columns.sql 里已备好对应的 ADD COLUMN（注释里标 ★）；
+--        · 缺的是「目标 DDL 有、存量没有」的列（如 `financing_mode`、`pre_strategy_name` +
+--          `post_strategy_name`）→ 它是**新增列**，01-add-columns.sql 里已备好对应的 ADD COLUMN（注释里标 ★）；
 --        · 缺的是「kit 引用、但目标 DDL 也没有」的列 → 把 03 里对应的 MODIFY 行删掉即可。
 --      本步输出的是**待办清单，不是门禁**（各环境存量结构不同，README §9.4 有实测对照）。
 -- ---------------------------------------------------------------------------
@@ -88,13 +88,13 @@ SELECT r.tbl AS table_name, r.col AS missing_column
          UNION ALL SELECT 'bankint_config', 'bank_code'
          UNION ALL SELECT 'bankint_config', 'bank_name'
          UNION ALL SELECT 'bankint_config', 'financing_mode'
-         UNION ALL SELECT 'bankint_config', 'front_interface_no'
          UNION ALL SELECT 'bankint_config', 'interface_order'
          UNION ALL SELECT 'bankint_config', 'request_param_template'
          UNION ALL SELECT 'bankint_config', 'response_param_template'
          UNION ALL SELECT 'bankint_config', 'result_flag'
          UNION ALL SELECT 'bankint_config', 'success_value'
-         UNION ALL SELECT 'bankint_config', 'strategy_name'
+         UNION ALL SELECT 'bankint_config', 'pre_strategy_name'
+         UNION ALL SELECT 'bankint_config', 'post_strategy_name'
          UNION ALL SELECT 'bankint_config', 'remark'
          UNION ALL SELECT 'bankint_config', 'del_status'
          UNION ALL SELECT 'bankint_config', 'add_user_id'
@@ -166,27 +166,42 @@ SELECT 'execution_log' AS tbl, COUNT(*) AS rows_cnt,
 -- ---------------------------------------------------------------------------
 -- 6) ★ P0 唯一键冲突预检（不通过就不要往下走，否则 03 加唯一键会直接 1062 失败）
 --
---    目标唯一键：
---      config       (tenant_id, interface_no, busi_node, interface_order, deleted_seq)
+--    目标唯一键（config 是**两把**，必须两个维度都查）：
+--      config       (tenant_id, interface_no, deleted_seq)                 ← 接口号：租户内全局唯一
+--      config       (tenant_id, busi_node, interface_order, deleted_seq)   ← 顺序：节点内唯一
 --      logic_branch (tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)
 --
+--    ⚠️ 维度一（接口号全局唯一）是本次新增的约束：以前 (tenant_id, interface_no, busi_node,
+--       interface_order) 才要求唯一，同一个 interface_no 挂到两个 busi_node 上是合法的；
+--       现在 interface_no 是租户级业务唯一键（queryLogicBranches 只有 tenantId + interfaceNo，
+--       没有 busi_node，必须自洽），存量里若真有「同号跨节点」就会在 03 撞 1062。
 --    ⚠️ interface_order 会从 char(2) 变成 smallint：'02' 与 '2' 迁移后**是同一个值**，
 --       所以这里必须按 CAST(... AS UNSIGNED) 分组，按字符串分组会漏掉这处冲突。
 --    ⚠️ deleted_seq 回填规则是「未删除=0，已删除=key_id」，所以只有"同一组里有 ≥2 条
 --       del_status=0"才会真的撞唯一键；已删除行各自唯一，不用处理。
 -- ---------------------------------------------------------------------------
 
--- 6.1 config：未删除行冲突（**期望 0 行**）
-SELECT tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED) AS order_num,
+-- 6.1 config 维度一：同租户同接口号有多条未删除行（**期望 0 行**）
+SELECT tenant_id, interface_no, COUNT(*) AS dup_cnt,
+       GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids,
+       GROUP_CONCAT(busi_node ORDER BY key_id) AS busi_nodes
+  FROM bankint_config
+ WHERE del_status = 0
+ GROUP BY tenant_id, interface_no
+HAVING COUNT(*) > 1;
+
+-- 6.2 config 维度二：同租户同节点同顺序有多条未删除行（**期望 0 行**）
+SELECT tenant_id, busi_node, CAST(interface_order AS UNSIGNED) AS order_num,
        COUNT(*) AS dup_cnt,
        GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids,
+       GROUP_CONCAT(interface_no ORDER BY key_id) AS interface_nos,
        GROUP_CONCAT(interface_order ORDER BY interface_order) AS raw_order_values
   FROM bankint_config
  WHERE del_status = 0
- GROUP BY tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED)
+ GROUP BY tenant_id, busi_node, CAST(interface_order AS UNSIGNED)
 HAVING COUNT(*) > 1;
 
--- 6.2 config：已删除行（理论上不挡唯一键，用于发现"删了又建"的历史；可仅记录）
+-- 6.3 config：已删除行（理论上不挡唯一键，用于发现"删了又建"的历史；可仅记录）
 SELECT tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED) AS order_num,
        COUNT(*) AS dup_cnt, GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids
   FROM bankint_config
@@ -194,7 +209,7 @@ SELECT tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED) AS 
  GROUP BY tenant_id, interface_no, busi_node, CAST(interface_order AS UNSIGNED)
 HAVING COUNT(*) > 1;
 
--- 6.3 logic_branch：未删除行冲突（**期望 0 行**）
+-- 6.4 logic_branch：未删除行冲突（**期望 0 行**）
 SELECT tenant_id, interface_no, COALESCE(method_flag, '<NULL>') AS method_flag,
        logic_branch_name, COUNT(*) AS dup_cnt,
        GROUP_CONCAT(key_id ORDER BY key_id) AS key_ids
@@ -205,10 +220,11 @@ HAVING COUNT(*) > 1;
 -- 注意 method_flag 为 NULL 的组：MySQL 唯一键不约束 NULL，理论上可放行；
 -- 但要确认这些接口的兜底分支不超过 1 条（见第 10.3 条）。
 
--- 6.4 处理建议（由人工决定，脚本不自动改数据）：
---     · 同组多条 → 改 interface_order（例如 10 / 20 / 30）分批拉开；
+-- 6.5 处理建议（由人工决定，脚本不自动改数据）：
+--     · 6.1（同号跨节点）→ 改 interface_no 或改 busi_node，让接口号在租户内唯一；
+--     · 6.2（同节点同顺序）→ 改 interface_order（例如 10 / 20 / 30）分批拉开；
 --     · 确认多余的配置无效 → del_status=1（同时把 deleted_seq 置为 key_id，见 02-backfill.sql）；
---     · 处理完重跑 6.1 / 6.3，直到返回 0 行。
+--     · 处理完重跑 6.1 / 6.2 / 6.4，直到返回 0 行。
 
 -- ---------------------------------------------------------------------------
 -- 7) interface_order 能否安全转 smallint（P0）
@@ -242,7 +258,7 @@ SET @s8a1 := (SELECT CONCAT('SELECT ',
                 FROM information_schema.COLUMNS
                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_config'
                  AND COLUMN_NAME IN ('interface_name','bank_name','bank_code','interface_code','project_code',
-                                     'front_interface_no','financing_mode','busi_node','strategy_name',
+                                     'financing_mode','busi_node','pre_strategy_name','post_strategy_name',
                                      'result_flag','success_value','remark'));
 SET @s8a1 := IFNULL(@s8a1, 'SELECT 1 AS config_variant_columns_absent');
 PREPARE q8a1 FROM @s8a1; EXECUTE q8a1; DEALLOCATE PREPARE q8a1;
@@ -281,7 +297,8 @@ SET @s8b1 := (SELECT CONCAT('SELECT ',
                 FROM information_schema.COLUMNS
                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_config'
                  AND COLUMN_NAME IN ('interface_name','interface_code','busi_node','bank_code','interface_order',
-                                     'result_flag','success_value','strategy_name','remark','add_user_id',
+                                     'result_flag','success_value','pre_strategy_name','post_strategy_name',
+                                     'remark','add_user_id',
                                      'modify_user_id','add_request_id','modify_request_id','add_time','modify_time'));
 SET @s8b1 := IFNULL(@s8b1, 'SELECT 1 AS config_variant_columns_absent');
 PREPARE q8b1 FROM @s8b1; EXECUTE q8b1; DEALLOCATE PREPARE q8b1;

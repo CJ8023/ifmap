@@ -11,6 +11,20 @@
 > **配套交付**：[`tools/audit_bankint_config.py`](./tools/audit_bankint_config.py)（配置静态审计，审计对象是 ECC 存量 `bankint_*` 表，故文件名保留旧前缀）、[`tools/gen_rule_inventory.py`](./tools/gen_rule_inventory.py)（内置规则清单生成器）
 > **规则审计**：[`ifmap-内置规则审计与优化_v1.md`](./ifmap-内置规则审计与优化_v1.md)（52 个内置规则的去留、core 精简至 18 个的方案）
 
+> ⚠️ **历史稿提示（2026-10 更新）**：本文是 v1 定稿的**设计存档**，落地过程中有过若干次破坏性重构。
+> 正文里凡涉及下面三处的描述，都以**现状文档为准**，本文只作设计沿革参考：
+>
+> 1. **`ifmap_config.front_interface_no` 已删除**（连同 `idx_ifmap_config_front`）：它与 `interface_order`
+>    表达的是同一件事，现由 `interface_order`（业务节点内的步骤序号）单一定序 + 起点截断 + **跨步骤共享池**
+>    表达；唯一键相应由一把五列拆成 `uk_ifmap_config_biz` + `uk_ifmap_config_order` 两把，
+>    `ConfigRepository` 增加 `queryConfigsByBusiNode(tenantId, busiNode)`。
+> 2. **`strategy_name` 已拆成 `pre_strategy_name` / `post_strategy_name`**：`SpecialDealStrategy` 分
+>    `PRE`（出网前）/ `POST`（回参产物之后、判定之前）两个相位。
+> 3. **`ConfigValidator` 的校验清单**已去掉「前置链成环」、新增「池引用只能指向本节点更早的步骤」。
+>
+> 现状口径见 [`CHANGELOG.md`](../CHANGELOG.md) 的「Changed（编排定序、跨步骤共享池与前后序策略）」与
+> [`docs/06-执行编排与策略扩展.md`](./06-执行编排与策略扩展.md)。
+
 ---
 
 ## 0. 阅读指引
@@ -132,7 +146,7 @@
 | 编号 | 表 | 现状 | 问题 | 处置 |
 |---|---|---|---|---|
 | **TS-17** | `ifmap_config` | `busi_node char(10)` | 实际取值如 `GP85`/`GP98`/`GP99`（`BankFileNodeEnum`），`char` 定长会补空格、比较易踩坑；且节点集合应由宿主机定义 | 改 `varchar(32)` + 枚举由宿主机注册（§6.6） |
-| **TS-18** | `ifmap_config` | `interface_no` / `interface_code` / `front_interface_no` 三个"编号"语义重叠 | 新人无法区分；`front_interface_no` 用 `varchar(255)` 存编号（过长） | 文档化三者语义（§6.6）；`front_interface_no` 改 64 |
+| **TS-18** | `ifmap_config` | `interface_no` / `interface_code` / `front_interface_no` 三个"编号"语义重叠 | 新人无法区分；`front_interface_no` 用 `varchar(255)` 存编号（过长） | 文档化三者语义（§6.6）；**`front_interface_no` 最终被整体删除**（改由 `interface_order` 单一定序 + 跨步骤共享池表达，见顶部「历史稿提示」） |
 | **TS-19** | 三张表 | `tenant_id bigint NOT NULL DEFAULT -1` | ECC 场景实为单租户（`-1`） | 保留（开源产品多租户是加分项），默认单租户，见 §7.3 |
 | **TS-20** | `ifmap_config` | `add_user_id bigint(19)` | 用户 ID 若不是数字（UUID/工号）则插不进去 | 改 `varchar(64)`（§6.2） |
 
@@ -326,7 +340,7 @@ public interface ConfigRepository {
 
 | SPI | ECC 现状 | 注册键 | 说明 |
 |---|---|---|---|
-| `SpecialDealStrategy` | 38 个 Impl，`strategy_name` = Spring bean 名 | **bean 名 / 类简单名 / 宽松小写名**（三 key，解决 P0-7） | 特殊处理（补参数、文件上传…） |
+| `SpecialDealStrategy` | 38 个 Impl，`strategy_name` = Spring bean 名（落地后**拆为 `pre_strategy_name` / `post_strategy_name` 两列**，分 `PRE` / `POST` 相位） | **bean 名 / 类简单名 / 宽松小写名**（三 key，解决 P0-7） | 特殊处理（补参数、文件上传…） |
 | `FullParamStrategy` | 20 个 Impl，`@FullParam(partnerCode, busiNode)` | 注解值 | 主参数组包（如 961 行的 `FinancingFullParamStrategyImpl`） |
 | `LogicBranchStrategy` | 12 个 Impl，`@LogicBranch` + 反射 `getDeclaredMethod` | 注解值 + **Action Key** | 分支动作（改走 ActionRegistry，不再反射方法名，见 TS-6） |
 | `IfmapCallbackHandler` | `IfmapConfigApplication` 17 个回调 | `interfaceNo` | 银行回调（上传通知、放款结果…） |
@@ -427,13 +441,13 @@ CREATE TABLE `ifmap_config` (
   `partner_code`                 varchar(32)  NOT NULL                     COMMENT '合作机构编码',
   `partner_name`                 varchar(128)          DEFAULT NULL        COMMENT '合作机构名称',
   `financing_mode`            varchar(32)           DEFAULT NULL        COMMENT '融资模式（见 §6.6）',
-  `front_interface_no`        varchar(64)           DEFAULT NULL        COMMENT '前置接口编号（空=无前置）',
-  `interface_order`           smallint     NOT NULL DEFAULT 0           COMMENT '【改】接口执行顺序，升序；同值按 key_id 兜底',
+  `interface_order`           smallint     NOT NULL DEFAULT 0           COMMENT '【改】本业务节点内的步骤序号，升序；同值按 key_id 兜底',
   `request_param_template`    text                                  COMMENT '请求参数模板（DSL）',
   `response_param_template`   longtext                              COMMENT '响应参数模板（DSL）',
   `result_flag`               varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】执行结果标志（JsonPath）',
   `success_value`             varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】成功判断值，多值以 , 或 ; 分隔（大小写不敏感）',
-  `strategy_name`             varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】特殊处理策略标识（=Spring bean 名）',
+  `pre_strategy_name`         varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】前序特殊处理策略标识（=Spring bean 名），出网前执行',
+  `post_strategy_name`        varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】后序特殊处理策略标识（=Spring bean 名），回参产物之后执行',
   `status`                    tinyint(1)   NOT NULL DEFAULT 1           COMMENT '【新】状态：1启用 0停用',
   `version`                   int          NOT NULL DEFAULT 0           COMMENT '【新】乐观锁版本',
   `remark`                    varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】备注',
@@ -446,9 +460,9 @@ CREATE TABLE `ifmap_config` (
   `modify_time`               datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '【改类型】更新时间（引擎统一维护）',
   `modify_request_id`         varchar(40)  NOT NULL DEFAULT ''         COMMENT '修改请求ID',
   PRIMARY KEY (`key_id`),
-  UNIQUE KEY `uk_ifmap_config_biz` (`tenant_id`,`interface_no`,`busi_node`,`interface_order`,`deleted_seq`),
+  UNIQUE KEY `uk_ifmap_config_biz`   (`tenant_id`,`interface_no`,`deleted_seq`),
+  UNIQUE KEY `uk_ifmap_config_order` (`tenant_id`,`busi_node`,`interface_order`,`deleted_seq`),
   KEY `idx_ifmap_config_list`  (`tenant_id`,`del_status`,`busi_node`,`partner_code`),
-  KEY `idx_ifmap_config_front` (`tenant_id`,`del_status`,`front_interface_no`),
   KEY `idx_ifmap_config_code`  (`tenant_id`,`del_status`,`interface_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC
   COMMENT='资方接口配置';
@@ -464,9 +478,9 @@ CREATE TABLE `ifmap_config` (
 | `version` | — | `int DEFAULT 0` | TS-10 |
 | `result_flag` | 255 | 512 | TS-7 |
 | `success_value` | 255 | 512 | TS-8（语义扩为多值，**列名不变**） |
-| `strategy_name` | 50 | 128 | 类名 `BCMPushFileUploadDealStrategyImpl` 已 34 字符，留余量 |
+| ~~`strategy_name`~~ → `pre_strategy_name` / `post_strategy_name` | 50 | 128 | 类名 `BCMPushFileUploadDealStrategyImpl` 已 34 字符，留余量；落地后一列拆两列（见顶部「历史稿提示」） |
 | `busi_node` | `char(10)` | `varchar(32)` | TS-17 |
-| `front_interface_no` | 255 | 64 | TS-18 |
+| ~~`front_interface_no`~~ | 255 | — | TS-18；落地后该列**被整体删除**，不再收窄 |
 | `interface_code` | 255 | 64 | TS-18（编码不会超 64；过长会挤压索引） |
 | `financing_mode` | 50 | 32 | 枚举值短 |
 | `remark` | 255 | 512 | 管理端需要写清变更原因 |
@@ -619,9 +633,9 @@ CREATE TABLE `ifmap_config_history` (
 
 | 字段 | 语义 | 示例 |
 |---|---|---|
-| `interface_no` | **引擎内部的接口业务编号**，同一 `busi_node` 下唯一标识一个接口，是配置查询的主键 | `IF_PSBC_SIGNUP_001` |
+| `interface_no` | **引擎内部的接口业务编号**，**租户内唯一**（`uk_ifmap_config_biz`），是配置查询与 `queryLogicBranches` 的键；一个接口号只属于一个 `busi_node` | `IF_PSBC_SIGNUP_001` |
 | `interface_code` | **对接方（银行/金融机构服务）的接口编码**，用于出网调用时定位对方接口 | `PSBC_0001` |
-| `front_interface_no` | **前置接口编号**：本接口执行前必须先执行的接口（空=无前置） | `IF_PSBC_AUTH_001` |
+| `busi_node` + `interface_order` | **步骤位置**：同一业务节点内唯一（`uk_ifmap_config_order`），决定执行次序；调用方传的 `interfaceNo` 是这段计划的**起点** | `apply` + `2` |
 
 ### 6.7 迁移映射（ECC 现有表 → 目标表）
 
@@ -635,7 +649,9 @@ ALTER TABLE `ifmap_config`
   MODIFY COLUMN `interface_order`  smallint     NOT NULL DEFAULT 0,
   MODIFY COLUMN `result_flag`      varchar(512) NOT NULL DEFAULT '',
   MODIFY COLUMN `success_value`    varchar(512) NOT NULL DEFAULT '',
-  MODIFY COLUMN `strategy_name`    varchar(128) NOT NULL DEFAULT '',
+  -- ↓ 旧 `strategy_name` 一列拆成两列（存量先 ADD COLUMN，值由人工按新口径重配）
+  MODIFY COLUMN `pre_strategy_name`  varchar(128) NOT NULL DEFAULT '',
+  MODIFY COLUMN `post_strategy_name` varchar(128) NOT NULL DEFAULT '',
   MODIFY COLUMN `busi_node`        varchar(32)  NOT NULL,
   MODIFY COLUMN `add_user_id`      varchar(64)  NOT NULL DEFAULT '',
   MODIFY COLUMN `modify_user_id`   varchar(64)  NOT NULL DEFAULT '',
@@ -807,16 +823,17 @@ ifmap-provider-jdbc/src/main/resources/
 
 ```
 IfmapRequest
-  → [前置接口链] front_interface_no 递归（带环检测）
-  → [主参数组包] FullParamStrategy（按 partnerCode + busiNode）
+  → [执行计划] 取该 busi_node 内的有序步骤（interface_order 升序），截断到起点 interfaceNo
+  → [主参数组包] FullParamStrategy（按 partnerCode + busiNode）+ payload + 跨步骤共享池
   → [请求模板渲染] @FUN 规则 + JsonPath 取数（ReadContext 一次解析多次取数）
-  → [特殊处理] SpecialDealStrategy（strategy_name → 三 key 注册表）
+  → [前序特殊处理] SpecialDealStrategy（pre_strategy_name，相位 PRE）
   → [出网调用] 宿主机提供的 PartnerServiceGateway SPI
-  → [响应模板解析] response_param_template
-  → [结果判定] result_flag + success_value（多值）
+  → [响应模板解析] response_param_template → 本步骤产物
+  → [后序特殊处理] SpecialDealStrategy（post_strategy_name，相位 POST）
+  → [结果判定] result_flag + success_value（多值）；**成功才把产物写进共享池**
   → [逻辑分支] logic_branch_order 升序匹配 → ActionRegistry 执行
   → [执行日志] ExecutionLogSink（脱敏后落库）
-IfmapResult
+IfmapResult（data = 展平后的池 + pool 键）
 ```
 
 ### 7.2 租户上下文（P1-9）
@@ -849,10 +866,11 @@ ConfigCacheKey = tenantId + ":" + interfaceNo + [":" + busiNode]
 ### 7.4 执行顺序（TS-1 的落地）
 
 ```
-queryConfigs(tenantId, interfaceNo, busiNode)
-  → 过滤 status = 1
+queryConfigsByBusiNode(tenantId, busiNode)
+  → 过滤 status = 1 且 del_status = 0
   → ORDER BY interface_order ASC, key_id ASC   ← 引擎侧兜底排序（即使 provider 没排序）
-  → 按 front_interface_no 拓扑排序（含环检测，检出即抛 ConfigException）
+  → 起点 interfaceNo 非空时：定位它在计划中的位置并截断（取它及其之后）
+  → 起点不在计划内（停用 / 已删除 / 编号写错）→ 抛 IfmapConfigException
 ```
 
 ### 7.5 合规：日志脱敏（P1-12）
@@ -922,7 +940,7 @@ public interface LogMasker {
 | GET | `/branches` | 逻辑分支查询/维护（含 `logic_branch_order`） |
 | GET | `/rules` | **可用规则清单**（`RuleRegistry.describeAll()`） |
 | GET | `/actions` | 已注册动作清单 |
-| GET | `/audit` | 全量配置审计（落地方案 v1 的 T23：`@FUN` 合法性、`strategy_name` 契约、死分支、重复默认分支）；`tenantId` 不传 = **跨租户全量**，`markdown=true` 返回可贴工单的报告 |
+| GET | `/audit` | 全量配置审计（落地方案 v1 的 T23：`@FUN` 合法性、`pre_/post_strategy_name` 契约、池引用、死分支、重复默认分支）；`tenantId` 不传 = **跨租户全量**，`markdown=true` 返回可贴工单的报告 |
 
 **状态码契约（W5 落地时定稿）**：`200` 成功，**也包括"业务上没做成"**（乐观锁冲突、目标已删除 → `ok=false`，前端按业务提示而不是弹通用错误）；`400` 用错接口 / 目标不存在 / 参数缺失；`422` 保存前校验未通过（带 `errors`）；`502` 外呼失败（试跑正常不出网）；`500` 兜底。详见公开文档 `docs/07-管理端REST.md`。
 
@@ -933,12 +951,12 @@ public interface LogMasker {
 | 模板是合法 JSON | 基础 |
 | 所有 `@FUN(name,…)` 的 `name` 已在 `RuleRegistry` | 方案 v1 P0-5 |
 | `@FUN` 参数个数/类型可匹配到某个重载 | 方案 v1 P1-4（含 5 组重载） |
-| `strategy_name` ∈ 已注册策略 key（**权威 bean 名**） | 方案 v1 P0-7（11/38 不一致） |
+| `pre_strategy_name` / `post_strategy_name` ∈ 已注册策略 key（**权威 bean 名**） | 方案 v1 P0-7（11/38 不一致）；两列拆自旧 `strategy_name` |
 | 所有 JsonPath 表达式语法合法 | 新增能力 |
-| `front_interface_no` 存在且**不构成环** | 方案 v1 P0-2 |
+| 请求模板里的 `$.pool.<接口号>` 指向本节点内**更早**的步骤 | 落地后新增；取代原「`front_interface_no` 不构成环」（方案 v1 P0-2） |
 | 默认兜底分支 ≤ 1 条；`logic_branch_order` 唯一 | 本次 TS-2 |
 | `method_flag` ∈ 已注册动作 | 本次 TS-6 |
-| `(tenant, interface_no, busi_node, interface_order)` 不重复 | 本次 TS-4（DB 唯一键兜底 + 友好提示） |
+| 唯一键不冲突（**两个维度**）：`(tenant, interface_no)` 与 `(tenant, busi_node, interface_order)` | 本次 TS-4（DB 两把唯一键兜底 + 友好提示） |
 
 ---
 
@@ -1049,7 +1067,7 @@ public interface LogMasker {
 | `deleted_seq` 冲突 | 历史软删除行若不留 `deleted_seq`，加唯一键会失败 | 先回填（`del_status=1 → deleted_seq=key_id`）再加唯一键 |
 | `interface_order` 转换 | `char(2)` 里有非数字值会 `CAST` 失败 | 迁移前 `SELECT DISTINCT interface_order` 确认；非数字 → 置 0 并记录 |
 | `logic_branch_order` 回填 | 无源数据，只能按 `key_id` 升序近似 | 回填后**必须人工复核**每个 `interface_no` 的分支顺序（尤其含默认兜底分支的） |
-| 字段截断（1） | `varchar(255) → 64`（`interface_code` / `front_interface_no`）、`varchar(255) → 128`（`partner_name` / `logic_branch_name`） | 迁移前 `SELECT MAX(CHAR_LENGTH(...))` 逐列校验，超限值需人工决定截断或放宽 |
+| 字段截断（1） | `varchar(255) → 64`（`interface_code`；`front_interface_no` 最终被整体删除，不再收窄）、`varchar(255) → 128`（`partner_name` / `logic_branch_name`） | 迁移前 `SELECT MAX(CHAR_LENGTH(...))` 逐列校验，超限值需人工决定截断或放宽 |
 | 字段收窄（2） | `response_param longtext(4GB) → mediumtext(16MB)` | 报文不可能超 16MB；迁移前 `SELECT MAX(LENGTH(response_param))` 校验；若确有超限，保留 `longtext` 并从 §6.4 DDL 移除该变更 |
 | `timestamp` 零值 | `timestamp` 的 `'0000-00-00 00:00:00'` 转 `datetime(3)` 会报错 | 迁移前查 `WHERE add_time = '0000-00-00 00:00:00'` 并修值 |
 
@@ -1191,7 +1209,7 @@ public interface LogMasker {
 | "三工厂" → 注册表 | ✅ `SpecialDealStrategyRegistry`（key = **bean 名**，含 `decapitalizeLoose` 别名与冲突诊断）/ `FullParamStrategyRegistry`（key = `bank\|busi`，查找 exact → `(partner,*)` → `(*,busi)` → `(*,*)`）/ `LogicBranchStrategyRegistry`（key → 多实现） | 用注册表替代"工厂 + 反射按方法名调用"，对应方案 v1 P0-7 / TS-6 |
 | `ActionRegistry` | ✅ `@IfmapAction("submit")` 或显式 key；`failOnMissingAction` 默认 `true`（缺失即抛 `IfmapStrategyException`） | 取代 `method_flag` 反射（方法重命名不再静默失效） |
 | `CallbackRegistry` | ✅ `@IfmapCallback("IF_X")` 或显式 key；未注册接口号直接抛异常（不再静默什么都不做） | 取代存量 17 个回调方法 |
-| 执行顺序与环检测 | ✅ `orchestrator/InterfaceOrdering`：`topological(sort(enabled))`（DFS + 环检测，异常含"循环依赖"与完整路径）；**并递归加载 `front_interface_no` 前置链**（`MAX_FRONT_DEPTH = 64` 护栏） | 递归加载是计划外补充 —— 仓储按单一 `interface_no` 查询，不递归拿不到前置接口 |
+| 执行顺序与环检测 | ✅ `orchestrator/InterfaceOrdering`：`topological(sort(enabled))`（DFS + 环检测，异常含"循环依赖"与完整路径）；**并递归加载 `front_interface_no` 前置链**（`MAX_FRONT_DEPTH = 64` 护栏） | 递归加载是计划外补充 —— 仓储按单一 `interface_no` 查询，不递归拿不到前置接口；**该形态随后被整体删除**（改为 `interface_order` 单一定序 + 起点截断，见顶部「历史稿提示」） |
 | 契约自检 0 违规 | ✅ `validate/ContractValidator` + `ContractReport.toMarkdown()`：模板 JSON 合法性 + `@FUN` 规则名存在 + 参数可匹配重载；`ContractValidatorTest` 断言"全注册时零违规" | 增补"模板非法 JSON"检查（渲染必经 jsonOps 解析，非法必在运行期炸） |
 | 判定器（计划外） | ✅ `orchestrator/ResponseJudge`：`result_flag` 为空 = 成功、`success_value` 多值 `;`/`,`、忽略大小写、响应非 JSON 只判失败**不抛异常** | 存量判定逻辑分散在多处，此处收敛为一处 |
 | 合规（W6 提前） | ✅ `spi/DefaultLogMasker`（值形态 + 字段名两种脱敏、排除字段整体 `***`、幂等、非 JSON 安全）+ `util/Logs.truncate`（`...truncated`） | 与 W6 并行（§11 计划表已标注"W6 与 W4 可并行"） |
@@ -1216,7 +1234,7 @@ public interface LogMasker {
 
 1. **`DefaultLogMasker` 默认字段集误含 `mobile` / `phone` / `telephone`** → 手机号被按姓名规则脱敏成 `1**********`（无意义且不合规）。修复：默认只留姓名类字段（8 个），手机/证件/卡号统一走值形态正则。
 2. **`DefaultLogMasker(maskFields, excludeFields)` 传空集合时会关闭默认脱敏** → 属性留空 = 姓名原样落库。修复：空/null 回退 `DEFAULT_MASK_FIELDS`（要完全关闭须自定义 `LogMasker` bean）。
-3. **编排器未递归加载 `front_interface_no` 前置链** → 测试 `frontInterfacesExecuteInTopologicalOrderAndDataMerges` 只得到 `[MAIN]`。修复：广度递归收集 + `MAX_FRONT_DEPTH=64` 护栏。
+3. **编排器未递归加载 `front_interface_no` 前置链** → 测试 `frontInterfacesExecuteInTopologicalOrderAndDataMerges` 只得到 `[MAIN]`。修复：广度递归收集 + `MAX_FRONT_DEPTH=64` 护栏（**该机制与其测试随后一起被删除**，见顶部「历史稿提示」）。
 4. **策略注册表用 `getClass().getAnnotation(...)` 查注解** → Spring CGLIB 代理类取不到类注解（类注解不继承）。修复：统一走 `Annotations.find`（父类链 + 接口链）。
 5. **`ContractValidator` 漏检「模板不是合法 JSON」** → `{not json` 且无 `@FUN` 时漏检。修复：补 `engine.getJsonOps().isJson(template)` 检查。
 
@@ -1231,7 +1249,7 @@ public interface LogMasker {
 | 模块形态 | ✅ 独立 `ifmap-admin-spring-boot-starter`（新模块，**不耦合** starter；引擎运行期不依赖它） | 计划稿写 `ifmap-admin`，落地为 starter（与"引入即用"一致） |
 | 装配门控 | ✅ 三重门控：`ifmap.admin.enabled=true`（**默认 false**）+ classpath `DispatcherServlet`/`JdbcTemplate` + `DataSource`；全部 bean `@ConditionalOnMissingBean` | 管理端能改线上配置，默认必须关；**不内置鉴权**（不绑定宿主认证体系），文档明确要求挂网关 |
 | CRUD | ✅ `GET/POST /configs`、`GET/PUT/DELETE /configs/{id}`、`POST /configs/{id}/status`（启停） | — |
-| §8.3 校验 | ✅ `ConfigValidator` 11 类：必填列、模板 JSON 合法、`$.path` 合法（`JsonOps.isValidPath`）、`@FUN` 规则与重载可匹配（`ContractValidator`）、`strategy_name` 已注册、前置链自指/成环、唯一键冲突、分支默认兜底 ≤1、分支顺序唯一、`method_flag` 已注册 | 无引擎时**至少**做模板 JSON 语法校验（历史脏数据真实存在，不能静默放过） |
+| §8.3 校验 | ✅ `ConfigValidator`：必填列、模板 JSON 合法、`$.path` 合法（`JsonOps.isValidPath`）、`@FUN` 规则与重载可匹配（`ContractValidator`）、`pre_/post_strategy_name` 已注册、**池引用只指向本节点更早的步骤**、唯一键冲突（两个维度）、分支默认兜底 ≤1、分支顺序唯一、`method_flag` 已注册 | 无引擎时**至少**做模板 JSON 语法校验（历史脏数据真实存在，不能静默放过）；原「前置链自指/成环」一项已随 `front_interface_no` 删除 |
 | 试跑 | ✅ `POST /configs/dry-run`：走完整编排链路（前置链 → 拓扑 → 渲染 → 特殊处理 → 判定 → 分支动作），只把出网换成 `mockResponse` | 计划稿路径为 `/configs/{id}/dry-run`，落地改为请求体承载（含 `tenantId` + `params: Map`），REST 语义更顺 |
 | 历史 / 回滚 | ✅ `GET /configs/{id}/history` + `POST /configs/{id}/rollback`；快照 = **显式业务列 → 有序 Map → `JsonOps.toJson`**，附字段级 `diff` | 快照序列化放 admin 模块（provider-jdbc 保持零 JSON 依赖）；不用 Bean 反射序列化（少 JSR-310 模块、不写 `version`/审计列、字段增删不静默丢字段） |
 | `/audit` | ✅ `ConfigAuditor`：跨租户全量巡检 + `audit-max-configs` 上限 + `truncated` 标记，可输出 Markdown | — |
@@ -1346,7 +1364,7 @@ public interface LogMasker {
 |---|---|---|
 | M1 迁移 SQL kit | ✅ `ifmap-provider-jdbc/src/main/resources/db/migration/ecc-to-ifmap/`：`README.md` + `00-precheck` / `01-add-columns` / `02-backfill` / `03-modify-and-index` / `04-rename-tables` / `05-verify`（共 7 文件、约 53 KB） | 计划稿只写"迁移脚本"；落地把**执行顺序按"何时能做"重排**：`04-rename-tables` 是**切换时刻**才执行的秒级元数据操作，放在最后（放最前会在共存期就切断 ECC 依赖）。`README` 另给"大表按体量分岔"（< 50 万行 COPY / ≥ 50 万行走 gh-ost）与 11 行排错表 |
 | kit 是否随 changelog 自动执行 | ✅ **不自动**：不在 `db/changelog/` 主入口下、文件名也不符合 Flyway `V<版本>__<描述>.sql` 规范 → 必须运维手工执行；`README` 首节写明这一点 | 计划稿未提；这是最容易出事的隐含假设（以为引了 jar 就自动迁移） |
-| M2 规则/策略对齐 | ✅ 落到公开文档 `docs/10-迁移指南.md`：**"配置里的字符串 → ifmap 注册点"对照表**（`@FUN(名字)` → 内置 18 规则 / `@IfmapRule`；`method_flag` → `@IfmapAction`；分支标识 → `@LogicBranch`；`strategy_name` → `SpecialDealStrategy` bean 名）+ **启动期自检动作**（`/audit`、`/rules`、`/actions`、`/strategies`、`/configs/validate`、`/configs/dry-run`） | 计划稿写的"52 个规则名映射清单"**不进公开仓**（`cmbInvoiceType`/`cebFilePathJoin` 这类名字属"银行合作细节"）→ 改为**通用方法论 + 自检机制**：对照表 + 巡检 0 违规作为验收动作 |
+| M2 规则/策略对齐 | ✅ 落到公开文档 `docs/10-迁移指南.md`：**"配置里的字符串 → ifmap 注册点"对照表**（`@FUN(名字)` → 内置 18 规则 / `@IfmapRule`；`method_flag` → `@IfmapAction`；分支标识 → `@LogicBranch`；`strategy_name`（落地后为前序 / 后序两列）→ `SpecialDealStrategy` bean 名）+ **启动期自检动作**（`/audit`、`/rules`、`/actions`、`/strategies`、`/configs/validate`、`/configs/dry-run`） | 计划稿写的"52 个规则名映射清单"**不进公开仓**（`cmbInvoiceType`/`cebFilePathJoin` 这类名字属"银行合作细节"）→ 改为**通用方法论 + 自检机制**：对照表 + 巡检 0 违规作为验收动作 |
 | D2 JsonOps TCK | ✅ 新模块 `ifmap-json-tck`：`JsonOpsConformanceTestBase`（**24 用例**）+ `JdkNativeValues`（递归断言"返回值只含 JDK 原生类型"）；`JacksonJsonOpsConformanceTest` 空壳继承 | 计划稿写"TCK"；落地把它做成**独立模块**（而非 core 的 test-jar）——外部实现者继承一个类即可，避免 test-jar 打包复杂度。24 个用例里 2 个首跑失败，**是我的期望写错而非实现有问题**（见下"实测证据"） |
 | D4 通用迁移指南 | ✅ `docs/10-迁移指南.md`（M0 摸底 → M1 → M2 → M3 切换与回滚；共存三路径；10 条行为对齐清单；排错速查）；`mkdocs.yml` nav 加页（**11 页**）；README / CHANGELOG 同步 | 计划稿只写"迁移指南"；落地定下"**M2 契约自检 0 违规 + 切换 checklist**"作为可判定的门槛（否则"迁移做完了吗"没法回答） |
 | **P0 级实现缺陷修复（W8 顺带）** | ✅ `IfmapOrchestrator` 的**兜底分支从不生效** → 改为**两趟匹配**（常规分支优先，全部未命中才走兜底） | **设计文档 §6.3 / 附录 C 与 `ConfigValidator` 都假定兜底分支会生效（`logic_branch_flag` 为空 = 兜底），但引擎实现把 blank flag 判 `false` 并打 WARN** → 存量（ECC `BankintConfigManager`）正是用"空标志"表达兜底 → 直接迁过来会出现**"分支命中不到 → 业务回调静默不执行"**。TDD：先加 2 个用例（红：`expected: <[fallback]> but was: <[]>`）→ 改引擎 → 绿。**数据零改动**（不需要回填 `logic_branch_flag`） |
@@ -1581,9 +1599,9 @@ ALTER TABLE `ifmap_config`
   MODIFY COLUMN `interface_order` smallint     NOT NULL DEFAULT 0,
   MODIFY COLUMN `result_flag`     varchar(512) NOT NULL DEFAULT '',
   MODIFY COLUMN `success_value`   varchar(512) NOT NULL DEFAULT '',
-  MODIFY COLUMN `strategy_name`   varchar(128) NOT NULL DEFAULT '',
+  MODIFY COLUMN `pre_strategy_name`  varchar(128) NOT NULL DEFAULT '',   -- 旧 strategy_name 一列拆两列
+  MODIFY COLUMN `post_strategy_name` varchar(128) NOT NULL DEFAULT '',
   MODIFY COLUMN `busi_node`       varchar(32)  NOT NULL,
-  MODIFY COLUMN `front_interface_no` varchar(64) DEFAULT NULL,
   MODIFY COLUMN `interface_code`  varchar(64)  NOT NULL,
   MODIFY COLUMN `financing_mode`  varchar(32)  DEFAULT NULL,
   MODIFY COLUMN `remark`          varchar(512) NOT NULL DEFAULT '',
@@ -1591,9 +1609,9 @@ ALTER TABLE `ifmap_config`
   MODIFY COLUMN `modify_user_id`  varchar(64)  NOT NULL DEFAULT '',
   MODIFY COLUMN `add_time`        datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   MODIFY COLUMN `modify_time`     datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  ADD UNIQUE KEY `uk_ifmap_config_biz` (`tenant_id`,`interface_no`,`busi_node`,`interface_order`,`deleted_seq`),
+  ADD UNIQUE KEY `uk_ifmap_config_biz`   (`tenant_id`,`interface_no`,`deleted_seq`),
+  ADD UNIQUE KEY `uk_ifmap_config_order` (`tenant_id`,`busi_node`,`interface_order`,`deleted_seq`),
   ADD KEY `idx_ifmap_config_list`  (`tenant_id`,`del_status`,`busi_node`,`partner_code`),
-  ADD KEY `idx_ifmap_config_front` (`tenant_id`,`del_status`,`front_interface_no`),
   ADD KEY `idx_ifmap_config_code`  (`tenant_id`,`del_status`,`interface_code`),
   ROW_FORMAT=DYNAMIC,
   ALGORITHM=COPY, LOCK=SHARED;

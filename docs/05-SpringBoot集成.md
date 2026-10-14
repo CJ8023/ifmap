@@ -97,7 +97,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmap.tenant-header` | `X-Tenant-Id` | 取租户的请求头名（上下文显式给了 `tenantId` 时不看头） |
 | `ifmap.default-tenant-id` | `-1` | 上下文与请求头都取不到时的兜底租户 |
 | `ifmap.orchestrator.stop-on-failure` | `true` | 多条配置中一条判定失败即停止后续执行 |
-| `ifmap.orchestrator.fail-on-missing-strategy` | `true` | `strategy_name` 找不到策略时快速失败（`false` 则 WARN 跳过） |
+| `ifmap.orchestrator.fail-on-missing-strategy` | `true` | `pre_strategy_name` / `post_strategy_name` 找不到策略时快速失败（`false` 则 WARN 跳过） |
 | `ifmap.orchestrator.fail-on-missing-action` | `true` | `method_flag` 找不到动作时快速失败（`false` 则 WARN 跳过） |
 | `ifmap.log.enabled` | `true` | 是否装配执行日志落库（`ExecutionLogSink`） |
 | `ifmap.log.truncate-threshold` | `65536` | 单条报文落库最大长度，超出尾部替换为 `...truncated` |
@@ -259,7 +259,7 @@ public class MyJsonConfig {
 ### 3.4 编排器与策略：写个 bean 就行（W4）
 
 ```java
-// 1) 特殊处理策略：key = bean 名，配置里 strategy_name 直接写 czbApplyStrategy
+// 1) 特殊处理策略：key = bean 名，配置里 pre_strategy_name / post_strategy_name 直接写 czbApplyStrategy
 @Component
 public class CzbApplyStrategy implements SpecialDealStrategy {
     @Override
@@ -309,7 +309,7 @@ public IfmapResult call(IfmapRequest request) {
 | 失败行为可调 | `ifmap.orchestrator.*` 三个开关控制「失败即停」与「缺失策略/动作是否快速失败」 |
 | 日志与脱敏 | `ifmap.log.*` 控制落库、截断阈值、脱敏字段（详见 [`docs/06`](06-执行编排与策略扩展.md) §6） |
 
-编排链路（前置接口递归 + 拓扑排序 + 判定 + 分支 + 回调）、`IfmapRequest`/`IfmapResult` 用法、
+编排链路（业务节点内的有序步骤 + 起点截断 + 跨步骤共享池 + 前 / 后序策略 + 判定 + 分支 + 回调）、`IfmapRequest`/`IfmapResult` 用法、
 dry-run 试跑、契约自检见 [`docs/06-执行编排与策略扩展.md`](06-执行编排与策略扩展.md)。
 
 ### 3.5 配置库与日志库分离（不做多数据源框架）

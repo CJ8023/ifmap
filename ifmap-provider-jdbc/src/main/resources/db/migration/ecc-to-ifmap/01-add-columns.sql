@@ -34,11 +34,34 @@ SET SESSION lock_wait_timeout = 10;
 SET SESSION time_zone = '+08:00';
 
 -- ---------------------------------------------------------------------------
+-- 1.0) ★ 接口配置表：条件列 `pre_strategy_name` / `post_strategy_name`
+--      【必须先执行本条】：下面 1) 里 `status` 的 AFTER 锚点就是 `post_strategy_name`。
+--
+--      目标 DDL 把旧的一列 `strategy_name` 拆成了**前后序两列**，而且 ifmap 的配置读写 SQL
+--      **显式带了这两列**（`JdbcConfigWriter` 的 INSERT/UPDATE、`IfmapRowMappers` 的 SELECT）
+--      —— 迁完没有它们，运行期每次读写配置都会 1054。
+--
+--      ⚠️ 存量环境分两种（与 1.1 的 `financing_mode` 同一套路）：
+--        · 存量**没有**这两列（只有旧 `strategy_name`）→ 执行下面这条；
+--          旧 `strategy_name` 的数据**不搬**：本 kit 只做结构同步，策略名需要人工按新口径重配
+--          （旧值在语义上是"一个策略"，拆成前后序是业务决策，脚本猜不出来）；
+--        · 存量**已有**这两列 → **删掉下面这条语句**，否则报 `1060 Duplicate column name`；
+--          已有时的类型交给 03 的 MODIFY 归一成 `varchar(128) NOT NULL DEFAULT ''`。
+--
+--      单独一条 ALTER：存量已有该列 / 该列冲突时，失败范围只限本条，
+--      不会把 1) 的 status / version / deleted_seq 一起拖下水。
+-- ---------------------------------------------------------------------------
+ALTER TABLE `bankint_config`
+  ADD COLUMN `pre_strategy_name`  varchar(128) NOT NULL DEFAULT '' COMMENT '前序策略标识（=Spring bean 名），出网前执行'  AFTER `success_value`,
+  ADD COLUMN `post_strategy_name` varchar(128) NOT NULL DEFAULT '' COMMENT '后序策略标识（=Spring bean 名），回参产物之后执行' AFTER `pre_strategy_name`,
+  ALGORITHM=INPLACE, LOCK=NONE;
+
+-- ---------------------------------------------------------------------------
 -- 1) 接口配置表：+3 列（status / version / deleted_seq）
 --    AFTER 用来对齐目标 DDL 的列顺序；列名不存在会直接报 1054（安全失败，不会静默错位）。
 -- ---------------------------------------------------------------------------
 ALTER TABLE `bankint_config`
-  ADD COLUMN `status`      tinyint(1) NOT NULL DEFAULT 1 COMMENT '状态：1启用 0停用' AFTER `strategy_name`,
+  ADD COLUMN `status`      tinyint(1) NOT NULL DEFAULT 1 COMMENT '状态：1启用 0停用' AFTER `post_strategy_name`,
   ADD COLUMN `version`     int        NOT NULL DEFAULT 0 COMMENT '乐观锁版本' AFTER `status`,
   ADD COLUMN `deleted_seq` bigint     NOT NULL DEFAULT 0 COMMENT '软删除唯一化：未删除=0，删除时=key_id' AFTER `del_status`,
   ALGORITHM=INPLACE, LOCK=NONE;
@@ -79,20 +102,24 @@ ALTER TABLE `bankint_execution_log`
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
--- 4) 执行后自检：6 个新列都应存在
+-- 4) 执行后自检：8 个新列都应存在
 -- ---------------------------------------------------------------------------
 SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
   FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
-   AND COLUMN_NAME IN ('financing_mode', 'status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg')
+   AND COLUMN_NAME IN ('financing_mode', 'pre_strategy_name', 'post_strategy_name',
+                       'status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg')
  ORDER BY TABLE_NAME, COLUMN_NAME;
--- **期望 6 行**；若存量本来就有 `financing_mode`、按上面说明删掉了那条 ADD COLUMN，则是 5 行。
+-- **期望 8 行**；存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name`、
+-- 按上面说明删掉了对应 ADD COLUMN 的，则相应减少（常见是 5 或 6 行）。
 -- 少于期望说明有语句没执行成功，不要继续。
 
 -- ---------------------------------------------------------------------------
 -- 回滚（如需）：
 --   ALTER TABLE `bankint_config` DROP COLUMN `financing_mode`, ALGORITHM=INPLACE, LOCK=NONE;   -- 仅当本条 ADD 执行过
+--   ALTER TABLE `bankint_config` DROP COLUMN `pre_strategy_name`, DROP COLUMN `post_strategy_name`,
+--     ALGORITHM=INPLACE, LOCK=NONE;                                                           -- 仅当 1.0 执行过
 --   ALTER TABLE `bankint_config` DROP COLUMN `deleted_seq`, DROP COLUMN `version`, DROP COLUMN `status`,
 --     ALGORITHM=INPLACE, LOCK=NONE;
 --   ALTER TABLE `bankint_logic_branch_config` DROP COLUMN `deleted_seq`, DROP COLUMN `logic_branch_order`,

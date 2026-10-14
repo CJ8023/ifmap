@@ -63,21 +63,22 @@ ALTER TABLE `bankint_config`
   -- ★ 条件列：存量有它 → 归一到 varchar(32)；存量没有 → 由 01-add-columns.sql 的 1.1 先 ADD
   --   （实测两套真实存量都没有这一列，见 README §9.4；少这一列 ifmap 运行期读写配置必 1054）
   MODIFY COLUMN `financing_mode`          varchar(32)           DEFAULT NULL COMMENT '融资模式',
-  MODIFY COLUMN `front_interface_no`      varchar(64)           DEFAULT NULL COMMENT '前置接口编号（空=无前置）',
-  MODIFY COLUMN `interface_order`         smallint     NOT NULL DEFAULT 0    COMMENT '接口执行顺序，升序；同值按 key_id 兜底',
+  MODIFY COLUMN `interface_order`         smallint     NOT NULL DEFAULT 0    COMMENT '本业务节点内的步骤序号，升序；同值按 key_id 兜底',
   MODIFY COLUMN `request_param_template`  text                               COMMENT '请求参数模板（DSL），可为空',
   MODIFY COLUMN `response_param_template` longtext                           COMMENT '响应参数模板（DSL），可为空',
   MODIFY COLUMN `result_flag`             varchar(512) NOT NULL DEFAULT ''   COMMENT '执行结果标志（JsonPath）',
   MODIFY COLUMN `success_value`           varchar(512) NOT NULL DEFAULT ''   COMMENT '成功判断值，多值以 , 或 ; 分隔（大小写不敏感）',
-  MODIFY COLUMN `strategy_name`           varchar(128) NOT NULL DEFAULT ''   COMMENT '特殊处理策略标识（=Spring bean 名）',
+  -- ↓ 旧 `strategy_name` 一列拆成前后序两列（列位置对齐目标 DDL）
+  MODIFY COLUMN `pre_strategy_name`        varchar(128) NOT NULL DEFAULT ''   COMMENT '前序策略标识（=Spring bean 名），出网前执行',
+  MODIFY COLUMN `post_strategy_name`       varchar(128) NOT NULL DEFAULT ''   COMMENT '后序策略标识（=Spring bean 名），回参产物之后执行',
   MODIFY COLUMN `remark`                  varchar(512) NOT NULL DEFAULT ''   COMMENT '备注',
   MODIFY COLUMN `add_user_id`             varchar(64)  NOT NULL DEFAULT ''   COMMENT '添加人',
   MODIFY COLUMN `add_time`                datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '添加时间',
   MODIFY COLUMN `modify_user_id`          varchar(64)  NOT NULL DEFAULT ''   COMMENT '更新人',
   MODIFY COLUMN `modify_time`             datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '更新时间（由写入方统一设置，不用 ON UPDATE）',
-  ADD UNIQUE KEY `uk_ifmap_config_biz`   (`tenant_id`,`interface_no`,`busi_node`,`interface_order`,`deleted_seq`),
+  ADD UNIQUE KEY `uk_ifmap_config_biz`   (`tenant_id`,`interface_no`,`deleted_seq`),
+  ADD UNIQUE KEY `uk_ifmap_config_order` (`tenant_id`,`busi_node`,`interface_order`,`deleted_seq`),
   ADD KEY `idx_ifmap_config_list`  (`tenant_id`,`del_status`,`busi_node`,`partner_code`),
-  ADD KEY `idx_ifmap_config_front` (`tenant_id`,`del_status`,`front_interface_no`),
   ADD KEY `idx_ifmap_config_code`  (`tenant_id`,`del_status`,`interface_code`),
   ROW_FORMAT=DYNAMIC,
   COMMENT='资方接口配置',
@@ -89,8 +90,13 @@ ALTER TABLE `bankint_config`
 --   · `add_user_id` / `modify_user_id`：bigint → varchar(64)（存的是用户名/工号，不是数值）。
 --   · 改名：`bank_code`→`partner_code`、`bank_name`→`partner_name`。想回退执行
 --     `ALTER TABLE ... CHANGE COLUMN \`partner_code\` \`bank_code\` varchar(32) NOT NULL, ... ALGORITHM=COPY, LOCK=SHARED`。
---   · 唯一键含 `deleted_seq`：未删除恒 0 → 「同租户 + 同接口 + 同节点 + 同顺序」只允许一条；
---     软删除时写入 key_id → 同一组可以保留多条历史删除行。
+--   · 两把唯一键都含 `deleted_seq`：未删除恒 0 → 「同租户 + 同接口号」只允许一条、
+--     「同租户 + 同节点 + 同顺序」只允许一条；软删除时写入 key_id → 同一组可以保留多条历史删除行。
+--   · `front_interface_no` 这一列**已从目标 DDL 删除**（前后的概念被 `interface_order` 取代：
+--     起点由调用方传的 interfaceNo 决定，前序产物通过 `pre_strategy_name` 加工）。
+--     本语句不再 MODIFY 它；存量表里若还有该列，按 kit 的「只增不映射」原则**原样留着**
+--     （ifmap 不再读写它），要彻底清理可自行 `ALTER TABLE ... DROP COLUMN front_interface_no`。
+--   · 同理，旧的 `strategy_name` 存量独有列保留不删（ifmap 只读 `pre_/post_strategy_name`）。
 
 -- ===========================================================================
 -- B. 逻辑分支表（数据量小：低峰直接 COPY）
@@ -192,14 +198,14 @@ SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE,
    AND INDEX_NAME LIKE '%ifmap%'
  GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE
  ORDER BY TABLE_NAME, INDEX_NAME;
--- **期望 9 条**：config 4（uk_config_biz / idx_config_list / _front / _code）
+-- **期望 9 条**：config 4（uk_config_biz / uk_config_order / idx_config_list / _code）
 --              + logic_branch 2（uk_logic_branch / idx_logic_branch_query）
 --              + execution_log 3（idx_log_biz / _iface / _time）
 -- 返回 0 条 = 本步骤没执行成功，不要继续。
 
 -- ---------------------------------------------------------------------------
 -- 回滚（如需；每一步都必须"先 DROP 唯一键再改回类型"）：
---   ALTER TABLE `bankint_config` DROP INDEX `uk_ifmap_config_biz`;
+--   ALTER TABLE `bankint_config` DROP INDEX `uk_ifmap_config_biz`, DROP INDEX `uk_ifmap_config_order`;
 --   ALTER TABLE `bankint_config` MODIFY COLUMN `interface_order` char(2) NULL,
 --     MODIFY COLUMN `add_user_id` bigint(19) NULL, ..., ALGORITHM=COPY, LOCK=SHARED;
 -- （完整反向定义请从 00-precheck 第 3 步留档的 COLUMN_TYPE 复制；不要凭记忆手写。）

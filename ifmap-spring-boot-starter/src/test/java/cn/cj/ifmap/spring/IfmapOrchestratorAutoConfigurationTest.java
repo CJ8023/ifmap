@@ -159,7 +159,7 @@ class IfmapOrchestratorAutoConfigurationTest {
                 .withBean("cmbCallback", CmbCallback.class, CmbCallback::new)
                 .run(context -> {
                     SpecialDealStrategyRegistry specialDeals = context.getBean(SpecialDealStrategyRegistry.class);
-                    assertTrue(specialDeals.contains("allInOneStrategy"), "strategy_name 应按 bean 名直接可用");
+                    assertTrue(specialDeals.contains("allInOneStrategy"), "pre_/post_strategy_name 应按 bean 名直接可用");
 
                     FullParamStrategyRegistry fullParams = context.getBean(FullParamStrategyRegistry.class);
                     assertTrue(fullParams.contains("CMB", "apply"));

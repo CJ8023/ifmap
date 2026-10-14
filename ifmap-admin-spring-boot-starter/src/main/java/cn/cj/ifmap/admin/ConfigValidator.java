@@ -40,8 +40,9 @@ import java.util.Set;
  * <ol>
  *   <li><b>模板契约</b>：模板必须是合法 JSON；{@code @FUN} 规则必须已注册且参数可匹配重载
  *       （复用引擎的 {@link ContractValidator}，与启动期自检同一套逻辑）；</li>
- *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；{@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的
- *       特殊处理策略里；</li>
+ *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；请求模板里的 {@code $.pool.<接口号>} 必须是本业务节点内
+ *       <b>更早步骤</b>的接口号（T2，见 {@code checkPoolRefs}）；
+ *       {@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的特殊处理策略里；</li>
  *   <li><b>结构约束</b>：{@code (tenant_id, interface_no)} 与 {@code (tenant_id, busi_node, interface_order)}
  *       两组唯一键都不能重复；分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、
  *       {@code method_flag} 必须是已注册动作。</li>
@@ -50,6 +51,9 @@ import java.util.Set;
  * @author caijun
  */
 public class ConfigValidator {
+
+    /** 池保留根：与 {@code IfmapOrchestrator.POOL_KEY} 同名，DSL 里写作 {@code $.pool.<接口号>}。 */
+    private static final String POOL_ROOT = "$.pool.";
 
     private final ContractValidator contractValidator;
     private final JsonOps jsonOps;
@@ -192,18 +196,128 @@ public class ConfigValidator {
 
     /** 模板里出现的 JsonPath 必须是合法表达式（Save 前拦截，别等到线上运行才炸）。 */
     private void checkJsonPaths(IfmapConfig config, ValidationResult result) {
-        Set<String> paths = new LinkedHashSet<String>();
-        collectPaths(config.getRequestParamTemplate(), paths);
-        collectPaths(config.getResponseParamTemplate(), paths);
+        // 两个模板的**根不同**：请求根 = params（前序产物 + payload + 池），响应根 = 对方原始回参。
+        // 所以路径必须分开收集 —— 混在一起就没法判「这条路径的根上到底有没有 pool」（T2 需要这个前提）。
+        Set<String> requestPaths = new LinkedHashSet<String>();
+        collectPaths(config.getRequestParamTemplate(), requestPaths);
+        Set<String> responsePaths = new LinkedHashSet<String>();
+        collectPaths(config.getResponseParamTemplate(), responsePaths);
+        Set<String> paths = new LinkedHashSet<String>(requestPaths);
+        paths.addAll(responsePaths);
         for (String path : paths) {
             if (!jsonOps.isValidPath(path)) {
                 result.error("JsonPath 语法非法：" + path);
             }
         }
+        checkPoolRefs(config, requestPaths, result);
         // 表达式错语法：旧实现用正则从原文「剜」路径，遇逗号截断 -> @sum@$.a,$.b 抽出 $.a（合法）
         // 而静默放行，线上求和成 0。改用引擎同一套 DSL 感知判定（设计 §4.4 U4-C）。
         checkExpressions(config.getRequestParamTemplate(), "request_param_template", result);
         checkExpressions(config.getResponseParamTemplate(), "response_param_template", result);
+    }
+
+    /**
+     * 池引用静态校验（T2，设计 §4.6）：只校验<b>请求模板</b>里 {@code $.pool.<接口号>[.字段]} 形态的引用。
+     *
+     * <p>为什么必须静态拦：跨步骤共享池的键是「<b>已成功</b>步骤的接口号」。写错一个前缀
+     * （引用了本轮的后续步骤、或从别的业务节点复制配置后忘了改接口号）在运行期<b>不会报错</b> ——
+     * {@code $.pool.X} 取不到就是空值，再按 {@code ifmap.template.null-policy}（默认 {@code SKIP_FIELD}）
+     * 静默丢字段，最后表现为「对方收到少字段的报文」。这是典型的静默出错，只能在保存前拦。</p>
+     *
+     * <p>判据（三档，全部 error）：</p>
+     * <ol>
+     *   <li>{@code X} 是本 {@code busi_node} 内 {@code interface_order} <b>严格更早</b>的接口号 → 通过；</li>
+     *   <li>{@code X} 是本节点接口号但顺序 ≥ 自己（含自引用）→ error（本轮不可能产出，预置数据走 {@code payload}）；</li>
+     *   <li>{@code X} 不是本节点的接口号（拼错 / 跨节点复制）→ error，并把本节点的接口号集合列出来。</li>
+     * </ol>
+     *
+     * <p><b>诚实边界</b>（刻意不做的检查）：</p>
+     * <ul>
+     *   <li>只认 {@code $.pool.} 前缀，其余路径一律不判 —— 请求模板的 {@code $.} 根是
+     *       {@code params}（前序产物 + {@code payload} + 池），前两者的键运行期才知，静态判不了；</li>
+     *   <li>第一段不是普通标识符（{@code $.pool} 本身、{@code $.pool[*]}、{@code $.pool['X']}）不判，
+     *       避免把合法写法误判成拼错；</li>
+     *   <li><b>响应模板完全不判</b>：响应根是对方原始回参，里面完全可以有一个真名叫 {@code pool}
+     *       的业务字段，判它就是误报；</li>
+     *   <li>展平键层（{@code $.pool.X.字段} 里的字段名）不判：{@code @array@} / 整对象引用会让静态枚举
+     *       不完整，属于必然误报面。</li>
+     * </ul>
+     *
+     * @param requestPaths 请求模板里抽出的全部 {@code $.path}（已由 {@link #collectPaths} 收集）
+     */
+    private void checkPoolRefs(IfmapConfig config, Set<String> requestPaths, ValidationResult result) {
+        Set<String> refs = new LinkedHashSet<String>();
+        for (String path : requestPaths) {
+            String name = poolRefName(path);
+            if (name != null) {
+                refs.add(name);
+            }
+        }
+        if (refs.isEmpty() || isBlank(config.getBusiNode())) {
+            return;
+        }
+        List<IfmapConfig> node = liveRows(new ConfigQuery()
+                .setTenantId(asTenantId(config.getTenantId()))
+                .setBusiNode(config.getBusiNode())
+                .setSize(ConfigQuery.MAX_SIZE));
+        List<String> nodeCodes = new ArrayList<String>();
+        for (IfmapConfig row : node) {
+            nodeCodes.add(row.getInterfaceNo());
+        }
+        for (String ref : refs) {
+            IfmapConfig target = null;
+            for (IfmapConfig row : node) {
+                if (ref.equals(row.getInterfaceNo())) {
+                    target = row;
+                    break;
+                }
+            }
+            if (target == null) {
+                if (ref.equals(config.getInterfaceNo())) {
+                    result.error("池引用非法：$.pool." + ref
+                            + " 是自引用，步骤取不到自己的产物；本轮要用的数据请走 payload");
+                } else {
+                    result.error("池引用非法：$.pool." + ref + " 不是业务节点 " + config.getBusiNode()
+                            + " 的接口号（本节点：" + nodeCodes + "）—— 拼错，或从别的节点复制配置后忘了改？");
+                }
+                continue;
+            }
+            Integer targetOrder = target.getInterfaceOrder();
+            Integer selfOrder = config.getInterfaceOrder();
+            if (targetOrder != null && selfOrder != null && targetOrder.intValue() < selfOrder.intValue()) {
+                continue;
+            }
+            // 顺序号有一侧为空则无法比较：DDL 里 interface_order 是 NOT NULL DEFAULT 0，
+            // 空值只可能出现在未落库的内存对象上 —— 存疑时不拦（保存期门禁的误报比漏报更贵）。
+            if (targetOrder == null || selfOrder == null) {
+                continue;
+            }
+            result.error("池引用非法：$.pool." + ref + " 的 interface_order=" + targetOrder
+                    + " 不小于本步骤的 " + selfOrder
+                    + "；同序或后续步骤的产物本轮不可能产出，预置数据请走 payload");
+        }
+    }
+
+    /** {@code $.pool.<名>...} → {@code 名}；不是池引用、或名字不是普通标识符（含通配符 / 下标）返回 null。 */
+    private static String poolRefName(String path) {
+        if (path == null || !path.startsWith(POOL_ROOT)) {
+            return null;
+        }
+        String rest = path.substring(POOL_ROOT.length());
+        int end = rest.length();
+        int dot = rest.indexOf('.');
+        if (dot >= 0 && dot < end) {
+            end = dot;
+        }
+        int bracket = rest.indexOf('[');
+        if (bracket >= 0 && bracket < end) {
+            end = bracket;
+        }
+        String name = rest.substring(0, end);
+        if (name.length() == 0 || name.indexOf('*') >= 0) {
+            return null;
+        }
+        return name;
     }
 
     private void checkExpressions(String template, String column, ValidationResult result) {

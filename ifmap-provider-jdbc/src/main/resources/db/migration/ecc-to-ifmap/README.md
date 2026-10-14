@@ -20,13 +20,13 @@ sed -i 's/bankint_/acme_/g' *.sql
 ```
 
 迁移之所以是「改结构」而不是「搬数据」，原因是字段遵循 **P1「只增不映射」** 原则
-（唯一的例外是下面那 **2 处列改名**）：
+（例外只有下面表里的三种**结构变更**：列改名 / 列拆分 / 列退出目标 DDL —— 都不搬数据）：
 
 | 维度 | 是否变化 | 说明 |
 |---|---|---|
 | 表名 | **变** | `bankint_*` → `ifmap_*`（项目更名后 DDL 同步更名） |
-| 列名 | **2 处改名** | `bank_code` → `partner_code`、`bank_name` → `partner_name`（标识符不再锁死在「银行」：同一列要承载银行 / 保理 / 信托 / 小贷 / 保险等各类合作机构）；**其余列名原样保留** → 没有 ETL、没有字段映射表 |
-| 列定义 | 部分变化 | 新增 6 列（config 3 / branch 2 / log 1）+ **1 个条件新增列** `financing_mode`（存量没有就加，见 §9.4 ①；`yfl_bill` 那一类还要再补 `interface_code`/`project_code`/`interface_name`，见 §9.4 ③）、改类型/长度/可空 30+ 列、加 9 个索引/唯一键 |
+| 列名 | **2 处改名 + 1 处拆分 + 1 处退出** | 改名：`bank_code` → `partner_code`、`bank_name` → `partner_name`（标识符不再锁死在「银行」：同一列要承载银行 / 保理 / 信托 / 小贷 / 保险等各类合作机构）；拆分：`strategy_name` → `pre_strategy_name` + `post_strategy_name`（出网前 / 回参之后的两个钩子）；退出：`front_interface_no` 已从目标 DDL 删除（前后序改由 `interface_order` + 跨步骤共享池表达）；**其余列名原样保留** → 没有 ETL、没有字段映射表 |
+| 列定义 | 部分变化 | 新增 8 列（config 3 / branch 2 / log 1 / **前后序策略 2**）+ **条件新增列** `financing_mode` 与 `pre_strategy_name` + `post_strategy_name`（存量没有就加，见 §9.4 ①⑥；`yfl_bill` 那一类还要再补 `interface_code`/`project_code`/`interface_name`，见 §9.4 ③）、改类型/长度/可空 30+ 列、加 9 个索引/唯一键（config 的唯一键由一把五列**拆成两把**，见 §9.4 ⑥） |
 
 所以整个迁移 = **`ADD COLUMN` → 回填 → 改列名与列类型 / 加唯一键与索引 → `RENAME TABLE`**。
 
@@ -197,8 +197,10 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 | `LOCK=NONE is not supported ... Try LOCK=SHARED`（1846 附近） | 在"改变列类型"这种不支持并发 DML 的操作上写了 `LOCK=NONE` | 改成 `ALGORITHM=COPY, LOCK=SHARED`（本 kit 已如此） |
 | `ALGORITHM=INPLACE is not supported ... Try ALGORITHM=COPY`（1845 附近） | 同上（写了 `INPLACE`） | 改成 `ALGORITHM=COPY` |
 | `Duplicate column name 'financing_mode'`（1060） | 你的存量环境**本来就有** `financing_mode`，但跑了 `01` 的 1.1 段 | 删掉 1.1 段那条 `ADD COLUMN` 再跑（03 的 `MODIFY` 保持不变） |
+| `Duplicate column name 'pre_strategy_name'`（1060） | 存量**本来就有**前后序两列，但跑了 `01` 的 1.0 段 | 删掉 1.0 段那条 `ADD COLUMN` 再跑（03 的 `MODIFY` 保持不变） |
 | `Unknown column 'xxx' in 'field list'`（1054）**出现在 00-precheck** | 你的存量变体缺这个列（实测两套真实存量都缺 `financing_mode`，`yfl_bill` 还缺 `interface_code`/`project_code`/`interface_name`） | 先看 3.1 步的「列齐备性清单」，按清单补 `ADD COLUMN`（第 8 条体检 8.1/8.2 已改成**只体检当前库真实存在的列**，不会再因缺列 1054） |
-| `Duplicate entry '...' for key 'uk_ifmap_config_biz'`（1062） | `00-precheck` 第 6 步没通过就跑了 03 | 处理重复数据（拉开 `interface_order` / 停用多余行）后重跑 6.1、6.3 与 03 |
+| `Duplicate entry '...' for key 'uk_ifmap_config_biz'`（1062） | `00-precheck` 第 6 步没通过就跑了 03：同租户下有两个相同的 `interface_no`（含跨 `busi_node` —— 这一档是本次新增的约束） | 按 6.1 的结果改 `interface_no` 或 `busi_node`，重跑 6.1 与 03 |
+| `Duplicate entry '...' for key 'uk_ifmap_config_order'`（1062） | 同上：同租户 + 同 `busi_node` 下有两个相同的 `interface_order` | 按 6.2 的结果拉开 `interface_order`（建议 10/20/30 留白写法），重跑 6.2 与 03 |
 | `Data too long for column 'xxx'`（1406） | 列宽收窄（`varchar(255) → 64/128`、`longtext → mediumtext`）但有超长数据 | 按 `00-precheck` 第 8.1 条逐列清理，或放宽目标列宽 |
 | `Invalid use of NULL value`（1138）/ `Column 'x' cannot be null`（1048） | 目标为 `NOT NULL` 但存量有 NULL | 按第 8.2 条补默认值（**不要**靠列的 `DEFAULT`：显式写 NULL 不生效） |
 | `Incorrect datetime value`（1292） | 存在 `'0000-00-00 00:00:00'` 零值时间 | 先修值再重跑（第 9 条） |
@@ -234,7 +236,7 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 - [ ] 磁盘余量 ≥ 最大表大小 × 1.5（`COPY` / 在线加索引期间新旧两份并存）
 - [ ] 记录当前会话时区，且全流程固定 `SET time_zone='+08:00'`
 - [ ] `00-precheck.sql` 全部"期望 0 / ≤ 1"通过，输出留档（这是迁移前的**唯一**基线）
-- [ ] `01-add-columns.sql` 执行完成，自检 6 个新列都在（存量本来就有 `financing_mode` 时删掉那条 `ADD COLUMN`，自检为 5 行）
+- [ ] `01-add-columns.sql` 执行完成，自检 8 个新列都在（存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name` 时删掉对应的 `ADD COLUMN`，自检相应减少到 5~7 行）
 - [ ] `02-backfill.sql` 执行完成，自检全 0；**分支顺序已人工复核**
 - [ ] `03-modify-and-index.sql` 执行完成：**`bank_code`/`bank_name` 已改名为 `partner_code`/`partner_name`**（用 `SHOW FULL COLUMNS` 复核）、9 条索引都在；大表走 gh-ost 且已 `--dry-run`
 - [ ] **存量模块的列名已处置**（§2 路径 A 的三种做法选一种），并用存量侧的**真实 SQL** 跑过冒烟
@@ -321,6 +323,24 @@ ALTER TABLE `bankint_config`
   ADD COLUMN `interface_name` varchar(128) NOT NULL DEFAULT '' COMMENT '接口名称' AFTER `project_code`,
   ALGORITHM=INPLACE, LOCK=NONE;
 ```
+
+**⑥ 删掉的 `front_interface_no` 与拆开的 `strategy_name` 都不搬数据。**
+
+目标 DDL 里这两个旧列都不在了（`front_interface_no` 直接删除，`strategy_name` 拆成
+`pre_strategy_name` + `post_strategy_name`），而 ifmap 的读写 SQL 显式带了新列
+（`JdbcConfigWriter` 的 INSERT/UPDATE、`IfmapRowMappers` 的 SELECT）：
+
+- 存量有旧 `strategy_name` → 本 kit **不搬它的值**：旧语义是「一个策略」，拆成前后序是业务决策
+  （哪个策略在出网前跑、哪个在回参之后跑，脚本猜不出来），需要在 admin 端按新口径重配；
+  旧列本身按「只增不映射」原样保留（ifmap 不再读它），要彻底清理可自行 `DROP COLUMN`。
+- 存量有 `front_interface_no` → 同样原样保留、不再被读写；前后序关系现在由
+  `interface_order`（同 `busi_node` 内的步骤序号）+ 跨步骤共享池表达。
+- 两列都没有（参考环境）→ `01-add-columns.sql` 的 **1.0** 段负责 `ADD COLUMN`，
+  它必须排在 1) 之前：1) 里 `status` 的 `AFTER` 锚点就是 `post_strategy_name`。
+
+唯一键也从「一把五列」拆成了**两把**：`(tenant_id, interface_no, deleted_seq)`（接口号租户内全局唯一）
+与 `(tenant_id, busi_node, interface_order, deleted_seq)`（顺序节点内唯一）；`idx_config_front` 一并删除。
+所以 `00-precheck` 第 6 步要查**两个维度**：6.1（接口号）/ 6.2（顺序），`05-verify` 第 4 节同理。
 
 > 结论：**换一个环境就要把 `00-precheck` 第 3 步 + 3.1 步的输出当输入，逐列核对一次**。
 > 「脚本一字不改、拿到哪个库都能跑」在这个迁移里不成立 —— 存量结构本来就不止一个版本。

@@ -96,7 +96,7 @@ ifmap:
 | GET | `/audit?tenantId=&busiNode=&markdown=` | 全量巡检，`markdown=true` 返回可贴工单的报告 |
 | GET | `/enums` | 宿主机注册的**字典**（可选 SPI，见 §11.3）；没注册就返回 `{}`（不是 404） |
 
-**这些端点由服务端提供，前端不要硬编码**：`@FUN` 规则、`method_flag` 动作、`strategy_name` 都是宿主机代码决定的，硬编码必然和宿主漂移。
+**这些端点由服务端提供，前端不要硬编码**：`@FUN` 规则、`method_flag` 动作、`pre_strategy_name` / `post_strategy_name` 都是宿主机代码决定的，硬编码必然和宿主漂移。
 
 ### 3.4 审计头
 
@@ -141,9 +141,9 @@ ifmap:
 | 模板是合法 JSON | `request_param_template` / `response_param_template` |
 | `$.path` 路径合法 | `JsonOps.isValidPath` —— Jackson 实现只做 JsonPath 编译，**拦不住 `$.a[`**；`ifmap-json-fastjson` 的实现额外要求引号外括号配对，能拦住（差异见 [`docs/05`](05-SpringBoot集成.md) §3.2） |
 | `@FUN` 规则存在且参数可匹配重载 | `ContractValidator`（引擎在位时）；引擎缺席时**至少校验模板 JSON 合法**（历史脏数据真实存在，不能静默放过） |
-| `strategy_name` 已注册 | `SpecialDealStrategyRegistry` |
-| `front_interface_no` 前置链可解析 | 不能自指、不能成环（护栏 64 层） |
-| 唯一键不冲突 | `(tenant_id, interface_no, busi_node, interface_order, deleted_seq)` |
+| `pre_strategy_name` / `post_strategy_name` 已注册 | `SpecialDealStrategyRegistry` |
+| 请求模板里的 `$.pool.<接口号>` 指向**本节点内更早**的步骤 | `ConfigRepository.queryConfigsByBusiNode`（同序或后续步骤、自引用、拼错的接口号一律拒；响应模板不判——它的根是对方原始回参，可能真有个叫 `pool` 的业务字段） |
+| 唯一键不冲突（**两个维度**） | `(tenant_id, interface_no, deleted_seq)`（接口号租户内唯一）+ `(tenant_id, busi_node, interface_order, deleted_seq)`（顺序节点内唯一） |
 | 分支集合：默认兜底 ≤ 1、顺序唯一、`method_flag` 已注册 | `validateBranches` / `validateBranch` |
 
 关于最后一行：**默认兜底分支（`logic_branch_flag`/`value` 都空）最多 1 条**——引擎取首个命中者，第二条永远不会生效，属于"配了但没用"的静默陷阱，所以新增第二条时直接拒。
@@ -179,7 +179,7 @@ POST /ifmap/admin/configs/dry-run
 }
 ```
 
-执行链路与线上**完全一致**（前置接口链 → 拓扑排序 → 组包 → 渲染 → 特殊处理 → 判定 → 分支动作），只把"出网"换成 `mockResponse`。因此能看到：渲染后的请求报文、映射后的响应数据、命中的分支、失败原因。
+执行链路与线上**完全一致**（取业务节点内的有序步骤 → 起点截断 → 组包 + 共享池 → 渲染 → 前序策略 → 判定 → 后序策略 → 入池 → 分支动作），只把"出网"换成 `mockResponse`。因此能看到：渲染后的请求报文、映射后的响应数据、命中的分支、失败原因。
 
 `tenantId` 是 `String`、`params` 是 `Map<String,Object>`（不是 JSON 字符串），前端直接用表单值即可。
 
@@ -190,7 +190,7 @@ POST /ifmap/admin/configs/dry-run
 | 字段 | 说明 |
 |---|---|
 | `configCount` / `branchCount` | 扫到的配置数 / 分支数 |
-| `errors` | 必须修的问题（模板非法、规则不存在、`strategy_name` 缺失、死分支、重复默认分支……） |
+| `errors` | 必须修的问题（模板非法、规则不存在、`pre_/post_strategy_name` 缺失、池引用指向非前序步骤、死分支、重复默认分支……） |
 | `warnings` | 提醒（接口没有分支等） |
 | `truncated` | 超过 `audit-max-configs` 时为 `true`：**报告不完整**，别当"全绿" |
 | `markdown` | `markdown=true` 时的报告正文（可直接贴工单） |

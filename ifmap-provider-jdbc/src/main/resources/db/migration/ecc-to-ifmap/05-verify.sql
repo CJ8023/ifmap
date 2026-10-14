@@ -45,12 +45,14 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLU
    AND COLUMN_NAME IN ('interface_order', 'busi_node', 'add_user_id', 'modify_user_id',
                        'add_time', 'modify_time', 'status', 'version', 'deleted_seq',
                        'financing_mode', 'partner_code', 'partner_name', 'execution_time',
+                       'pre_strategy_name', 'post_strategy_name',
                        'logic_branch_order', 'logic_branch_flag', 'logic_branch_value',
                        'method_flag', 'request_param', 'response_param', 'execution_result', 'error_msg')
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- 期望：interface_order smallint；busi_node varchar(32)；add_user_id varchar(64)；
 --       add_time datetime(3)；status tinyint(1)；deleted_seq bigint；logic_branch_order smallint；
 --       partner_code varchar(32) NOT NULL；partner_name varchar(128)；financing_mode varchar(32)；
+--       pre_strategy_name / post_strategy_name varchar(128) NOT NULL DEFAULT ''；
 --       execution_time bigint；
 --       request_param mediumtext；response_param mediumtext；execution_result varchar(16)；error_msg varchar(1024)。
 --       ⚠️ 两列都是文本类型是**刻意设计**：日志列必须"一定写得进去"（超长报文会被截断，截断结果不是合法 JSON，
@@ -70,7 +72,7 @@ SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE,
    AND TABLE_NAME IN ('ifmap_config', 'ifmap_logic_branch_config', 'ifmap_execution_log')
    AND INDEX_NAME LIKE '%ifmap%'
  GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE ORDER BY TABLE_NAME, INDEX_NAME;
--- 期望：config 4（uk_ifmap_config_biz / idx_ifmap_config_list / _front / _code）
+-- 期望：config 4（uk_ifmap_config_biz / uk_ifmap_config_order / idx_ifmap_config_list / _code）
 --       logic_branch 2（uk_ifmap_logic_branch / idx_ifmap_logic_branch_query）
 --       execution_log 3（idx_ifmap_log_biz / _iface / _time）
 
@@ -92,10 +94,15 @@ SELECT 'config status 异常', COUNT(*) FROM ifmap_config WHERE status IS NULL O
 
 -- ---------------------------------------------------------------------------
 -- 4) 唯一键效果自检（**期望 0 行**：同一组不允许出现 > 1 条未删除行）
+--    与 DDL 上的两把唯一键一一对应：uk_*_biz（接口号租户内唯一） + uk_*_order（顺序节点内唯一）。
 -- ---------------------------------------------------------------------------
-SELECT tenant_id, interface_no, busi_node, interface_order, COUNT(*) AS cnt
+SELECT tenant_id, interface_no, COUNT(*) AS cnt
   FROM ifmap_config WHERE del_status = 0
- GROUP BY tenant_id, interface_no, busi_node, interface_order HAVING COUNT(*) > 1;
+ GROUP BY tenant_id, interface_no HAVING COUNT(*) > 1;
+
+SELECT tenant_id, busi_node, interface_order, COUNT(*) AS cnt
+  FROM ifmap_config WHERE del_status = 0
+ GROUP BY tenant_id, busi_node, interface_order HAVING COUNT(*) > 1;
 
 SELECT tenant_id, interface_no, COALESCE(method_flag, '<NULL>') AS method_flag,
        logic_branch_name, COUNT(*) AS cnt

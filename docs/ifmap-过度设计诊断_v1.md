@@ -3,6 +3,10 @@
 > 适用版本：`0.1.0-SNAPSHOT`　作者：caijun　性质：**内部审查档**
 > 审查范围：全仓 11 个模块（main ≈ 1.9 万行 / test ≈ 1.05 万行）
 > 行号取自本次审查时的快照，仅供参考
+> **后续更新**：本档成文后，编排定序做过一次破坏性重构（删 `front_interface_no`、`strategy_name` 拆前 / 后两列、
+> `InterfaceOrdering` 收缩为 `enabled + sort`，见 [`CHANGELOG.md`](../CHANGELOG.md) 的
+> 「Changed（编排定序、跨步骤共享池与前后序策略）」）。其中与本次审查结论相关的两处已就地补注（§2.1 顺带修的文档问题、
+> §3 判「非过度设计」清单里的 `InterfaceOrdering` 行）。
 
 **结论一句话**：8 条 P1 候选里，**6 条复核后撤回、1 条改判为「补文档」、只有 1 条是真缺陷（已修）**。
 本档把「撤回的证据」一并写下来 —— 那才是这份审查真正的产出，因为下次还会有人提出同样的候选。
@@ -107,6 +111,7 @@
 
 **顺带修掉的两处文档问题**：
 1. `docs/10-迁移指南.md` §4.1 的 `strategy_name` 行「默认 **warn 后跳过**（可配成快速失败）」**两半都反了**：`IfmapProperties.Orchestrator.failOnMissingStrategy` 默认 `true` → `IfmapOrchestrator:246` 抛 `IfmapStrategyException`，"warn 后跳过"是 `false` 那一支（`:249`）。`docs/05` §2 写的是对的，两份文档矛盾。
+   *（后续：该列已拆为 `pre_strategy_name` / `post_strategy_name`，`docs/10` §4.1 行已随之改写；本条的"默认快速失败"结论对两列同样成立，代码位置改到 `IfmapOrchestrator.applySpecialDeal` / `applyPostDeal`。）*
 2. 补上「两个宽松别名」的公开说明（`docs/06` §3 指针 + `docs/10` §4.1 全文）：**代码此前比文档容忍得多**，宽容行为没有写出来。
 
 ---
@@ -184,7 +189,7 @@
 
 **证据**：`docs/11-远端配置源.md:159` 把它写成了契约，一字不差：
 
-> \| **缺失的可选字段** \| 按建表 DDL 的默认值补齐（**与 JDBC 仓储读出来的对象逐字段一致**）：`interface_order / version / del_status / deleted_seq → 0`、`status → 1`、`result_flag / success_value / strategy_name / remark → ''` \|
+> \| **缺失的可选字段** \| 按建表 DDL 的默认值补齐（**与 JDBC 仓储读出来的对象逐字段一致**）：`interface_order / version / del_status / deleted_seq → 0`、`status → 1`、`result_flag / success_value / pre_strategy_name / post_strategy_name / remark → ''` \|
 
 配套三处：
 - `:160` 必填字段的判定口径 = 「DDL 里 `NOT NULL` 且**没有** `DEFAULT` 的列」← **DDL 被指定为映射契约的唯一真源**；
@@ -238,7 +243,7 @@
 | `JsonConfigMapper` 的 DDL 默认值 | `provider-remote` | 「与 JDBC 读出对象逐字段一致」的契约（§3.7） |
 | 25 个配置键 | `IfmapProperties` | 全部有消费点与文档；`clean-*` 是运维旋钮（§3.7） |
 | 策略注册表三 key + `getConflicts()` | `SpecialDealStrategyRegistry` | P0-7 修复；`conflicts` 是三个注册表的统一模式（§3.3） |
-| `InterfaceOrdering` 拓扑排序 + 环检测 | `core.ordering` | 前置接口链的正确性基础，非"排序工具" |
+| ~~`InterfaceOrdering` 拓扑排序 + 环检测~~ | `core.ordering` | 当时判"前置接口链的正确性基础，非排序工具"；**后续该机制连同 `front_interface_no` 一起被删除**（`interface_order` 单一定序 + 起点截断 + 跨步骤共享池取代，见顶部更新说明），本行结论已作废 |
 | `Values` 数字格式化 | `core.template` | 数字保真契约（`10.00` 不得变 `10.0`、不得出科学计数法） |
 | `JsonOps` SPI + `ifmap-json-tck` | `json-tck` / `json-*` | 换 JSON 库时的一致性套件，只进测试范围 |
 | `ContractValidator` / `TemplateScanner` / `StrictTypes` | `core.contract` | 保存前校验的三大件，对应 docs/02 §7 |

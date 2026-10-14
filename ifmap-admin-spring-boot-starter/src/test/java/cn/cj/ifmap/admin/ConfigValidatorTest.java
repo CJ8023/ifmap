@@ -276,6 +276,92 @@ class ConfigValidatorTest {
         assertTrue(result.isPassed(), result.getErrors().toString());
     }
 
+    @Test
+    @DisplayName("池引用：指向本节点内更早步骤的接口号 → 通过")
+    void poolRefToEarlierStepPasses() {
+        assertTrue(writer.insert(AdminTestSupport.config("POOL_1", "apply", 1)) > 0);
+
+        ValidationResult result = validator.validate(poolRef("POOL_2", 2, "POOL_1"), true);
+        assertTrue(result.isPassed(), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("池引用：指向后续步骤的产物 → error（本轮不可能产出，预置数据走 payload）")
+    void poolRefToLaterStepIsRejected() {
+        assertTrue(writer.insert(AdminTestSupport.config("POOL_3", "apply", 3)) > 0);
+
+        ValidationResult result = validator.validate(poolRef("POOL_2", 2, "POOL_3"), true);
+        assertFalse(result.isPassed(), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("本轮不可能产出"), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("预置数据请走 payload"), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("池引用：自引用 → error（同序即命中「不小于本步骤」这一档）")
+    void poolRefToSelfIsRejected() {
+        IfmapConfig self = AdminTestSupport.config("POOL_SELF", "apply", 1);
+        assertTrue(writer.insert(self) > 0);
+        self.setRequestParamTemplate("{\"applyNo\":\"$.pool.POOL_SELF.applyNo\"}");
+
+        ValidationResult result = validator.validate(self, false);
+        assertFalse(result.isPassed(), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("本轮不可能产出"), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("池引用：不是本节点的接口号（拼错 / 跨节点复制）→ error 并列出本节点接口号")
+    void poolRefToUnknownInterfaceIsRejected() {
+        assertTrue(writer.insert(AdminTestSupport.config("POOL_1", "apply", 1)) > 0);
+
+        ValidationResult result = validator.validate(poolRef("POOL_2", 2, "GP85_IF_9"), true);
+        assertFalse(result.isPassed(), result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("不是业务节点 apply 的接口号"),
+                result.getErrors().toString());
+        assertTrue(result.getErrors().toString().contains("POOL_1"), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("池引用：只认 $.pool. 前缀；请求侧非池路径、响应模板、空模板、裸 $.pool 都不报")
+    void poolRefHonestBoundaries() {
+        assertTrue(writer.insert(AdminTestSupport.config("POOL_1", "apply", 1)) > 0);
+
+        // 非 pool 前缀：请求模板的 $. 根不只有池（前序产物 / payload），静态无从判定 -> 不报
+        IfmapConfig plain = AdminTestSupport.config("POOL_2", "apply", 2);
+        plain.setRequestParamTemplate("{\"a\":\"$.bizNo\",\"b\":\"$.data.x\"}");
+        assertTrue(validator.validate(plain, true).isPassed(),
+                validator.validate(plain, true).getErrors().toString());
+
+        // 响应模板的根是对方原始回参：里面可以真有一个叫 pool 的业务字段 -> 判它就是误报
+        IfmapConfig response = AdminTestSupport.config("POOL_3", "apply", 3);
+        response.setResponseParamTemplate("{\"out\":\"$.pool.ANYTHING.x\",\"raw\":\"$.pool\"}");
+        assertTrue(validator.validate(response, true).isPassed(),
+                validator.validate(response, true).getErrors().toString());
+
+        // 裸 $.pool / 通配符：取不到具体接口号 -> 不报（宁可漏报也不误报）
+        IfmapConfig whole = AdminTestSupport.config("POOL_4", "apply", 4);
+        whole.setRequestParamTemplate(
+                "{\"a\":\"$.pool\",\"b\":\"$.pool[*].applyNo\",\"c\":\"@FUN(numRound,$.pool.POOL_9.amount,2)\"}");
+        ValidationResult wholeResult = validator.validate(whole, true);
+        assertFalse(wholeResult.isPassed(), wholeResult.getErrors().toString());
+        // 只有 @FUN 实参里的 $.pool.POOL_9 被判定（POOL_9 不在本节点），裸 $.pool / [*] 不报
+        assertEquals(1, wholeResult.getErrors().size(), wholeResult.getErrors().toString());
+        assertTrue(wholeResult.getErrors().toString().contains("POOL_9"), wholeResult.getErrors().toString());
+
+        // 空模板：完全跳过
+        IfmapConfig blank = AdminTestSupport.config("POOL_5", "apply", 5);
+        blank.setRequestParamTemplate("  ");
+        blank.setResponseParamTemplate(null);
+        assertTrue(validator.validate(blank, true).isPassed(),
+                validator.validate(blank, true).getErrors().toString());
+    }
+
+    /** 造一条「请求模板里引用 $.pool.<ref>.applyNo」的配置。 */
+    private static IfmapConfig poolRef(String interfaceNo, int order, String ref) {
+        IfmapConfig config = AdminTestSupport.config(interfaceNo, "apply", order);
+        config.setRequestParamTemplate("{\"applyNo\":\"$.pool." + ref + ".applyNo\"}");
+        return config;
+    }
+
     // ---------------------------------------------------------------- 测试用策略
 
     @IfmapAction("submit")

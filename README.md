@@ -264,6 +264,7 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | 文档 | 内容 | 版本库 |
 | --- | --- | --- |
 | [`docs/ifmap-整体设计_v1.md`](docs/ifmap-整体设计_v1.md) | 整体设计（分层、SPI、表结构、分期计划、ADR） | **已入库** |
+| [`docs/ifmap-过度设计诊断_v1.md`](docs/ifmap-过度设计诊断_v1.md) | 过度设计审查：8 条候选的复核结论（6 条撤回的完整证据链、判据与提交前检查表） | **已入库** |
 | `docs/ifmap-内置规则审计与优化_v1.md` | 存量规则审计、P0 缺陷实证、core 规则收敛清单 | 未入库 |
 | `docs/bankintconfig模块优化方案_v1.md` | 迁移前的现状分析与优化方案（前身文档） | 未入库 |
 | `docs/tools/` | 规则清单/审计脚本 | 未入库 |

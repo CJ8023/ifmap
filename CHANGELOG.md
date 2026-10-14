@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Removed
+- **移除影子运行框架（`cn.cj.ifmap.core.shadow`，12 个类 / 1247 行 + 27 个单测）**：该框架只为存量迁移的
+  「M3 影子运行」阶段而写 —— 同一笔业务双跑新旧链路，主链路结果原样返回、差异只记录不影响主链路
+  （`ShadowRunner` 为入口，配套 `ShadowEngine` / `ShadowTarget` / `ShadowExtractor` / `ShadowComparer` /
+  `ShadowDiffSink` / `ShadowOptions` 等）。但它**没有任何装配入口**：`ifmap-spring-boot-starter` /
+  `ifmap-admin-spring-boot-starter` / 两个 demo 里 `grep shadow` 全部 0 命中，没有 `@Bean`、没有配置项，
+  宿主必须手工 `new ShadowRunner(...)` 拼 5 个对象；对绝大多数使用者而言它只是常驻 `core` 的 1247 行负债。
+  而按设计它本身就是**一次性件**（`ShadowTarget` javadoc 原话："切换完成后整个类直接删掉"）。
+  **连带调整**：迁移阶段由 `M0 摸底 → M1 表结构 → M2 规则策略对齐 → M3 影子运行 → M4 切换与回滚`
+  收敛为 **`M0 → M1 → M2 → M3 切换与回滚`**；[`docs/10-迁移指南.md`](docs/10-迁移指南.md) 的 M3 章节、
+  迁移 kit 的前置条件与 checklist、README / `docs/index.md` / 整体设计文档 §10.2 §11.0.7 同步删除；
+  数字保真的破坏性变更清单由 **B-1 ~ B-8** 收敛为 **B-1 ~ B-7**（原 B-8「影子比对会报 diff」随框架一起消失）
+
 ### Fixed（P3 真库迁移演练：ecc-to-ifmap kit）
 - **把迁移 kit 拿到真库跑了一遍，修掉 4 处「参考环境假设」**：在专用测试库 `ifmap` 内、以两套真实存量
   （`yfl_bill.bankint_config` 22 列 / `yfl_financing_scheme.bankint_config` 25 列）各建副本真数据，完整执行
@@ -64,7 +77,7 @@
     [`docs/04`](docs/04-接入与建表.md) §8.3/§10、[`docs/08`](docs/08-日志与合规.md) §3（为什么报文列是文本）
 
 ### Changed
-- **数字保真与数组语义严格化（本批）**：报文里的金额/数量是"看起来一样就行"的字符串，但**小数形态**过去是随底层 JSON 库（甚至随库版本）漂的 —— 同一个 `12345678.90`，Jackson 出 `1.23456789E7`、fastjson 出 `12345678.90`；`@sum@` 出的是无引号 number、而功能等价的 `numSum` 出字符串。本批把"数字出来长什么样"从"看库的实现"变成**写下来的契约**，并顺手把两处**静默出错**（既不报错也不抛异常，只是报文悄悄不对）变成可观测、可拒绝。**共 8 项破坏性变更**：
+- **数字保真与数组语义严格化（本批）**：报文里的金额/数量是"看起来一样就行"的字符串，但**小数形态**过去是随底层 JSON 库（甚至随库版本）漂的 —— 同一个 `12345678.90`，Jackson 出 `1.23456789E7`、fastjson 出 `12345678.90`；`@sum@` 出的是无引号 number、而功能等价的 `numSum` 出字符串。本批把"数字出来长什么样"从"看库的实现"变成**写下来的契约**，并顺手把两处**静默出错**（既不报错也不抛异常，只是报文悄悄不对）变成可观测、可拒绝。**共 7 项破坏性变更**：
   - **B-1 `JsonOps.parse` 的小数返回 `BigDecimal`**（原 `Double`）：解析层保留源文字小数位（`"10.00"` → `10.00` 而不是 `10.0`），并避免 `Double` 二次转换的精度损失。**直接依赖 `parse()` 返回类型的宿主代码需要核对**；引擎层只受益不受影响
   - **B-2 `$.path` 取到的小数形态变化**：**保留源文字小数位**（`"10.00"` → `"10.00"`）、**不丢位数**（`12345678.90` 不再变 `1.23456789E7`）、**永不科学计数法**（`0.000001` 不再变 `1.0E-6`、`1.0E10` → `"10000000000"`）。**影响所有报文内容**，上线前需逐接口回归
   - **B-3 数组/对象内的数字**：**类型不变**（仍是 JSON number，不会变成字符串 —— 那会破坏下游按数组解析的契约），仅去掉科学计数法（`[1.50,2.25]` → `[1.50,2.25]`）
@@ -72,7 +85,6 @@
   - **B-5 `concat` 遇到数组/对象实参**：运行期才知道，无法静态盘点。`ifmap.strict-types=warn`（**本版默认**）保持旧输出 `"[01, 02]"` 并把日志升为 **ERROR**，`fail` 抛 `RuleArgumentException`（消息含规则名、实参下标、替代写法：`listJoin` / `key@array@$.path`）
   - **B-6 `@sum@` 遇到非数值操作数**（`"abc"`、数组、对象）：`warn` 保持按 0 相加但日志升为 ERROR（带模板字段路径与原值），`fail` 抛异常。**注意「缺失」（`$.notExist`）仍静默按 0** —— 这是求和表达式的常规用法，把它改成报错会打断正常业务
   - **B-7 表达式错语法保存/启动即拒**（**不灰度、立即生效**）：`@sum@$.a,$.b`（顶层逗号把表达式切成两段 → 运行期**求和恒为 0**）、`@FUN(concat,$.a`（少右括号 → 运行期把整串**原样写进报文**）这两类过去静默，现在启动期 `validateTemplate` / `validateTemplates` 与管理端保存前校验（`ConfigValidator` / `ContractValidator`）一律拒绝。**上线前必须先跑一次存量配置巡检**
-  - **B-8 影子（shadow）比对会因数字形态变化报出 diff**：属**预期**，不是逻辑回归 —— 先刷新影子基线再切 `fail`，否则每个接口都会 diff
   - **两阶段灰度**：本版 `ifmap.strict-types` 默认 `warn`（保持存量输出 + ERROR 日志，用来盘点存量脏写法），**下一版默认切 `fail`**（见 R5）；不想改默认值的宿主在配置里写死 `ifmap.strict-types=warn` 即可
   - **新增 `ifmap.strict-types`**（`warn` / `fail`，默认 `warn`）：**只覆盖类型/形态契约，不是通用严格模式**（表达式错语法任何时候都拒，不受它控制）；等价 Java API 是 `IfmapEngine.builder().strictTypes(StrictTypes.WARN|FAIL)`，全部旧构造（3 参 `TemplateEngine`、`BuiltinRules.registerTo(reg)`、无参 `StringRules()`）保持源码兼容
   - **实现要点**：新增 `Values`（Java 8、零依赖的"数字文本化"唯一出口）、`DslExpressions`（DSL 结构解析**唯一**实现，渲染期与管理端保存校验共用，替掉管理端原来那段"从原文里剜路径、遇逗号就截断"的正则）、`TemplateScanner.expressionProblems`（扫字符串值与 key）、`StrictTypes`；Jackson 侧同时开 `SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN` 与 `JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN`（只开前者对生成器层的 `writeNumber` 不够），fastjson 侧开 `SerializerFeature.WriteBigDecimalAsPlain`
@@ -139,9 +151,8 @@
 - **W8 迁移预热**（本版本）：
   - **存量表迁移 SQL kit**（`ifmap-provider-jdbc/src/main/resources/db/migration/ecc-to-ifmap/`，7 个文件）：`README.md`（执行手册：三条路径、每步算法/锁语义、大表 gh-ost 命令、回滚、排错表、checklist、行为对齐清单、免责声明）+ `00-precheck.sql`（只读体检：唯一键冲突按 `CAST(interface_order AS UNSIGNED)` 分组、非数字顺序号、NULL→NOT NULL 列、长度超限、零值时间、时区、基线快照）/ `01-add-columns.sql`（纯 `ADD COLUMN`，`ALGORITHM=INPLACE, LOCK=NONE`）/ `02-backfill.sql`（软删唯一化 + 分支顺序自连接回填）/ `03-modify-and-index.sql`（类型变更 `ALGORITHM=COPY, LOCK=SHARED` + 唯一键/索引；日志大表按体量走 gh-ost；索引单独在线 `INPLACE, LOCK=NONE`）/ `04-rename-tables.sql`（切换时刻的 `RENAME TABLE` + 回滚）/ `05-verify.sql`（列数 28/17/17、索引 9 条、回填完整性、行数 + `SUM(key_id)` 指纹、时间抽样、分支顺序、查询冒烟）。**随 jar 发布、不会被 Liquibase/Flyway 自动执行**（不在 changelog 主入口目录，文件名也不符合 Flyway 规范）；库中表名以 `bankint_` 前缀书写，其它前缀用 `sed -i 's/bankint_/yourprefix_/g' *.sql` 全局替换
   - **`ifmap-json-tck` 模块**（新）：`JsonOpsConformanceTestBase`（**24 个契约用例**）+ `JdkNativeValues`（递归断言返回值只含 JDK 原生类型）。任何 `JsonOps` 实现继承基类即得全套一致性检查（含“路径不存在 → null”与“过滤器/通配不命中 → 空列表”的语义区分、数字-字符串不隐式转换、上下文可复用、非法路径抛 `IfmapConfigException`）；`JacksonJsonOpsConformanceTest` 为 Jackson 实现的空壳继承 —— 换 JSON 库只需覆写一个方法
-  - **影子运行框架**（`cn.cj.ifmap.core.shadow`，12 个类）：`ShadowRunner` + `ShadowRequest`/`ShadowTarget`/`ShadowEngine`/`ShadowExtractor`/`ShadowOutcome`/`ShadowComparer`/`ShadowFieldDiff`/`ShadowDiffSink`/`LoggingShadowDiffSink`/`ShadowRunResult`/`ShadowOptions`。同一笔业务双跑，**主链路结果原样返回、异常原样上抛**；影子链路异常与差异出口异常**只记录不外泄**；`legacyRawResponse` 回填存量原始响应后影子**不再对资方出网**（单测用“出网计数为 0”钉住）；支持采样率、`ignoreKeys`、数字宽容比对、字符串去空格、差异条数上限；差异出货前统一走 `LogMasker` 脱敏。引擎侧抽象为 `ShadowEngine`（而非直接依赖 `final` 的 `IfmapOrchestrator`）以便单测替换与迁移期换实现
-  - **公开迁移指南** [`docs/10-迁移指南.md`](docs/10-迁移指南.md)：M0 摸底 → M1 表结构 → M2 规则/策略对齐 → M3 影子运行 → M4 切换与回滚；共存三路径（前缀指向 / `RENAME` / 新表搬迁，并说明为什么不能用视图兜底）；M2 的“配置字符串 → 注册点”对照表与启动期自检动作；影子跑退出条件（连续 7 天零差异）与假差异排查顺序；10 条行为对齐清单与排错速查
-  - 测试：新增 **53 个**（core `ShadowRunnerTest` 22 + `ShadowEngineIntegrationTest` 5 + `IfmapOrchestratorTest` 兜底分支 2 + json-jackson `JacksonJsonOpsConformanceTest` 24（TCK 契约套件））；JDK 17 全 reactor **321 个全绿**（core 155 / json-jackson 46 / provider-jdbc 33 / starter 41 / admin 42 / demo-sb3 4），JDK 8 侧 **234 个全绿**；两轮 `clean verify` 都是 `BUILD SUCCESS`，SpotBugs 仍为 **0 缺陷**
+  - **公开迁移指南** [`docs/10-迁移指南.md`](docs/10-迁移指南.md)：M0 摸底 → M1 表结构 → M2 规则/策略对齐 → M3 切换与回滚；共存三路径（前缀指向 / `RENAME` / 新表搬迁，并说明为什么不能用视图兜底）；M2 的“配置字符串 → 注册点”对照表与启动期自检动作；10 条行为对齐清单与排错速查
+  - 测试：新增 **26 个**（`IfmapOrchestratorTest` 兜底分支 2 + json-jackson `JacksonJsonOpsConformanceTest` 24（TCK 契约套件））；JDK 17 全 reactor **294 个全绿**（core 128 / json-jackson 46 / provider-jdbc 33 / starter 41 / admin 42 / demo-sb3 4），JDK 8 侧 **207 个全绿**；两轮 `clean verify` 都是 `BUILD SUCCESS`，SpotBugs 仍为 **0 缺陷**
 - **W7 开源工程化**（同版本，前一批）：
   - `NOTICE`（版权 + 第三方组件许可说明）；`CONTRIBUTING.md`（贡献入口）与 [`docs/09-参与贡献.md`](docs/09-参与贡献.md)（开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁、PR 检查表）
   - **许可头全量落地**：166 个 `*.java` + 5 个 `*.sql` 全部带 Apache-2.0 许可头（Liquibase changelog 的 `--liquibase formatted sql` 仍保持在首行，许可头插在它之后）
@@ -174,7 +185,7 @@
 
 ### Fixed（W12）
 - **`success_value` 的多值分隔符：文档写错，以实现为准回写**。文档（[`docs/04`](docs/04-接入与建表.md) 列说明、[`docs/06`](docs/06-执行编排与策略扩展.md) §7 示例、`001-create-ifmap-config.sql` 列注释）写作 `|`，而实现是 `ResponseJudge.MULTI_VALUE_SEPARATORS = {";", ","}`（**不含 `|`**）→ 全部改为 `,` / `;`。核实存量 ECC：`BankintConfigManager.SEG_STR = ","`，真实数据里 `|` 只出现在 JSONPath 的 `||` 里 —— `|` 是设计稿的臆测。**`0000|S` 是"一个候选值"而不是两个**（已用 `ResponseJudgeTest.pipeIsNotASeparator()` 钉住）
-- **如实文档化"取反"缺口（本轮不实现）**：存量 `success_value` 支持 `!值`（ECC `NON_STR = "!"`，语义"不等于该值即成功"），ifmap **不支持** → 在 [`docs/06`](docs/06-执行编排与策略扩展.md) §7 与 [`docs/10-迁移指南.md`](docs/10-迁移指南.md) §7 行为对齐清单（新增 row 12）写明"迁移前先扫 `success_value like '!%'` 改成等价写法"，并用 `ResponseJudgeTest.negationPrefixIsNotSupported()` 把缺口钉住 —— 防止以后被"顺手实现"成一半（`!0000` 现在只是一个永不命中的字面候选值，属已知语义差异而非静默错误）
+- **如实文档化"取反"缺口（本轮不实现）**：存量 `success_value` 支持 `!值`（ECC `NON_STR = "!"`，语义"不等于该值即成功"），ifmap **不支持** → 在 [`docs/06`](docs/06-执行编排与策略扩展.md) §7 与 [`docs/10-迁移指南.md`](docs/10-迁移指南.md) §6 行为对齐清单（新增 row 12）写明"迁移前先扫 `success_value like '!%'` 改成等价写法"，并用 `ResponseJudgeTest.negationPrefixIsNotSupported()` 把缺口钉住 —— 防止以后被"顺手实现"成一半（`!0000` 现在只是一个永不命中的字面候选值，属已知语义差异而非静默错误）
 
 ### Fixed（W7）
 - `ConfigValidator.checkUniqueKey` 用 **`Integer == Integer`** 比较顺序号 → `Integer` 只缓存 `-128..127`，**顺序号 ≥ 128 时"唯一键冲突"静默漏判**（校验形同虚设，重复配置能被写入）。改为 null 安全的 `sameOrder()`（`equals`）；并补**在旧代码上确认会红**的回归测试 `uniqueKeyDetectsConflictBeyondIntegerCache`（顺序号 200）

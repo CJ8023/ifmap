@@ -20,8 +20,7 @@
 --      `Table 'xxx.bankint_config' doesn't exist`；
 --   ② 03-modify-and-index.sql 已完成，05-verify.sql 的"列 / 索引 / 回填"三节核对通过；
 --   ③ M2（规则与策略对齐）完成：启动期契约自检 0 违规；
---   ④ M3（影子运行）达到退出条件：连续 N 天（建议 7）零差异或差异均有明确解释；
---   ⑤ 已备份（至少备份三张表结构 + 配置数据）。
+--   ④ 已备份（至少备份三张表结构 + 配置数据）。
 --
 -- 为什么 RENAME 放在最后：
 --   共存期先用「路径 A：ifmap 配 ifmap.table-prefix=bankint_」直接读写存量表，

@@ -33,11 +33,11 @@
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-testkit`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **436 个**单元/端到端测试全绿（core 157 + json-jackson 46 + json-fastjson 53 + provider-jdbc 48 + **provider-remote 25** + starter 44 + admin 59 + demo-sb3 4；JDK 8 侧 329 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **508 个**单元/端到端测试全绿（core 160 + json-jackson 69 + json-fastjson 76 + testkit 14 + provider-jdbc 53 + **provider-remote 27** + starter 44 + admin 61 + demo-sb3 4；JDK 8 侧 399 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**10 个模块 0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
 | 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：12 页），CI 独立 job 构建 |
-| 迁移预热 | 存量表迁移 SQL kit（加列/回填/改类型/改表名，含体检与核对脚本）、`JsonOps` 一致性 TCK、影子运行框架（双跑比对、不出网、只记录）、[`docs/10-迁移指南.md`](docs/10-迁移指南.md) |
+| 迁移预热 | 存量表迁移 SQL kit（加列/回填/改类型/改表名，含体检与核对脚本）、`JsonOps` 一致性 TCK、[`docs/10-迁移指南.md`](docs/10-迁移指南.md) |
 | 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
 | 配置来源可换 | 三选一、**引擎侧无感知**：JDBC（自带建表脚本）、**远端 HTTP**（`ifmap-provider-remote`，直连存量配置接口，**一行表都不用迁**，见 [`docs/11`](docs/11-远端配置源.md)）、自研（实现 `ConfigRepository` 即可） |
 | 配置库 / 日志库分离 | **不做多数据源框架**（设计 Q10）：读配置与写日志本来就是两个 SPI，宿主声明一个 `logDataSource` + 一个 `ExecutionLogSink` bean 即可（Spring Boot 官方双数据源写法，[`docs/05`](docs/05-SpringBoot集成.md) §3.5）；日志库不可用**不会**回落到配置库 |
@@ -52,7 +52,7 @@
 **尚未落地**（见 `docs/` 与整体设计文档 W10 之后计划）：PostgreSQL/Oracle 方言、Micrometer 指标。
 
 > 迁移预热（W8）已交付：存量表迁移 SQL kit（`db/migration/ecc-to-ifmap/`，随 jar 发布、需手工执行）、
-> `JsonOps` TCK 一致性套件（`ifmap-json-tck`）、影子运行框架（`cn.cj.ifmap.core.shadow`）、
+> `JsonOps` TCK 一致性套件（`ifmap-json-tck`）、
 > 公开迁移指南 [`docs/10-迁移指南.md`](docs/10-迁移指南.md)。
 >
 > **暂时不想迁表？** 存量配置若本来就是通过 HTTP 接口读的（ECC 即如此），用 `ifmap-provider-remote`
@@ -255,7 +255,7 @@ set JAVA_HOME=D:\cj\softwares\dev\JDK\jdk17\jdk-17.0.20+8&& D:\cj\softwares\dev\
 | [`docs/07-管理端REST.md`](docs/07-管理端REST.md) | 管理端：启用与鉴权、API 一览、状态码语义、保存前校验清单、历史与回滚、试跑、巡检、**可视化页面与字典 SPI**、排错 |
 | [`docs/08-日志与合规.md`](docs/08-日志与合规.md) | 日志与合规：落什么/不落什么、脱敏、截断、失败降级、保留期清理、**按月分区手册与冷热分离归档**、异常体系、合规自查清单 |
 | [`docs/09-参与贡献.md`](docs/09-参与贡献.md) | 参与贡献：开发环境、双 JDK 构建、TDD 流程、代码/测试/文档约定、开源合规、质量门禁与 PR 检查表 |
-| [`docs/10-迁移指南.md`](docs/10-迁移指南.md) | 存量迁移指南（M1 表结构 / M2 规则策略对齐 / M3 影子运行 / M4 切换回滚）、共存方案、行为对齐清单、排错 |
+| [`docs/10-迁移指南.md`](docs/10-迁移指南.md) | 存量迁移指南（M1 表结构 / M2 规则策略对齐 / M3 切换回滚）、共存方案、行为对齐清单、排错 |
 | [`docs/11-远端配置源.md`](docs/11-远端配置源.md) | 配置在远端 HTTP 接口时怎么接（`ConfigFetcher` SPI、Feign/RestTemplate 三种写法、映射规则、与存量接口差异） |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南入口（三条底线 + 指向 `docs/09`） |
 

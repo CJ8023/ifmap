@@ -62,7 +62,7 @@ class ResponseJudgeTest {
     @Test
     void negationPrefixIsNotSupported() {
         // 存量 ECC 的 getInterfaceDealFlag 把 `!0000` 解释为「不等于 0000 即成功」；
-        // ifmap 不做这个转换（docs/10 §7 第 12 条），所以这里只是普通候选值：
+        // ifmap 不做这个转换（docs/10 §6 第 12 条），所以这里只是普通候选值：
         // 两条断言一起看，说明 `!0000` 既不等于 0000 也不等于 9999，只有字面相等才命中。
         assertFalse(judge.evaluate(config("$.code", "!0000"), "{\"code\":\"0000\"}").isSuccess());
         assertFalse(judge.evaluate(config("$.code", "!0000"), "{\"code\":\"9999\"}").isSuccess());

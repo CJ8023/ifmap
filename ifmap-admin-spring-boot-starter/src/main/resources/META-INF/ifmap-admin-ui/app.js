@@ -565,10 +565,15 @@
       el('editor-title').textContent = isNew ? '新建配置' : ('配置 #' + config.keyId + ' · ' + text(config.interfaceNo));
     }
     if (el('editor-meta')) {
-      el('editor-meta').textContent = isNew ? '未保存（新建）'
+      el('editor-meta').textContent = isNew
+        ? '未保存 · 填完点右下「保存」即新建；想改已有的就在上面列表里点一条'
         : ('version=' + text(config.version) + ' status=' + text(config.status) +
           ' delStatus=' + text(config.delStatus) + ' modify=' + text(config.modifyUserId) +
           ' @ ' + text(config.modifyTime));
+    }
+    // 「清空表单」只在编辑态才有意义：空态已经是新建模式了
+    if (el('btn-config-new')) {
+      el('btn-config-new').classList.toggle('hidden', isNew);
     }
     setHtml('editor-fields', CONFIG_FIELDS.map(function (spec) {
       var value = config ? config[spec.name] : NEW_CONFIG_DEFAULTS[spec.name];
@@ -1018,7 +1023,7 @@
     if (el('btn-config-new')) {
       el('btn-config-new').onclick = function () {
         renderEditor(null);
-        toast('已切到新建模式，填完点「保存」');
+        toast('已清空表单：现在是新建模式，填完点「保存」');
       };
     }
     var list = el('config-list');

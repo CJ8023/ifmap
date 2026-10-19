@@ -49,8 +49,6 @@
       </select>
       <label class="inline"><input type="checkbox" id="f-includeDeleted"> 含已删除</label>
       <button type="submit" class="primary">查询</button>
-      <span class="grow"></span>
-      <button type="button" id="btn-config-new">新建配置</button>
     </form>
 
     <div id="config-list" class="card">加载中…</div>
@@ -60,6 +58,11 @@
       <div class="card-head">
         <h2 id="editor-title">配置详情</h2>
         <span class="muted" id="editor-meta">未选择</span>
+        <span class="grow"></span>
+        <!-- 「新建」不是一个需要点击才能进入的模式：表单空着就是新建态（标题会写「新建配置」）。
+             这个按钮只在编辑既有配置时出现，作用是清空表单回到新建态。 -->
+        <button type="button" class="mini hidden" id="btn-config-new"
+                title="清空当前表单，回到新建模式">清空表单</button>
       </div>
       <div id="editor-fields" class="fields"></div>
       <div class="row">

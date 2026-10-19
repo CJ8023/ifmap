@@ -17,6 +17,12 @@ dependency-reduced-pom.xml
 .project
 nbproject/
 
+# 本地环境变量（含库口令等敏感值，绝不入库）
+# 新环境照 .env 里的注释逐条填；需要给协作者参考时提交脱敏后的示例，别提交真值
+.env
+.env.*
+!.env.example
+
 # 本地 AI 代理运行时产物（不含项目内容）
 .omo/
 
@@ -37,3 +43,7 @@ docs/ifmap-内置规则审计与优化_v1.md
 docs/bankintconfig模块优化方案_v1.md
 docs/audit_report.md
 docs/tools/
+
+# 本机启动脚本（含本机 maven/JDK 路径，随环境而变，不入库）
+run-admin.ps1
+run-admin.bat

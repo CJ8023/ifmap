@@ -34,4 +34,14 @@ public interface PartnerServiceGateway {
      * @return 响应原文，允许为 null（表示无响应体）
      */
     String exchange(PartnerCall call);
+
+    /**
+     * 发起调用并附带传输层结果（状态码 / 超时 / 错误消息）。
+     *
+     * <p><b>可选实现</b>：默认回落 {@link #exchange(PartnerCall)}，老实现零改动、行为不变；
+     * 想上报状态码的宿主覆盖本方法即可。</p>
+     */
+    default PartnerOutcome exchangeForOutcome(PartnerCall call) {
+        return PartnerOutcome.ofBody(exchange(call));
+    }
 }

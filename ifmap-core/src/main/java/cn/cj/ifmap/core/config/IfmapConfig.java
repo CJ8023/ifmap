@@ -73,6 +73,10 @@ public class IfmapConfig implements Serializable {
     private String resultFlag;
     /** 成功判断值，多值以 {@code |} 分隔（大小写不敏感）。 */
     private String successValue;
+    /** 结果判定规格（JSON 文本）：{@code {"op":"always"}} / {@code {"all":[...]}} / {@code {"any":[...]}}；必填。 */
+    private String resultJudge;
+    /** 判定器注册名；空 = 用全局默认（{@code ruleSpec}）。 */
+    private String judgeName;
     /** 前序策略标识（= Spring bean 名）：渲染请求后、出网前执行。 */
     private String preStrategyName;
     /** 后序策略标识（= Spring bean 名）：回参产物之后、成功判定之前执行。 */
@@ -232,6 +236,22 @@ public class IfmapConfig implements Serializable {
 
     public void setSuccessValue(String successValue) {
         this.successValue = successValue;
+    }
+
+    public String getResultJudge() {
+        return resultJudge;
+    }
+
+    public void setResultJudge(String resultJudge) {
+        this.resultJudge = resultJudge;
+    }
+
+    public String getJudgeName() {
+        return judgeName;
+    }
+
+    public void setJudgeName(String judgeName) {
+        this.judgeName = judgeName;
     }
 
     public String getPreStrategyName() {

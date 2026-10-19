@@ -104,6 +104,43 @@ class ContractValidatorTest {
     }
 
     @Test
+    @DisplayName("判定规格非法要报违规：空 / all:[] / 未知 op 各有明确原因（复用 ResultJudgeSpec.validate，不另写一套）")
+    void invalidJudgeSpecIsReported() {
+        IfmapConfig blank = TestConfigs.config("IF_E", "GP81", 5, 5L);
+        blank.setResultJudge("");
+        IfmapConfig emptyGroup = TestConfigs.config("IF_F", "GP81", 6, 6L);
+        emptyGroup.setResultJudge("{\"all\":[]}");
+        IfmapConfig unknownOp = TestConfigs.config("IF_G", "GP81", 7, 7L);
+        unknownOp.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"between\",\"value\":\"1\"}]}");
+
+        ContractReport report = validator.validate(Arrays.asList(blank, emptyGroup, unknownOp));
+
+        assertEquals(3, report.judgeSpecViolations().size(), report.toMarkdown());
+        String md = report.toMarkdown();
+        assertTrue(md.contains("result_judge 不能为空"), md);
+        assertTrue(md.contains("不能为空数组"), md);
+        assertTrue(md.contains("between"), md);
+    }
+
+    @Test
+    @DisplayName("always 不计违规，但要计入「不判定接口数」；统计段要出现在 Markdown 里")
+    void alwaysConfigsAreCountedAsStatistics() {
+        IfmapConfig always = TestConfigs.config("IF_H", "GP81", 8, 8L);
+        always.setResultJudge("{\"op\":\"always\"}");
+        IfmapConfig conditional = TestConfigs.config("IF_I", "GP81", 9, 9L);
+        conditional.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}");
+
+        ContractReport report = validator.validate(Arrays.asList(always, conditional));
+
+        assertTrue(report.isClean(), report.toMarkdown());
+        assertEquals(1, report.alwaysCount());
+        assertEquals(2, report.totalConfigs());
+        String md = report.toMarkdown();
+        assertTrue(md.contains("判定形态统计"), md);
+        assertTrue(md.contains("不判定（always）：1"), md);
+    }
+
+    @Test
     @DisplayName("表达式错语法与缺规则同时存在时，两类违规都要报（不能只报一类）")
     void reportsBothMissingRuleAndExpressionProblem() {
         IfmapConfig config = TestConfigs.config("IF_D", "GP81", 4, 4L);

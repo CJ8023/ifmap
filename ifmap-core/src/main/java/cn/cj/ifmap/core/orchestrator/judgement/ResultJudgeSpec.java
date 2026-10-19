@@ -169,7 +169,10 @@ public final class ResultJudgeSpec {
         String path = ((String) pathValue).trim();
         JudgeOp op = JudgeOp.fromName(node.get("op") == null ? null : String.valueOf(node.get("op")));
         if (op == null || op == JudgeOp.ALWAYS) {
-            add(errors, path + " 的 op 非法（支持 eq/ne/in/notIn/exists/notBlank/regex）", errors != null);
+            // 带上写错的那个词：管理端 422 只回第一条错误，不点名的话用户得自己猜哪一行不对
+            Object rawOp = node.get("op");
+            add(errors, path + " 的 op 非法：" + (rawOp == null ? "（缺失）" : rawOp)
+                    + "（支持 eq/ne/in/notIn/exists/notBlank/regex）", errors != null);
             return null;
         }
         boolean ignoreCase = asBoolean(node.get("ignoreCase"), path, errors);

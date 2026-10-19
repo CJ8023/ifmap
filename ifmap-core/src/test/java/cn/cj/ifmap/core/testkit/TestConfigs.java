@@ -45,6 +45,9 @@ public final class TestConfigs {
         config.setInterfaceOrder(Integer.valueOf(order));
         config.setStatus(Integer.valueOf(1));
         config.setDelStatus(Integer.valueOf(0));
+        // result_judge 是 NOT NULL 的必填列：夹具默认「不判定」，需要判定的用例自己覆盖
+        config.setResultJudge("{\"op\":\"always\"}");
+        config.setJudgeName("");
         return config;
     }
 

@@ -18,6 +18,7 @@ package cn.cj.ifmap.core.validate;
 import cn.cj.ifmap.core.IfmapEngine;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.StartupValidationException;
+import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeSpec;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 契约自检：把"DB 里的模板"与"已注册规则"对一遍，缺规则即报违规。
+ * 契约自检：把"DB 里的模板"与"已注册规则"对一遍，缺规则即报违规；顺带校验判定规格并统计判定形态。
  *
  * <p>对应设计 §5.4 的验收口径 —— 存量引擎里 {@code @FUN(farmatDate,...)} 这种拼写错误
  * 会在生产静默输出字面量（已在生产实证 ×5），本类把问题提前到部署前的启动自检。</p>
@@ -43,20 +44,44 @@ public final class ContractValidator {
         this.engine = engine;
     }
 
-    /** 校验一批配置（遍历请求 + 响应模板）。 */
+    /** 校验一批配置（遍历请求 + 响应模板，另加判定规格）。 */
     public ContractReport validate(List<IfmapConfig> configs) {
         List<ContractReport.Violation> violations = new ArrayList<ContractReport.Violation>();
         if (configs == null) {
-            return new ContractReport(violations);
+            return new ContractReport(violations, 0, 0);
         }
+        int total = 0;
+        int alwaysCount = 0;
         for (IfmapConfig config : configs) {
             if (config == null) {
                 continue;
             }
+            total++;
             check(config, config.getRequestParamTemplate(), ContractReport.Violation.KIND_REQUEST, violations);
             check(config, config.getResponseParamTemplate(), ContractReport.Violation.KIND_RESPONSE, violations);
+            if (checkJudgeSpec(config, violations)) {
+                alwaysCount++;
+            }
         }
-        return new ContractReport(violations);
+        return new ContractReport(violations, total, alwaysCount);
+    }
+
+    /**
+     * 判定规格检查：直接复用 {@link ResultJudgeSpec#validate}（管理端 422、运行期 {@code RuleSpecJudge}
+     * 用的是同一套规则，三处口径必须同源）。
+     *
+     * @return 该接口是否「不做判定」（{@code always}）；非法规格返回 false（已记违规）
+     */
+    private boolean checkJudgeSpec(IfmapConfig config, List<ContractReport.Violation> violations) {
+        List<String> errors = ResultJudgeSpec.validate(config.getResultJudge(), engine.getJsonOps());
+        if (!errors.isEmpty()) {
+            for (String error : errors) {
+                violations.add(new ContractReport.Violation(config.getInterfaceNo(), config.getInterfaceOrder(),
+                        ContractReport.Violation.KIND_JUDGE, error));
+            }
+            return false;
+        }
+        return ResultJudgeSpec.parse(config.getResultJudge(), engine.getJsonOps()).isAlways();
     }
 
     private void check(IfmapConfig config, String template, String kind,

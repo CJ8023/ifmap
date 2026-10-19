@@ -198,6 +198,14 @@ class JsonConfigMapperTest {
         IfmapConfigException second = assertThrows(IfmapConfigException.class,
                 () -> JsonConfigMapper.toConfigs(JSON, secondBroken, null));
         assertTrue(second.getMessage().contains("第 2 条"), second.getMessage());
+
+        // result_judge 是 NOT NULL 且无默认值：远端漏给就在入口失败（旧键 result_flag 不再被读）
+        String legacyOnly = "[" + MINIMAL.replace(",\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"", "")
+                .replace("\"interfaceCode\"", "\"result_flag\":\"$.code\",\"success_value\":\"0000\",\"interfaceCode\"")
+                + "]";
+        IfmapConfigException noJudge = assertThrows(IfmapConfigException.class,
+                () -> JsonConfigMapper.toConfigs(JSON, legacyOnly, null));
+        assertTrue(noJudge.getMessage().contains("resultJudge"), noJudge.getMessage());
     }
 
     @Test

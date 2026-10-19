@@ -84,13 +84,77 @@ public class ConfigSnapshotMapper {
         config.setInterfaceOrder(asInt(map.get("interfaceOrder")));
         config.setRequestParamTemplate(asString(map.get("requestParamTemplate")));
         config.setResponseParamTemplate(asString(map.get("responseParamTemplate")));
-        config.setResultJudge(asString(map.get("resultJudge")));
-        config.setJudgeName(asString(map.get("judgeName")));
+        config.setResultJudge(resolveResultJudge(map));
+        // judge_name 是 NOT NULL DEFAULT ''：老快照没有该键，回滚出来的对象要和库里读出来的一致（空串而不是 null）
+        String judgeName = asString(map.get("judgeName"));
+        config.setJudgeName(judgeName == null ? "" : judgeName);
         config.setPreStrategyName(asString(map.get("preStrategyName")));
         config.setPostStrategyName(asString(map.get("postStrategyName")));
         config.setStatus(asInt(map.get("status")));
         config.setRemark(asString(map.get("remark")));
         return config;
+    }
+
+    /**
+     * 判定规格：新快照读 {@code resultJudge}；<b>老快照</b>（只有 {@code resultFlag}/{@code successValue}）
+     * 现算成等价新规格 —— <b>只读不写回</b>，历史行保持原样（回滚不该顺手改历史，审计要能看出"当时写的什么"）。
+     *
+     * <p>语义对齐（老口径见已删除的 {@code ResponseJudge}）：</p>
+     * <ul>
+     *   <li>{@code resultFlag} 为空 → 老口径"默认成功" ⇒ {@code {"op":"always"}}；</li>
+     *   <li>{@code successValue} 有值 → 老口径"多值、{@code ;}/{@code ,} 分隔、任一命中、忽略大小写"
+     *       ⇒ {@code {"all":[{path, op:"in", value:[...], ignoreCase:true}]}}；</li>
+     *   <li>{@code successValue} 为空 → 老口径"非空且非 false/0 即成功"，新规格没有 falsy 概念，
+     *       取最接近的 {@code notBlank}（比 {@code exists} 严：空串判失败）。这条只在回滚极老的
+     *       历史行时才会走到，宽松/从严的差异会体现在回滚后的判定上，已在此注明。</li>
+     * </ul>
+     */
+    String resolveResultJudge(Map<?, ?> map) {
+        String judge = asString(map.get("resultJudge"));
+        if (judge != null && !judge.trim().isEmpty()) {
+            return judge;
+        }
+        String flag = trimToNull(asString(map.get("resultFlag")));
+        if (flag == null) {
+            return "{\"op\":\"always\"}";
+        }
+        Map<String, Object> condition = new LinkedHashMap<String, Object>();
+        condition.put("path", flag);
+        java.util.List<String> values = splitLegacyValues(asString(map.get("successValue")));
+        if (values.isEmpty()) {
+            condition.put("op", "notBlank");
+        } else {
+            condition.put("op", "in");
+            condition.put("value", values);
+            condition.put("ignoreCase", Boolean.TRUE);
+        }
+        Map<String, Object> all = new LinkedHashMap<String, Object>();
+        all.put("all", java.util.Collections.singletonList(condition));
+        return jsonOps.toJson(all);
+    }
+
+    /** 老 {@code success_value} 的多值切分（{@code ;} / {@code ,}，去空白、丢空段 —— 与老实现一致）。 */
+    static java.util.List<String> splitLegacyValues(String expected) {
+        java.util.List<String> values = new java.util.ArrayList<String>();
+        String text = trimToNull(expected);
+        if (text == null) {
+            return values;
+        }
+        for (String part : text.split("[;,]")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                values.add(trimmed);
+            }
+        }
+        return values;
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**

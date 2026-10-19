@@ -69,6 +69,42 @@ class ConfigSnapshotMapperTest {
     }
 
     @Test
+    @DisplayName("老快照（result_flag/success_value）能读成等价新规格：in + 忽略大小写，多值按 ; 或 , 切")
+    void legacySnapshotWithFlagAndSuccessValueIsConverted() {
+        String legacy = "{\"keyId\":1001,\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CMB_IF_A\","
+                + "\"interfaceName\":\"接口A\",\"busiNode\":\"apply\",\"partnerCode\":\"CMB\","
+                + "\"interfaceOrder\":1,\"resultFlag\":\"$.resultCode\",\"successValue\":\"0000;success,OK\"}";
+
+        IfmapConfig restored = mapper.fromSnapshot(legacy);
+
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"in\","
+                        + "\"value\":[\"0000\",\"success\",\"OK\"],\"ignoreCase\":true}]}",
+                restored.getResultJudge(), "老 success_value 是多值（; , 分隔）、大小写不敏感，转换要保住这两个语义");
+        assertEquals("", restored.getJudgeName(), "老快照没有判定器概念 → 空串 = 默认 ruleSpec");
+    }
+
+    @Test
+    @DisplayName("老快照没有 result_flag（空或缺失）→ 转成 always，而不是留空导致回滚后无法判定")
+    void legacySnapshotWithoutFlagBecomesAlways() {
+        String blankFlag = "{\"keyId\":1001,\"interfaceNo\":\"IF_A\",\"resultFlag\":\"\""
+                + ",\"successValue\":\"0000\"}";
+        assertEquals("{\"op\":\"always\"}", mapper.fromSnapshot(blankFlag).getResultJudge());
+
+        String noColumns = "{\"keyId\":1001,\"interfaceNo\":\"IF_A\"}";
+        assertEquals("{\"op\":\"always\"}", mapper.fromSnapshot(noColumns).getResultJudge());
+    }
+
+    @Test
+    @DisplayName("新快照只写新键：resultFlag/successValue 不再出现（老字段不再被写回）")
+    void newSnapshotDropsLegacyKeys() {
+        String snapshot = mapper.toSnapshot(AdminTestSupport.config("IF_A", "apply", 1));
+
+        assertTrue(snapshot.contains("\"resultJudge\""), snapshot);
+        assertFalse(snapshot.contains("resultFlag"), "新快照不应再写老键：" + snapshot);
+        assertFalse(snapshot.contains("successValue"), "新快照不应再写老键：" + snapshot);
+    }
+
+    @Test
     @DisplayName("差异只含变化的字段，未变化的不出现")
     void diffOnlyContainsChangedFields() {
         IfmapConfig before = AdminTestSupport.config("IF_A", "apply", 1);

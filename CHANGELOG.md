@@ -57,6 +57,17 @@
   `IS_NULLABLE` / `COLUMN_DEFAULT`，不数总列 —— `result_flag`→`result_judge` 会让列数一模一样，正好掩盖就是这种漂移）；
   json-tck 新增 2 套实现 × 6 条 fixture。
 
+### Fixed（判定算子接线词面：`notBlank` / `notIn` 被自己拒了）
+- `JudgeOp.fromName` 只拿枚举名比较（`NOT_BLANK` / `NOT_IN`），而文档 §7 与管理端下拉框发出的是 camelCase 的
+  `notBlank` / `notIn` ⇒ 在管理端选「非空」或「不在集合内」存下来的规格，运行期直接判 `SPEC_INVALID`；
+  更绕的是报错信息还把 `notBlank` 列进"支持"清单，自己列的名字自己解析不了。
+  改为**忽略下划线 + 大小写不敏感**：camelCase 为规范形态，`not_blank` / `NOT_IN` 继续认，未知词仍 fail-closed
+  （未知算子不许静默降级这个原则不变）。
+- 为什么直到给真库种样例才暴露：`JudgeOpTest` 全部直接调枚举常量、`ResultJudgeSpecTest` 只用 `eq`/`in`、
+  TCK 12 条 fixture 也只覆盖 `eq`/`in`/`always`/未知算子 —— 三层测试**一致地没测接线词面**。
+  补 `JudgeOpTest.wireNamesAreCamelCaseLikeDocsAndAdmin` 与 `ResultJudgeSpecTest.acceptsWireNamesUsedByDocsAndAdmin`
+  （后者直接断言"管理端能存进去的规格必须能解析并求值"，把 UI 与解析层焊在一起）。
+
 ### Fixed（真库测试档：两处「同 hint 即同组表」的用例冲突）
 - `IfmapSchemaInitializerTest` 的 `createsThenSkips` 与 `applyAlterScriptsIsIdempotent` 共用了同一个 `caseName`，
   真库档下两者落到同一组表 ⇒ 后跑的那个断言「首次建 4 张表」必得 0 张。改成各用独立 hint。

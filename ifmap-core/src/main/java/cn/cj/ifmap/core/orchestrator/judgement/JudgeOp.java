@@ -29,14 +29,20 @@ public enum JudgeOp {
 
     EQ, NE, IN, NOT_IN, EXISTS, NOT_BLANK, REGEX, ALWAYS;
 
-    /** 词面 → 枚举（大小写不敏感）；未知返回 null。 */
+    /**
+     * 词面 → 枚举（大小写不敏感、忽略下划线）；未知返回 null。
+     *
+     * <p>接线词面以文档/管理端为准的 camelCase（{@code notBlank}、{@code notIn}）为规范形态，
+     * 同时兼容枚举名形态（{@code not_blank}、{@code NOT_IN}）—— 早期按枚举名写下的存量规格
+     * 不能因为改名就被判成非法规格。</p>
+     */
     public static JudgeOp fromName(String name) {
         if (name == null) {
             return null;
         }
-        String trimmed = name.trim();
+        String normalized = name.trim().replace("_", "");
         for (JudgeOp op : values()) {
-            if (op.name().equalsIgnoreCase(trimmed)) {
+            if (op.name().replace("_", "").equalsIgnoreCase(normalized)) {
                 return op;
             }
         }

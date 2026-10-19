@@ -62,6 +62,21 @@ class ResultJudgeSpecTest {
     }
 
     @Test
+    void acceptsWireNamesUsedByDocsAndAdmin() {
+        // 管理端下拉框与文档都写 camelCase；解析层必须认，否则选了就等于落一份非法规格
+        assertTrue(invalid("{\"all\":[{\"path\":\"$.data.riskLevel\",\"op\":\"notBlank\"}]}").isEmpty());
+        assertTrue(invalid("{\"all\":[{\"path\":\"$.data.riskLevel\",\"op\":\"notIn\",\"value\":[\"H\",\"R\"]}]}").isEmpty());
+        ResultJudgeSpec notBlank = ResultJudgeSpec.parse(
+                "{\"all\":[{\"path\":\"$.data.riskLevel\",\"op\":\"notBlank\"}]}", jsonOps);
+        assertTrue(notBlank.evaluate(jsonOps.readContext("{\"data\":{\"riskLevel\":\"A\"}}")).isMatched());
+        assertFalse(notBlank.evaluate(jsonOps.readContext("{\"data\":{\"riskLevel\":\"  \"}}")).isMatched());
+        ResultJudgeSpec notIn = ResultJudgeSpec.parse(
+                "{\"all\":[{\"path\":\"$.data.riskLevel\",\"op\":\"notIn\",\"value\":[\"H\",\"R\"]}]}", jsonOps);
+        assertTrue(notIn.evaluate(jsonOps.readContext("{\"data\":{\"riskLevel\":\"A\"}}")).isMatched());
+        assertFalse(notIn.evaluate(jsonOps.readContext("{\"data\":{\"riskLevel\":\"H\"}}")).isMatched());
+    }
+
+    @Test
     void nestedGroupsUpToThreeLevels() {
         String ok = "{\"any\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"},"
                 + "{\"all\":[{\"path\":\"$.state\",\"op\":\"eq\",\"value\":\"1\"},"

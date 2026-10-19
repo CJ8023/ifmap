@@ -21,6 +21,7 @@ import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JudgeOpTest {
@@ -64,6 +65,16 @@ class JudgeOpTest {
         assertFalse(JudgeOp.IN.matches(in, true, "9999"));
         JudgeCondition notIn = new JudgeCondition("$.code", JudgeOp.NOT_IN, null, false, Arrays.asList("9999"));
         assertTrue(JudgeOp.NOT_IN.matches(notIn, true, "0000"));
+    }
+
+    @Test
+    void wireNamesAreCamelCaseLikeDocsAndAdmin() {
+        // docs/06 §7 与管理端 app.js 的 JUDGE_OPS 写的是 notBlank / notIn（camelCase）
+        assertSame(JudgeOp.NOT_BLANK, JudgeOp.fromName("notBlank"));
+        assertSame(JudgeOp.NOT_IN, JudgeOp.fromName("notIn"));
+        // 枚举名形态也要继续认：已经按 not_blank / NOT_IN 写下的规格不能被判非法
+        assertSame(JudgeOp.NOT_BLANK, JudgeOp.fromName("not_blank"));
+        assertSame(JudgeOp.NOT_IN, JudgeOp.fromName("NOT_IN"));
     }
 
     @Test

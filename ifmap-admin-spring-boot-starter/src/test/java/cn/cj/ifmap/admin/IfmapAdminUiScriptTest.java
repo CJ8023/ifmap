@@ -132,6 +132,23 @@ class IfmapAdminUiScriptTest {
     }
 
     @Test
+    @DisplayName("编辑表单有判定编辑器：三种形态 + op 决定 value 是否必填，且不再出现 resultFlag/successValue")
+    void judgeEditorIsWired() {
+        String script = stripComments(text(JS));
+
+        assertTrue(script.contains("'resultJudge'"), "表单必须提供 resultJudge 字段");
+        assertTrue(script.contains("'judgeName'"), "表单必须提供 judgeName（判定器选择）");
+        assertTrue(!script.contains("resultFlag") && !script.contains("successValue"),
+                "老判定列已从库/接口里删除，页面不该再出现：否则一保存就写回不存在的字段");
+        assertTrue(script.contains("ed-judge-op") && script.contains("ed-judge-path")
+                && script.contains("ed-judge-value") && script.contains("ed-judge-raw"),
+                "缺少判定编辑器控件（path/op/value/原始 JSON）");
+        // op 决定 value 是否必填：存在性判定与 always 不该要求 value
+        assertTrue(script.contains("JUDGE_NO_VALUE_OPS") && script.contains("JUDGE_LIST_OPS"),
+                "必须按 op 区分 value 形态（exists/notBlank 无值、in/notIn 为数组）");
+    }
+
+    @Test
     @DisplayName("index.html 引用的两个静态资源都真实存在，且没有外链（内网离线可用）")
     void htmlIsSelfContained() {
         String html = text(HTML);

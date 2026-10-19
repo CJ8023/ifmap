@@ -56,6 +56,12 @@ code, pre, textarea { font-family: Consolas, Menlo, "Courier New", monospace; }
 .inline { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .block { display: block; margin: 6px 0; }
 
+/* 判定编辑器：三种形态横排 + 条件行（path/op/value 一行内可换行） */
+.judge-editor { border-left: 3px solid var(--line); padding-left: 8px; }
+.judge-editor .judge-modes { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0; }
+.judge-editor #ed-judge-condition { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.judge-editor input[type="text"], .judge-editor input:not([type]), .judge-editor select { min-width: 120px; }
+
 .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
 
 .tab-btn {

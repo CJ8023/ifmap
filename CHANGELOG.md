@@ -57,6 +57,14 @@
   `IS_NULLABLE` / `COLUMN_DEFAULT`，不数总列 —— `result_flag`→`result_judge` 会让列数一模一样，正好掩盖就是这种漂移）；
   json-tck 新增 2 套实现 × 6 条 fixture。
 
+### Fixed（真库测试档：两处「同 hint 即同组表」的用例冲突）
+- `IfmapSchemaInitializerTest` 的 `createsThenSkips` 与 `applyAlterScriptsIsIdempotent` 共用了同一个 `caseName`，
+  真库档下两者落到同一组表 ⇒ 后跑的那个断言「首次建 4 张表」必得 0 张。改成各用独立 hint。
+- `IfmapSplitDatasourceTest` 的两个用例共用主库 hint，都插 `interface_order=1` 的配置，而
+  `uk_*_config_order` 是 `(tenant_id, busi_node, interface_order, deleted_seq)`（**不含** `interface_no`）⇒ 第二个必撞唯一键。
+  「日志库不可用」用例改用独立 hint。
+  两处都是 H2 档天然看不出来的（每个 hint 一块独立内存库），只有真库档 + `-Dsurefire.runOrder` 换序才暴露。
+
 ### Changed（编排定序、跨步骤共享池与前后序策略 —— 破坏性）
 - **`ifmap_config` 删 1 列 / 拆 1 列**：删 `front_interface_no`（连带索引 `idx_config_front`）—— 它和
   `interface_order` 表达的是同一件事（步骤先后），两套机制并存让「谁是前序」有了两个答案；

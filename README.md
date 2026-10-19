@@ -33,7 +33,7 @@
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-testkit`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **580 个**单元/端到端测试全绿（core 198 + json-jackson 75 + json-fastjson 82 + testkit 14 + provider-jdbc 61 + **provider-remote 27** + starter 46 + admin 73 + demo-sb3 4；JDK 8 侧 443 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **580 个**单元/端到端测试全绿（core 198 + json-jackson 75 + json-fastjson 82 + testkit 14 + provider-jdbc 61 + **provider-remote 27** + starter 46 + admin 73 + demo-sb3 4；JDK 8 侧 457 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**10 个模块 0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
 | 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：12 页），CI 独立 job 构建 |

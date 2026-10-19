@@ -229,7 +229,9 @@ class IfmapSchemaInitializerTest {
     @Test
     @DisplayName("升级脚本幂等：第二次执行不再动表（存量库手工跑过 Liquibase / 重启 starter 都不报错）")
     void applyAlterScriptsIsIdempotent() {
-        final String caseName = "ifmap_ddl_idempotent";
+        // caseName 必须与 createsThenSkips 不同：真库档同一 hint = 同一组表，两个用例都断言"首次建 4 张表"，
+        // 撞在一起时后跑的那个会看到 0 张（H2 档每个 hint 一块独立内存库，所以从没暴露过）
+        final String caseName = "ifmap_ddl_alter_idem";
         javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
         String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
         IfmapSchemaInitializer initializer = new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),

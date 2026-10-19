@@ -73,6 +73,14 @@ class IfmapSplitDatasourceTest {
 
     /** 主库（配置）：标 {@code @Primary}，自动配置里的 {@code DataSource} 注入都走它。 */
     private static final String CONFIG_DB = "ifmap_split_config_db";
+    /**
+     * 「日志库不可用」用例的配置库 hint，**必须与 {@link #CONFIG_DB} 分开**。
+     *
+     * <p>真库档下同一个 hint 落到同一组表：两个用例都往 config 表插 {@code interface_order=1} 的行，
+     * 而 {@code uk_*_config_order} 是 {@code (tenant_id, busi_node, interface_order, deleted_seq)}，
+     * 不含 {@code interface_no} —— 于是第二个用例必撞唯一键（H2 档每个 hint 一块独立内存库，所以从没暴露）。</p>
+     */
+    private static final String CONFIG_DB_BROKEN = "ifmap_split_fail_db";
     /** 日志库（执行日志）：只有它被显式注入到覆盖后的 {@code ExecutionLogSink}。 */
     private static final String LOG_DB = "ifmap_split_log_db";
     private static final String LOG_DB_NO_TABLES = "ifmap_split_log_db_no_tables";
@@ -110,7 +118,7 @@ class IfmapSplitDatasourceTest {
         @Bean(name = "dataSource")
         @Primary
         public DataSource configDataSource() {
-            return TestDatabases.fresh(CONFIG_DB).dataSource();
+            return TestDatabases.fresh(CONFIG_DB_BROKEN).dataSource();
         }
 
         @Bean(name = "logDataSource")
@@ -132,11 +140,11 @@ class IfmapSplitDatasourceTest {
         }
     }
 
-    private static ApplicationContextRunner runner(Class<?> splitConfig) {
+    private static ApplicationContextRunner runner(Class<?> splitConfig, String configHint) {
         return new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(IfmapAutoConfiguration.class))
                 .withUserConfiguration(splitConfig)
-                .withPropertyValues("ifmap.table-prefix=" + prefixOf(CONFIG_DB))
+                .withPropertyValues("ifmap.table-prefix=" + prefixOf(configHint))
                 .withBean("echoGateway", PartnerServiceGateway.class, EchoGateway::new);
     }
 
@@ -169,7 +177,7 @@ class IfmapSplitDatasourceTest {
     @Test
     @DisplayName("配置读主库、日志写日志库：两边各只有自己那一半数据")
     void configAndLogsGoToDifferentDatabases() {
-        runner(SplitDatasourceConfig.class).run(context -> {
+        runner(SplitDatasourceConfig.class, CONFIG_DB).run(context -> {
             assertNull(context.getStartupFailure(), "上下文应正常启动");
             DataSource logDataSource = context.getBean("logDataSource", DataSource.class);
             DataSource configDataSource = context.getBean("dataSource", DataSource.class);
@@ -207,7 +215,7 @@ class IfmapSplitDatasourceTest {
     @Test
     @DisplayName("日志库不可用：业务照常成功，主库也不会被顶上（只降级为 WARN）")
     void unavailableLogDatabaseDoesNotBreakBusiness() {
-        runner(BrokenLogDatasourceConfig.class).run(context -> {
+        runner(BrokenLogDatasourceConfig.class, CONFIG_DB_BROKEN).run(context -> {
             DataSource configDataSource = context.getBean("dataSource", DataSource.class);
             // 刻意不给日志库建表：写入必然失败
             insertConfig(context.getBean(JdbcConfigWriter.class), "BIZ_SPLIT_FAIL", "0000");
@@ -219,7 +227,7 @@ class IfmapSplitDatasourceTest {
 
             assertTrue(result.isSuccess(), "写日志失败不能影响业务结果：" + result.getErrorMessage());
             assertEquals("AP-SPLIT", result.getData().get("applyNo"));
-            assertTrue(logsOf(configDataSource, prefixOf(CONFIG_DB), "BIZ-SPLIT-FAIL").isEmpty(),
+            assertTrue(logsOf(configDataSource, prefixOf(CONFIG_DB_BROKEN), "BIZ-SPLIT-FAIL").isEmpty(),
                     "日志库写失败时不许回落到主库，否则两库分离就失去意义");
         });
     }

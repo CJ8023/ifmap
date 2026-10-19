@@ -393,19 +393,23 @@
     var hint = spec.hint ? '<span class="muted">' + esc(spec.hint) + '</span>' : '';
     if (spec.dict) {
       var options = dictOptions(spec.dict);
-      var current = text(value);
-      var known = options.some(function (option) {
-        return option.value === current;
-      });
-      var extra = current !== '' && !known
-        ? '<option value="' + esc(current) + '" selected>' + esc(current) + ' · (字典未覆盖)</option>' : '';
-      var body = '<option value=""' + (current === '' ? ' selected' : '') + '>(空)</option>' +
-        options.map(function (option) {
-          return '<option value="' + esc(option.value) + '"' + (option.value === current ? ' selected' : '') +
-            '>' + esc(option.label) + '</option>';
-        }).join('') + extra;
-      return '<label class="inline">' + label + '<select id="' + id + '" data-field="' + esc(spec.name) + '">' +
-        body + '</select>' + hint + '</label>';
+      if (options.length) {
+        var current = text(value);
+        var known = options.some(function (option) {
+          return option.value === current;
+        });
+        var extra = current !== '' && !known
+          ? '<option value="' + esc(current) + '" selected>' + esc(current) + ' · (字典未覆盖)</option>' : '';
+        var body = '<option value=""' + (current === '' ? ' selected' : '') + '>(空)</option>' +
+          options.map(function (option) {
+            return '<option value="' + esc(option.value) + '"' + (option.value === current ? ' selected' : '') +
+              '>' + esc(option.label) + '</option>';
+          }).join('') + extra;
+        return '<label class="inline">' + label + '<select id="' + id + '" data-field="' + esc(spec.name) + '">' +
+          body + '</select>' + hint + '</label>';
+      }
+      // 字典是空的（宿主没注册 IfmapEnumProvider、也没内置值）：退化成输入框。
+      // 千万别在这里仍渲染 select —— 只剩一个「(空)」选项等于把字段锁死，用户连手输都做不到。
     }
     return '<label class="inline">' + label +
       '<input id="' + id + '" data-field="' + esc(spec.name) + '"' +

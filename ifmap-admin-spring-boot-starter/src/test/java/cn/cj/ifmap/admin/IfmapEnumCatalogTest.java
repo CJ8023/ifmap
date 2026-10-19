@@ -115,4 +115,50 @@ class IfmapEnumCatalogTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> first.get("partnerCode").add(EnumOption.of("ABC", "农业银行")));
     }
+
+    @Test
+    @DisplayName("框架字典：已注册策略名进 strategyName（去重 + 排序），status 恒有启用/停用")
+    void builtinEnums() {
+        IfmapEnumCatalog catalog = IfmapEnumCatalog.of(null,
+                IfmapBuiltinEnums.of(Arrays.asList("betaStrategy", "alphaStrategy", "betaStrategy", "  ", null)));
+
+        assertFalse(catalog.isPresent(), "isPresent 说的是「宿主机给了字典」，框架内置不算");
+        Map<String, List<EnumOption>> options = catalog.options();
+        // 排序是为了不让下拉顺序随 bean 注册顺序抖动（同一个策略集合，两次开页面选项顺序不一样很难看）
+        assertEquals(Arrays.asList("alphaStrategy", "betaStrategy"), values(options.get("strategyName")));
+        assertEquals(Arrays.asList("1", "0"), values(options.get("status")));
+    }
+
+    @Test
+    @DisplayName("宿主机同名 key 覆盖框架字典（标的是宿主的），没给的 key 仍用内置")
+    void hostOverridesBuiltin() {
+        IfmapEnumCatalog catalog = IfmapEnumCatalog.of(
+                () -> Collections.singletonMap("status",
+                        Collections.singletonList(EnumOption.of("1", "开启（宿主口径）"))),
+                IfmapBuiltinEnums.of(Collections.singletonList("demoStrategy")));
+
+        Map<String, List<EnumOption>> options = catalog.options();
+        assertEquals("开启（宿主口径）", options.get("status").get(0).getLabel());
+        assertEquals(1, options.get("status").size(), "是覆盖不是拼接：同 key 不该把内置项也留着");
+        assertEquals(Collections.singletonList("demoStrategy"), values(options.get("strategyName")));
+    }
+
+    @Test
+    @DisplayName("只有框架字典也不退化成 empty() 单例（端点会回 {}，页面就只剩「(空)」）")
+    void builtinOnlyIsNotEmpty() {
+        IfmapEnumCatalog catalog = IfmapEnumCatalog.of(null, IfmapBuiltinEnums.of(null));
+
+        assertFalse(catalog.options().isEmpty());
+        assertEquals(Collections.singletonList("status"), new ArrayList<String>(catalog.options().keySet()));
+        // 两边都空才回到单例
+        assertSame(IfmapEnumCatalog.empty(), IfmapEnumCatalog.of(null, Collections.<String, List<EnumOption>>emptyMap()));
+    }
+
+    private static List<String> values(List<EnumOption> options) {
+        List<String> out = new ArrayList<String>();
+        for (EnumOption option : options) {
+            out.add(option.getValue());
+        }
+        return out;
+    }
 }

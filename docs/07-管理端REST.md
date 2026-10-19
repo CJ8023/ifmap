@@ -94,9 +94,9 @@ ifmap:
 | GET | `/actions` | 已注册动作（`method_flag` 取值） |
 | GET | `/strategies` | 已注册策略：`specialDeals` / `fullParams` / `logicBranches` / `actions` / `callbacks` |
 | GET | `/audit?tenantId=&busiNode=&markdown=` | 全量巡检，`markdown=true` 返回可贴工单的报告 |
-| GET | `/enums` | 宿主机注册的**字典**（可选 SPI，见 §11.3）；没注册就返回 `{}`（不是 404） |
+| GET | `/enums` | 字典：**框架自带**（`strategyName` ← 已注册的前/后序策略、`status`）**＋** 宿主机字典（可选 SPI，同名 key 覆盖，见 §11.3） |
 
-**这些端点由服务端提供，前端不要硬编码**：`@FUN` 规则、`method_flag` 动作、`pre_strategy_name` / `post_strategy_name` 都是宿主机代码决定的，硬编码必然和宿主漂移。
+**这些端点由服务端提供，前端不要硬编码**：`@FUN` 规则、`method_flag` 动作、`pre_strategy_name` / `post_strategy_name` 都是宿主机代码决定的，硬编码必然和宿主漂移 —— 前/后序策略的下拉值就曾经只喂给了「元数据」页的标签、没接到表单，于是永远是空的。
 
 ### 3.4 审计头
 
@@ -235,7 +235,7 @@ POST /ifmap/admin/configs/dry-run
 | 点列表某行报「配置不存在：#899855950645559300」 | **ID 精度丢失**：雪花 `keyId` 以 JSON number 下发，浏览器 double 会就近取整（……296 变 ……300）。管理端已改成「超过 2^53 的 long 一律字符串」（§3.5）；页面也不得对 id 做 `Number()` |
 | 校验一直 422 说规则不存在 | 自定义规则没被收集：确认 `@IfmapRule` 方法所在 bean 被 Spring 管理（starter 的 `IfmapRuleRegistrar` 只扫 bean，不扫静态类） |
 | 打开 `/ui/` 是空白页 / 资源 404 | 静态资源挂在 `{base-path}/ui/**`；前面有 Nginx / 网关反向代理时**必须把 `{base-path}` 整段转发**（页面靠当前 URL 反推前缀，前缀被截断就调不到接口）；另看浏览器控制台报错 |
-| 页面上字典下拉是空的（其它都正常） | 宿主机没注册 `IfmapEnumProvider`（可选 SPI）→ `/enums` 返回 `{}`，页面退化成普通输入框，功能不受影响（§11.3） |
+| 页面上字典下拉是空的（其它都正常） | 那个字段的 key 既不在框架内置值里（`strategyName` / `status`），宿主机也没给 → 字段退化成**普通输入框**，手输即可（§11.3） |
 
 ## 10. 最小可运行示例
 
@@ -289,24 +289,34 @@ REST 是给机器和 curl 用的，运营同学要的是能点的页面。所以
 | 零前端框架、零构建链 | 加了 React/Vue 就多一条 Node 构建链要维护、要发版；页面本身就是一堆表单与表格，原生 JS 够用（`app.js` 约 1150 行） |
 | 资源**不缓存**（`Cache-Control: no-cache`） | 升级 ifmap 后刷新必须立刻是新版页面，避免"页面是旧的、接口是新的"这种最难查的错 |
 
-### 11.3 字典 SPI：`IfmapEnumProvider`（可选，不强制）
+### 11.3 字典：框架自带 + 宿主机 SPI（`IfmapEnumProvider`，可选）
 
-ifmap **不建字典表**（设计 Q8）：码值含义是宿主机业务，引擎只负责把值填进模板。想让页面把某字段渲染成下拉，宿主机注册一个 bean 即可：
+ifmap **不建字典表**（设计 Q8）：码值含义是宿主机业务，引擎只负责把值填进模板。但有两类值引擎**自己就知道**，不该让宿主机再拄一遍：
+
+| dict key | 页面字段 | 选项来源 |
+|---|---|---|
+| `strategyName` | 前序策略 / 后序策略 | `SpecialDealStrategyRegistry.keys()`（已注册了什么策略就能选到什么） |
+| `status` | 状态 | 固定 `1 启用` / `0 停用` |
+| `#actions`（特殊 key） | 分支的 `method_flag` | `GET /actions`（`ActionRegistry.keys()`），不走 `/enums` |
+
+业务码值（`partnerCode` / `financingMode`……）仍需宿主机注册一个 bean：
 
 ```java
 @Bean
 public IfmapEnumProvider partnerEnums() {
     return () -> Map.of(
             "partnerCode", List.of(EnumOption.of("CMB", "招商银行"), EnumOption.of("ICBC", "工商银行")),
-            "status",   List.of(EnumOption.of("1", "启用"), EnumOption.of("0", "停用")));
+            "status",   List.of(EnumOption.of("1", "启用（宿主口径）")));
 }
 ```
 
 | 约定 | 说明 |
 |---|---|
-| key | **模板里的字段名**（元素 `data-field`），如 `partnerCode`；页面按名字取，取不到就是普通输入框 |
+| key | **模板里的字段名**（元素 `data-field`），如 `partnerCode`；几个字段可共用一个 key（前/后序策略都指 `strategyName`） |
 | 返回 | `Map<String, List<EnumOption>>`；`EnumOption.value` 必填（空值直接 `IllegalArgumentException`），`label` 可省（省了用 `value`） |
-| 没注册 | `/enums` 返回 `200 {}`（**不是 404**）：页面只有"没有字典"这一条正常分支，少一个 SPI 不会让页面报错 |
+| **合并规则** | 先放框架字典，再用宿主机**同名 key 覆盖**（宿主最清楚自己的码值和文案）；宿主机没给的 key 继续用框架值 |
+| 没注册 | `/enums` 返回 **200 + 框架字典**（不是 404，也不是 `{}`）；`isPresent()` 仍是 `false`，但页面照样有下拉 |
+| **空字典** | 某个 key 一项都没有时，那个字段**退化成普通输入框**（可手输），而不是一个只有「（空）」的 select |
 | 脏数据 | `null` key / `null` 列表 / `null` 项会被跳过，坏一项不影响其它字段 |
 
 ### 11.4 页面自己怎么测（手写 JS 的护栏）

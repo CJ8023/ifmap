@@ -149,6 +149,19 @@ class IfmapAdminUiScriptTest {
     }
 
     @Test
+    @DisplayName("字典为空时退化成输入框：只剩「(空)」的 select 等于把字段锁死")
+    void emptyDictFallsBackToInput() {
+        String script = stripComments(text(JS));
+
+        assertTrue(script.contains("if (options.length)"),
+                "dict 分支必须先判空：否则宿主没注册 IfmapEnumProvider 时，渲染出一个只有「(空)」的 select，"
+                        + "前序策略/合作机构这些字段既选不到也输不进去");
+        // 意图写在注释里（stripComments 会去掉，所以这里看原文）：空字典要落到普通 input
+        assertTrue(text(JS).contains("退化成输入框"),
+                "空字典要落到普通 input（与 docs/07 §11.3 的承诺一致）");
+    }
+
+    @Test
     @DisplayName("index.html 引用的两个静态资源都真实存在，且没有外链（内网离线可用）")
     void htmlIsSelfContained() {
         String html = text(HTML);

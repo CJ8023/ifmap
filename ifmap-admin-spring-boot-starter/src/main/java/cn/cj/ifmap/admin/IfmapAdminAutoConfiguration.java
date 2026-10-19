@@ -150,15 +150,21 @@ public class IfmapAdminAutoConfiguration {
     }
 
     /**
-     * 宿主机字典的包装（可选 SPI，不注册就是空目录）。
+     * 字典目录 = 框架自带（已注册的前/后序策略名、启用/停用）+ 宿主机 SPI（可选，同名 key 覆盖）。
      *
      * <p>用 {@link ObjectProvider} 取而不是 {@code @ConditionalOnBean}：page 需要的是
      * "有则用、无则空"，而不是两个不同的 bean 定义。</p>
+     *
+     * <p>为什么要把策略名内置：前序策略的可选值本来就是 {@code SpecialDealStrategyRegistry} 里注册了什么，
+     * 之前这份清单只给「元数据」页当标签展示，表单里的下拉永远是空的 —— 宿主机不额外抄一份
+     * {@code strategyName} 字典就根本填不进去。</p>
      */
     @Bean
     @ConditionalOnMissingBean
-    public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider) {
-        return IfmapEnumCatalog.of(enumProviderProvider.getIfAvailable());
+    public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider,
+                                            SpecialDealStrategyRegistry specialDeals) {
+        return IfmapEnumCatalog.of(enumProviderProvider.getIfAvailable(),
+                IfmapBuiltinEnums.of(specialDeals.keys()));
     }
 
     /**

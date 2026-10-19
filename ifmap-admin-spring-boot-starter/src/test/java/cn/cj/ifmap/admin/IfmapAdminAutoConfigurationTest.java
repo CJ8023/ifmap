@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.admin;
 
+import cn.cj.ifmap.admin.spi.EnumOption;
 import cn.cj.ifmap.admin.web.IfmapBranchAdminController;
 import cn.cj.ifmap.admin.web.IfmapConfigAdminController;
 import cn.cj.ifmap.admin.web.IfmapMetaAdminController;
@@ -30,6 +31,9 @@ import org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguratio
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+import java.util.Map;
 
 import cn.cj.ifmap.testkit.TestDatabases;
 
@@ -105,10 +109,16 @@ class IfmapAdminAutoConfigurationTest {
     }
 
     @Test
-    @DisplayName("没有宿主机字典时 /enums 返回空字典（200 + {}，不是 404 —— 页面只有一条「没有字典」分支）")
-    void enumsIsEmptyWithoutProvider() {
-        runner.withPropertyValues("ifmap.admin.enabled=true").run(context -> assertThat(
-                context.getBean(IfmapMetaAdminController.class).enums()).isEmpty());
+    @DisplayName("没有宿主机字典时仍有框架字典：status 一定在（页面不会只剩一个「(空)」）")
+    void enumsHaveBuiltinWithoutProvider() {
+        runner.withPropertyValues("ifmap.admin.enabled=true").run(context -> {
+            Map<String, List<EnumOption>> options = context.getBean(IfmapMetaAdminController.class).enums();
+            assertThat(options).containsKey(IfmapBuiltinEnums.STATUS_KEY);
+            assertThat(options.get(IfmapBuiltinEnums.STATUS_KEY)).extracting(EnumOption::getValue)
+                    .containsExactly("1", "0");
+            // 宿主机没注册 provider：isPresent 仍是 false，框架字典不算「宿主机给了字典」
+            assertThat(context.getBean(IfmapEnumCatalog.class).isPresent()).isFalse();
+        });
     }
 
     @Test
@@ -119,7 +129,8 @@ class IfmapAdminAutoConfigurationTest {
                 .run(context -> {
                     IfmapEnumCatalog catalog = context.getBean(IfmapEnumCatalog.class);
                     assertThat(catalog.isPresent()).isTrue();
-                    assertThat(catalog.options()).containsOnlyKeys("partnerCode");
+                    // 宿主机只给了 partnerCode，status 仍由框架内置（两边合并，不是二选一）
+                    assertThat(catalog.options()).containsKeys("partnerCode", IfmapBuiltinEnums.STATUS_KEY);
                     assertThat(catalog.options().get("partnerCode").get(0).getLabel()).isEqualTo("招商银行");
                 });
     }

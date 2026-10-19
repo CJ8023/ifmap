@@ -134,5 +134,7 @@ class IfmapAdminUiEndpointTest {
         assertTrue(json.contains("partnerCode"), json);
         assertTrue(json.contains("招商银行"), json);
         assertTrue(json.contains("CMB"), json);
+        // 框架自带的那一组始终在（前序策略的下拉靠它，见 IfmapBuiltinEnums）
+        assertTrue(json.contains("status"), json);
     }
 }

@@ -57,6 +57,25 @@
   `IS_NULLABLE` / `COLUMN_DEFAULT`，不数总列 —— `result_flag`→`result_judge` 会让列数一模一样，正好掩盖就是这种漂移）；
   json-tck 新增 2 套实现 × 6 条 fixture。
 
+### Fixed（管理端页面：前序策略 / 状态的下拉一直是空的，字段被锁死）
+- 现象：编辑配置时「前序策略」「后序策略」「状态」是下拉框，但里面只有一个「(空)」，
+  `/enums` 返回 `{}` —— **宿主机不额外拄一份策略名字典就根本填不进去**。
+- 根因两层：① 前/后序策略的可选值本来就是 `SpecialDealStrategyRegistry` 里注册了什么，
+  但 `/strategies` 只把这份清单喂给了「元数据」页当标签，**没接到表单**；
+  ② `fieldHtml()` 里 `if (spec.dict)` 一旦成立就永远返回 `<select>`，字典为空时只剩「(空)」
+  —— 与 `docs/07` §11.3 / §9 写的「取不到字典就退化成普通输入框」不符，那是文档在说谎。
+- 修法 A（框架字典）：`IfmapBuiltinEnums` 提供引擎自己就知道的两组 ——
+  `strategyName` ← `SpecialDealStrategyRegistry.keys()`（去重 + 排序，不让下拉顺序随 bean 注册顺序抖动）、
+  `status` ← 启用/停用；`IfmapEnumCatalog` 改成「框架字典 + 宿主机 SPI」，
+  **同名 key 以宿主机为准**（宿主最懂自己的码值/文案），没给的 key 继续用内置。
+  宿主零改动，注册了什么策略就选得到什么。
+- 修法 C（保底）：字典为空时字段退化成**普通输入框**（可手输），不再渲染只有一个「(空)」的 select；
+  同时把文档口径拉回到实现上。
+- 补测：`IfmapEnumCatalogTest` 新增 3 条（内置排序/去重、宿主覆盖是同 key 替换而非拼接、
+  只有内置也不退回 `empty()`）；`IfmapAdminAutoConfigurationTest` 改成「没 provider 也有 status」；
+  `IfmapAdminUiScriptTest` 新增 `emptyDictFallsBackToInput`（`dict` 分支必须先判空）。
+  实测 `/enums` 返回 `strategyName:[DemoStrategy, demoStrategy]` + `status:[1,0]`。
+
 ### Fixed（管理端：雪花 `keyId` 在浏览器里被 double 截断）
 - 现象：列表看着正常，点任意一行报 `400 配置不存在：#899855950645559300`，而库里那条是
   `899855950645559296`。根因不在后端查询，而在 **JSON 传输**：雪花主键约 9e17，超过

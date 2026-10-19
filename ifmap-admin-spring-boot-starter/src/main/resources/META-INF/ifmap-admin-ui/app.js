@@ -721,7 +721,9 @@
       return null;
     }
     return api('POST', '/configs/' + state.current.keyId + '/rollback', {
-      historyId: Number(historyId),
+      // historyId 是雪花 ID：后端以字符串下发（超出 2^53，Number() 会把它取整成另一个 id，
+      // 撞出来就是「历史记录不存在」。Jackson 收字符串照样能转成 Long，原样传就行。
+      historyId: historyId,
       expectedVersion: state.current.version,
       reason: el('editor-reason') ? el('editor-reason').value.trim() : ''
     }).then(function (result) {

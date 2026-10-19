@@ -36,6 +36,8 @@ import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
 import cn.cj.ifmap.jdbc.TableNameResolver;
 import cn.cj.ifmap.spring.IfmapAutoConfiguration;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import org.springframework.boot.autoconfigure.jackson.Jackson2ObjectMapperBuilderCustomizer;
 import org.springframework.web.servlet.DispatcherServlet;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -157,6 +159,24 @@ public class IfmapAdminAutoConfiguration {
     @ConditionalOnMissingBean
     public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider) {
         return IfmapEnumCatalog.of(enumProviderProvider.getIfAvailable());
+    }
+
+    /**
+     * 大雪片 ID 一律以字符串下发（见 {@link JsSafeLongSerializer}）。
+     *
+     * <p>不这么做就有一个很难查的坑：{@code keyId} 以 number 下发 → 浏览器用 double 解析时
+     * {@code 899855950645559296} 变成 {@code 899855950645559300} → 页面点那一行就报「配置不存在」。</p>
+     *
+     * <p>用小整数不受影响（tenantId / version / 计数仍是 number），所以这条定制器不会把
+     * 整个管理端契约改成「全是字符串」。宿主机若也用这个 {@code ObjectMapper} 输出自己的 id，
+     * 受到的也只是「本来就会精度丢失」的那批值。</p>
+     */
+    @Bean
+    @ConditionalOnClass({Jackson2ObjectMapperBuilderCustomizer.class, JsonSerializer.class})
+    public Jackson2ObjectMapperBuilderCustomizer ifmapAdminJsSafeLongCustomizer() {
+        return builder -> builder
+                .serializerByType(Long.class, new JsSafeLongSerializer())
+                .serializerByType(Long.TYPE, new JsSafeLongSerializer());
     }
 
     /** 可视化页面入口（静态页 + 302）。 */

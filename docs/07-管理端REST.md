@@ -107,6 +107,29 @@ ifmap:
 
 不传也能用（落空串），但**上线请让网关强制带上**，否则留痕只有时间没有人。头名常量在 `IfmapAdminHeaders`，页面发的是同一对头（`IfmapAdminWebEndpointTest` 里断言操作人确实落到了历史记录的 `operatorId`）。
 
+### 3.5 ID 的 JSON 形态：超过 2^53 的 `keyId` 是**字符串**
+
+`keyId` 是雪花主键（约 9e17），而 JavaScript 能精确表示的整数上限是 `Number.MAX_SAFE_INTEGER = 2^53 − 1`（9007199254740991）。以 JSON **number** 下发时浏览器用 double 解析：
+
+```
+服务端: "keyId": 899855950645559296
+浏览器: 899855950645559300      ← 就近取整，已经变成另一个数
+```
+
+页面拿这串数再去 `GET /configs/899855950645559300` → **400「配置不存在」**（且列表里看起来完全正常，极难查）。
+
+所以管理端响应里 **绝对值 > 2^53−1 的 `long` 一律序列化成字符串**（`JsSafeLongSerializer`，在 `IfmapAdminAutoConfiguration` 里注册，只作用于管理端）：
+
+| 字段 | 形态 |
+|---|---|
+| `keyId`（配置 / 分支 / 历史）、`historyId` | **字符串**（雪花 ID，超出 2^53） |
+| `tenantId`、`version`、`interfaceOrder`、`logicBranchOrder`、`total`、`page`、`size` | 数字（小整数不受影响） |
+
+调用方注意两点：
+
+1. 请求里传字符串或数字都可以（Jackson 会从字符串转成 `Long`），**但别在前端做 `Number(keyId)`**——那一步就把精度丢了。页面的回滚按钮曾经写过 `Number(historyId)`，现在原样传。
+2. 入库的 JSON 快照、引擎链路的 `JsonOps` **不受此规则影响**（那是另一套 `ObjectMapper`）。
+
 ## 4. 状态码与错误体
 
 | 状态码 | 何时 | 响应体 |
@@ -209,6 +232,7 @@ POST /ifmap/admin/configs/dry-run
 | PUT / 状态变更 / 回滚返回 `ok=false` | 版本过期：`expectedVersion` 要填**上一次读到的 version**（新建后是 `0`，改一次变 `1`） |
 | `history` 里 `snapshot` 是带转义的一整串 | 历史快照列在 MySQL 上是 `json` 类型；**H2 1.4.200 的 `JSON` 类型不能用**（JDBC 写字符串会被包成 JSON 字符串字面量），所以 starter 在非 MySQL 方言下把 `json` 列建为 `text` |
 | 回滚报「历史快照不是 JSON 对象」 | 快照列被手动改过（不是对象），或历史来自旧版本；用 `/audit` 找脏数据 |
+| 点列表某行报「配置不存在：#899855950645559300」 | **ID 精度丢失**：雪花 `keyId` 以 JSON number 下发，浏览器 double 会就近取整（……296 变 ……300）。管理端已改成「超过 2^53 的 long 一律字符串」（§3.5）；页面也不得对 id 做 `Number()` |
 | 校验一直 422 说规则不存在 | 自定义规则没被收集：确认 `@IfmapRule` 方法所在 bean 被 Spring 管理（starter 的 `IfmapRuleRegistrar` 只扫 bean，不扫静态类） |
 | 打开 `/ui/` 是空白页 / 资源 404 | 静态资源挂在 `{base-path}/ui/**`；前面有 Nginx / 网关反向代理时**必须把 `{base-path}` 整段转发**（页面靠当前 URL 反推前缀，前缀被截断就调不到接口）；另看浏览器控制台报错 |
 | 页面上字典下拉是空的（其它都正常） | 宿主机没注册 `IfmapEnumProvider`（可选 SPI）→ `/enums` 返回 `{}`，页面退化成普通输入框，功能不受影响（§11.3） |
@@ -220,7 +244,7 @@ POST /ifmap/admin/configs/dry-run
 | 测试类 | 覆盖 |
 |---|---|
 | `ConfigAdminServiceTest` | 14 个用例：CRUD / 乐观锁 / 回滚 / 分支 / 试跑 / 校验 |
-| `IfmapAdminWebEndpointTest` | 6 个用例：前缀、状态码语义（含漏参/类型错 = 400 而非 500）、审计链、分支 + 试跑 |
+| `IfmapAdminWebEndpointTest` | 7 个用例：前缀、状态码语义（含漏参/类型错 = 400 而非 500）、雪花 `keyId` 必须下发为字符串、审计链、分支 + 试跑 |
 | `ConfigValidatorTest` | 21 个用例：§5 校验清单逐条正反例（含判定规格非法被 422、`always` 只告警） |
 | `ConfigAuditorTest` | 3 个用例：巡检报告（含 Markdown） |
 | `IfmapAdminAutoConfigurationTest` | 7 个用例：三重门控（默认关闭）、字典 bean 两态 |

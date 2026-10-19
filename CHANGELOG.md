@@ -57,6 +57,19 @@
   `IS_NULLABLE` / `COLUMN_DEFAULT`，不数总列 —— `result_flag`→`result_judge` 会让列数一模一样，正好掩盖就是这种漂移）；
   json-tck 新增 2 套实现 × 6 条 fixture。
 
+### Fixed（管理端：雪花 `keyId` 在浏览器里被 double 截断）
+- 现象：列表看着正常，点任意一行报 `400 配置不存在：#899855950645559300`，而库里那条是
+  `899855950645559296`。根因不在后端查询，而在 **JSON 传输**：雪花主键约 9e17，超过
+  `Number.MAX_SAFE_INTEGER`（2^53−1），浏览器用 double 解析时就近取整，页面再把这串数当 id 回传。
+- 修法：管理端响应对 **绝对值 > 2^53−1 的 `long` 一律序列化成字符串**（`JsSafeLongSerializer`，
+  在 `IfmapAdminAutoConfiguration` 注册）。阈值判断而不是一刀切 —— `tenantId` / `version` / `total`
+  等小整数仍是 number，契约没被整体改成字符串。`JsonOps` 与入库快照走另一套 `ObjectMapper`，不受影响。
+- 页面同步：回滚按钮原本写 `historyId: Number(historyId)`，那一步就把精度丢了；现在原样传字符串
+  （`RollbackRequest` 字段是 `Long`，Jackson 会从字符串转换）。
+- 补回归：`IfmapAdminWebEndpointTest.snowflakeKeyIdIsStringInJson` 直接断言**原始 JSON**里
+  `"keyId":"..."` 带引号（反序列化成对象再看类型是查不出这个 bug 的），并用该 id 查详情拿到 200。
+  `docs/07-管理端REST.md` 新增 §3.5「ID 的 JSON 形态」与排错表一行。
+
 ### Fixed（判定算子接线词面：`notBlank` / `notIn` 被自己拒了）
 - `JudgeOp.fromName` 只拿枚举名比较（`NOT_BLANK` / `NOT_IN`），而文档 §7 与管理端下拉框发出的是 camelCase 的
   `notBlank` / `notIn` ⇒ 在管理端选「非空」或「不在集合内」存下来的规格，运行期直接判 `SPEC_INVALID`；

@@ -102,7 +102,8 @@ class IfmapAdminWebEndpointTest {
                 });
         assertEquals(HttpStatus.OK, created.getStatusCode());
         assertTrue(Boolean.TRUE.equals(created.getBody().get("ok")), String.valueOf(created.getBody()));
-        long keyId = ((Number) created.getBody().get("keyId")).longValue();
+        // keyId 是雪花 ID（> 2^53），以字符串下发：见 snowflakeKeyIdIsStringInJson
+        long keyId = Long.parseLong(String.valueOf(created.getBody().get("keyId")));
 
         // 列表（前缀生效才会命中）
         ResponseEntity<Map<String, Object>> list = rest.exchange(BASE + "/configs?tenantId=7",
@@ -171,7 +172,7 @@ class IfmapAdminWebEndpointTest {
         assertEquals("http-tester", history.getBody().get(1).get("operatorId"));
         assertEquals("req-http-1", history.getBody().get(1).get("requestId"));
 
-        long createHistoryId = ((Number) history.getBody().get(1).get("keyId")).longValue();
+        long createHistoryId = Long.parseLong(String.valueOf(history.getBody().get(1).get("keyId")));
         ResponseEntity<Map<String, Object>> rolled = rest.exchange(BASE + "/configs/" + keyId + "/rollback",
                 HttpMethod.POST, new HttpEntity<Map<String, Object>>(
                         Map.of("historyId", createHistoryId, "expectedVersion", 1, "reason", "回滚验证"), headers()),
@@ -269,6 +270,28 @@ class IfmapAdminWebEndpointTest {
         assertEquals(HttpStatus.BAD_REQUEST, mismatch.getStatusCode(), String.valueOf(mismatch.getBody()));
         assertEquals("MethodArgumentTypeMismatchException", mismatch.getBody().get("type"),
                 String.valueOf(mismatch.getBody()));
+    }
+
+    @Test
+    @DisplayName("大雪片 keyId 以字符串下发（number 会被浏览器 double 截断，回传就「配置不存在」）")
+    void snowflakeKeyIdIsStringInJson() {
+        ResponseEntity<Map<String, Object>> created = rest.exchange(BASE + "/configs", HttpMethod.POST,
+                new HttpEntity<Map<String, Object>>(
+                        Map.of("config", sample("WEB_IF_ID", 1), "reason", "keyId 契约"), headers()),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        Object keyId = created.getBody().get("keyId");
+        assertTrue(keyId instanceof String, "雪花 keyId 必须序列化成字符串，否则页面拿到的是取整后的另一个数：" + keyId);
+        assertTrue(Long.parseLong((String) keyId) > 9007199254740991L,
+                "这条用例的前提是 id 真的超出 JS 安全整数：" + keyId);
+
+        // 列表与详情用的是同一套序列化：看**原始 JSON**（不经过反序列化），确认 keyId 是带引号的
+        ResponseEntity<String> raw = rest.getForEntity(BASE + "/configs?tenantId=7", String.class);
+        assertTrue(raw.getBody() != null && raw.getBody().contains("\"keyId\":\"" + keyId + "\""),
+                "列表里的 keyId 也必须是字符串：" + raw.getBody());
+        assertEquals(HttpStatus.OK, rest.exchange(BASE + "/configs/" + keyId, HttpMethod.GET,
+                new HttpEntity<Void>(headers()), new ParameterizedTypeReference<Map<String, Object>>() {
+                }).getStatusCode());
     }
 
     @Test

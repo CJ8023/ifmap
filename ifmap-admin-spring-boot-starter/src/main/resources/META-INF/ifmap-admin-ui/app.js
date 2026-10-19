@@ -465,7 +465,7 @@
     { name: 'partnerName', label: '合作机构名称' },
     { name: 'financingMode', label: '融资模式', dict: 'financingMode' },
     { name: 'interfaceOrder', label: '执行顺序', type: 'number' },
-    { name: 'judgeName', label: '判定器', hint: '空 = ruleSpec（默认规格判定器）' },
+    { name: 'judgeName', label: '判定器', hint: '空 = ruleSpec' },
     { name: 'resultJudge', label: '结果判定 result_judge', type: 'judge' },
     { name: 'preStrategyName', label: '前序策略', dict: 'strategyName' },
     { name: 'postStrategyName', label: '后序策略', dict: 'strategyName' },
@@ -531,7 +531,7 @@
         '">删除</button></td></tr>';
     });
     setHtml('config-list', table(
-      ['keyId', '租户', '接口编号', '业务节点', '银行', '顺序', '前序策略', '后序策略', '状态', '版本', ''],
+      ['keyId', '租户', '接口编号', '业务节点', '合作机构', '顺序', '前序策略', '后序策略', '状态', '版本', ''],
       rows));
   }
 
@@ -779,6 +779,12 @@
       interfaceNo: el('b-interfaceNo') ? el('b-interfaceNo').value.trim() : '',
       includeDeleted: el('b-includeDeleted') && el('b-includeDeleted').checked ? 'true' : ''
     };
+    // 分支表以 interface_no 为必填条件（一条分支挂在某个接口下），空着就别发请求：
+    // 服务端会回 400，页面只会多一个红框。
+    if (filters.interfaceNo === '') {
+      setHtml('branch-list', '<p class="muted tip">分支按接口编号查：在上面填「接口编号」（或在配置列表里选中一条配置），再点「查询」。</p>');
+      return Promise.resolve([]);
+    }
     return api('GET', '/branches' + query(filters)).then(function (list) {
       var rows = (list || []).map(function (branch) {
         return '<tr class="clickable" data-branch-id="' + esc(branch.keyId) + '">' +

@@ -96,6 +96,15 @@ main { padding: 12px 16px 40px; }
 .sub { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
 .sub h3 { font-size: 13px; margin: 6px 0; }
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 14px; margin: 8px 0; }
+/* 单元格内容多是 nowrap 的 label/input，一旦文本比 320px 宽就会溢出格子、压到相邻列
+   （判定器那一格就曾这样挤到合作机构代码那一行）。三条例行约束避免这类撑破：
+   1) 网格项允许收缩（min-width:0），不再由内容强制撑宽；
+   2) 字段内提示文案允许换行；
+   3) 判定编辑器与多行模板本身就宽，直接占满整行。 */
+.fields > * { min-width: 0; }
+.fields .inline { white-space: normal; flex-wrap: wrap; }
+.fields > .judge-editor,
+.fields > label.block { grid-column: 1 / -1; }
 
 input, select, textarea {
   padding: 4px 6px;

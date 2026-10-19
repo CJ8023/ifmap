@@ -24,8 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * 管理端异常 → HTTP 状态码映射。
@@ -60,6 +62,24 @@ public class IfmapAdminExceptionHandler {
     public ResponseEntity<ApiError> handleRemote(IfmapRemoteException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                 .body(new ApiError(e.getMessage(), e.getClass().getSimpleName()));
+    }
+
+    /** 客户端漏必填参数：400（这是调用方写错，不是服务端故障，不能打 ERROR 栈）。 */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParameter(MissingServletRequestParameterException e) {
+        String message = "缺少必填参数：" + e.getParameterName();
+        log.warn("ifmap 管理端参数错误：{}", message);
+        return ResponseEntity.badRequest().body(new ApiError(message, e.getClass().getSimpleName()));
+    }
+
+    /** 客户端参数类型不对（例如 status=abc 要 Integer）：同样 400。 */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        Class<?> required = e.getRequiredType();
+        String message = "参数类型不对：" + e.getName() + " 需要 "
+                + (required == null ? "?" : required.getSimpleName());
+        log.warn("ifmap 管理端参数错误：{}", message);
+        return ResponseEntity.badRequest().body(new ApiError(message, e.getClass().getSimpleName()));
     }
 
     /** 兜底：500，同时打日志（管理端不应该出现未知异常）。 */

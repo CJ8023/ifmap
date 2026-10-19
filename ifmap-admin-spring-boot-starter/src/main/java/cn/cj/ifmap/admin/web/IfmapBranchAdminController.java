@@ -53,8 +53,12 @@ public class IfmapBranchAdminController {
     /** 查询某接口的分支。 */
     @GetMapping
     public List<LogicBranchConfig> list(@RequestParam(value = "tenantId", required = false) String tenantId,
-                                        @RequestParam("interfaceNo") String interfaceNo,
+                                        @RequestParam(value = "interfaceNo", required = false) String interfaceNo,
                                         @RequestParam(value = "includeDeleted", required = false) Boolean includeDeleted) {
+        // interfaceNo 的必填校验交给 service.branches：它给出的文案是可读的「interfaceNo 不能为空」，
+        // 而 @RequestParam(required = true) 会让 Spring 在进方法之前就抛
+        // MissingServletRequestParameterException → 落到兜底处理器变成 500 + ERROR 栈，
+        // 前端只要把接口编号留空点一下「查询」就报「管理端内部错误」。
         return service.branches(tenantId, interfaceNo, includeDeleted != null && includeDeleted);
     }
 

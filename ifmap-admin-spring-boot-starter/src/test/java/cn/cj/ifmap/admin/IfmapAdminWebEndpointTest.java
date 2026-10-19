@@ -248,6 +248,30 @@ class IfmapAdminWebEndpointTest {
     }
 
     @Test
+    @DisplayName("漏参数 / 参数类型不对 = 400（不能变成 500「管理端内部错误」）")
+    void badRequestParameters() {
+        // 曾经 /branches 的 interfaceNo 是 @RequestParam(required = true)：Spring 在进方法前就抛
+        // MissingServletRequestParameterException → 兜底处理器 → 500 + ERROR 栈（页面只显示内部错误）
+        ResponseEntity<Map<String, Object>> missing = rest.exchange(BASE + "/branches?tenantId=7",
+                HttpMethod.GET, new HttpEntity<Void>(headers()),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        assertEquals(HttpStatus.BAD_REQUEST, missing.getStatusCode(), String.valueOf(missing.getBody()));
+        assertEquals("IfmapConfigException", missing.getBody().get("type"), String.valueOf(missing.getBody()));
+        assertTrue(String.valueOf(missing.getBody().get("error")).contains("interfaceNo"),
+                String.valueOf(missing.getBody()));
+
+        // 类型不对（status 要 Integer）也是调用方的错，同样不能报 500
+        ResponseEntity<Map<String, Object>> mismatch = rest.exchange(BASE + "/configs?status=abc",
+                HttpMethod.GET, new HttpEntity<Void>(headers()),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        assertEquals(HttpStatus.BAD_REQUEST, mismatch.getStatusCode(), String.valueOf(mismatch.getBody()));
+        assertEquals("MethodArgumentTypeMismatchException", mismatch.getBody().get("type"),
+                String.valueOf(mismatch.getBody()));
+    }
+
+    @Test
     @DisplayName("元数据端点：规则 / 动作 / 策略 / 审计")
     void metaEndpoints() {
         ResponseEntity<List<Map<String, Object>>> rules = rest.exchange(BASE + "/rules", HttpMethod.GET,

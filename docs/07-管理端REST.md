@@ -112,10 +112,12 @@ ifmap:
 | 状态码 | 何时 | 响应体 |
 |---|---|---|
 | 200 | 成功；**也包括"业务上没做成"**：乐观锁冲突、目标已删除/不存在时返回 `ok=false` | `{"ok":true,...}` / `{"ok":false,"reason":"版本已过期"}` |
-| 400 | 参数或目标问题：`config 不能为空`、`修改配置必须提供 keyId`、`配置不存在：#123`、dry-run 缺 `interfaceNo`/`busiNode` | `ApiError` |
+| 400 | 参数或目标问题：`config 不能为空`、`修改配置必须提供 keyId`、`配置不存在：#123`、dry-run 缺 `interfaceNo`/`busiNode`、`/branches` 缺 `interfaceNo`、参数类型不对（`status=abc`） | `ApiError` |
 | 422 | **保存前校验未通过**（`errors` 非空） | `ApiError` + `errors` / `warnings` |
 | 502 | 外呼失败（试跑只用假应答，正常不会出现） | `ApiError` |
 | 500 | 兜底（同时打 ERROR 日志） | `ApiError` |
+
+**「调用方写错」一律不许落到 500**：漏必填参数（`MissingServletRequestParameterException`）与参数类型不对（`MethodArgumentTypeMismatchException`）都由 `IfmapAdminExceptionHandler` 映射成 400 + `WARN` 日志——否则页面只看到「管理端内部错误」，运维还会被 ERROR 栈误导去找服务端故障。必填校验请写在 service 里（例如 `ConfigAdminService.branches` 的「interfaceNo 不能为空」），别用 `@RequestParam(required = true)`：那样 Spring 在进方法前就抛异常，可读文案就丢了。
 
 `ApiError` 形状：
 
@@ -218,7 +220,7 @@ POST /ifmap/admin/configs/dry-run
 | 测试类 | 覆盖 |
 |---|---|
 | `ConfigAdminServiceTest` | 14 个用例：CRUD / 乐观锁 / 回滚 / 分支 / 试跑 / 校验 |
-| `IfmapAdminWebEndpointTest` | 5 个用例：前缀、状态码语义、审计链、分支 + 试跑 |
+| `IfmapAdminWebEndpointTest` | 6 个用例：前缀、状态码语义（含漏参/类型错 = 400 而非 500）、审计链、分支 + 试跑 |
 | `ConfigValidatorTest` | 21 个用例：§5 校验清单逐条正反例（含判定规格非法被 422、`always` 只告警） |
 | `ConfigAuditorTest` | 3 个用例：巡检报告（含 Markdown） |
 | `IfmapAdminAutoConfigurationTest` | 7 个用例：三重门控（默认关闭）、字典 bean 两态 |

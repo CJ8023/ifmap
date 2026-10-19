@@ -120,8 +120,7 @@ public class DemoRunner implements ApplicationRunner {
         config.setInterfaceOrder(Integer.valueOf(1));
         config.setRequestParamTemplate(REQUEST_TEMPLATE);
         config.setResponseParamTemplate(RESPONSE_TEMPLATE);
-        config.setResultFlag("$.resultCode");
-        config.setSuccessValue("0000");
+        config.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         // 按 bean 名指定特殊处理策略（DemoStrategy 的 bean 名 = demoStrategy）
         config.setPreStrategyName("demoStrategy");
         config.setStatus(Integer.valueOf(1));

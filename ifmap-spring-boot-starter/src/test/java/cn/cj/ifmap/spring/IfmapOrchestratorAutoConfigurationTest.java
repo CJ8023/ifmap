@@ -210,8 +210,7 @@ class IfmapOrchestratorAutoConfigurationTest {
                     config.setTenantId(-1L);
                     config.setRequestParamTemplate("{\"acctName\":\"$.acctName\"}");
                     config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-                    config.setResultFlag("$.code");
-                    config.setSuccessValue("0000");
+                    config.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}");
                     writer.insert(config);
 
                     IfmapResult result = context.getBean(IfmapOrchestrator.class).execute(

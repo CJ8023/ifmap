@@ -123,8 +123,7 @@ final class AdminTestSupport {
         config.setInterfaceOrder(order);
         config.setRequestParamTemplate("{\"bizNo\":\"$.bizNo\",\"amount\":\"@FUN(numRound,$.amount,2)\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-        config.setResultFlag("$.resultCode");
-        config.setSuccessValue("0000");
+        config.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         config.setStatus(1);
         config.setRemark("单测");
         return config;

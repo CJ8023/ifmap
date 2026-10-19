@@ -190,12 +190,14 @@ class JdbcConfigRepositoryTest {
         c.setInterfaceName("签约申请");
         c.setBusiNode("GP81");
         c.setPartnerCode("PSBC");
+        c.setResultJudge("{\"op\":\"always\"}");
 
         long id = writer.insert(c);
         assertTrue(id > 0);
 
         IfmapConfig saved = writer.findByKeyId(id).orElseThrow(IllegalStateException::new);
         assertEquals(-1L, saved.getTenantId().longValue());
+        assertEquals("", saved.getJudgeName(), "judge_name 是 NOT NULL DEFAULT ''，未给时落空串（走默认判定器）");
         assertEquals(0, ((Number) saved.getVersion()).intValue());
         assertEquals(0, ((Number) saved.getDelStatus()).intValue());
         assertEquals(0L, saved.getDeletedSeq().longValue());
@@ -209,8 +211,7 @@ class JdbcConfigRepositoryTest {
     @DisplayName("insert 把 NOT NULL DEFAULT '' 列的 null 归一化为空串（否则 MySQL 严格模式直接报错）")
     void insertNormalisesNullsForNotNullColumns() {
         IfmapConfig c = config("IF_G2", "GP81", 1, 1501L);
-        c.setResultFlag(null);
-        c.setSuccessValue(null);
+        c.setJudgeName(null);
         c.setPreStrategyName(null);
         c.setPostStrategyName(null);
         c.setRemark(null);
@@ -219,8 +220,7 @@ class JdbcConfigRepositoryTest {
 
         long id = writer.insert(c);
         IfmapConfig saved = writer.findByKeyId(id).orElseThrow(IllegalStateException::new);
-        assertEquals("", saved.getResultFlag());
-        assertEquals("", saved.getSuccessValue());
+        assertEquals("", saved.getJudgeName());
         assertEquals("", saved.getPreStrategyName());
         assertEquals("", saved.getPostStrategyName());
         assertEquals("", saved.getRemark());
@@ -419,8 +419,7 @@ class JdbcConfigRepositoryTest {
         c.setInterfaceOrder(order);
         c.setRequestParamTemplate("{\"a\":\"$.a\"}");
         c.setResponseParamTemplate("{\"b\":\"$.b\"}");
-        c.setResultFlag("$.code");
-        c.setSuccessValue("0000|000000");
+        c.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         return c;
     }
 

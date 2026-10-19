@@ -200,6 +200,7 @@ public final class IfmapOrchestrator {
             if (!outcome.success) {
                 success = false;
                 errorMessage = outcome.errorMessage;
+                result.failType(outcome.failType);
                 if (stopOnFailure) {
                     break;
                 }
@@ -256,10 +257,11 @@ public final class IfmapOrchestrator {
             pool.put(config.getInterfaceNo(), data);
         }
         String matchedBranch = judgement.isSuccess() ? applyBranch(request, tenantId, config, context, response, judgement) : null;
-        String errorMessage = judgement.isSuccess() ? null : judgement.getReason();
+        String errorMessage = judgement.isSuccess() ? null : failureMessage(judgement);
         long elapsed = clock.currentTimeMillis() - start;
-        writeLog(tenantId, request, config, requestJson, response, judgement.isSuccess(), elapsed, errorMessage);
-        return new StepOutcome(judgement.isSuccess(), data, response, errorMessage, matchedBranch);
+        writeLog(tenantId, request, config, requestJson, response, judgement, elapsed);
+        return new StepOutcome(judgement.isSuccess(), data, response, errorMessage, matchedBranch,
+                judgement.getFailType());
     }
 
     private String applySpecialDeal(StrategyContext context, RuleContext ruleContext, String requestJson) {
@@ -471,8 +473,8 @@ public final class IfmapOrchestrator {
         long start = clock.currentTimeMillis();
         String tenantId = tenantResolver.resolve(request);
         IfmapResult result = callbacks.dispatch(interfaceNo, request, rawBody);
-        writeLog(tenantId, request, null, rawBody, null, result.isSuccess(), clock.currentTimeMillis() - start,
-                result.getErrorMessage());
+        writeLog(tenantId, request, null, rawBody, null, result.isSuccess(),
+                clock.currentTimeMillis() - start, result.getErrorMessage());
         return result;
     }
 
@@ -495,8 +497,27 @@ public final class IfmapOrchestrator {
         }
     }
 
+    /** 回调入口用：没有判定结论（成败由宿主动作自己给），只落基本列。 */
     private void writeLog(String tenantId, IfmapRequest request, IfmapConfig config, String requestJson,
                           String response, boolean success, long elapsed, String errorMessage) {
+        writeLog(tenantId, request, config, requestJson, response, success, elapsed, errorMessage, null);
+    }
+
+    /**
+     * 落执行日志。
+     *
+     * <p>{@code error_msg} 写「失败原因 + 抽到的对方消息」两段：前者说明<b>我们</b>怎么判的
+     * （未命中 / 取不到字段 / HTTP 500），后者是<b>对方</b>的原话（"余额不足"）——
+     * 只有前者时运维还得翻响应报文，只有后者时不知道是判定规格还是通道问题。</p>
+     */
+    private void writeLog(String tenantId, IfmapRequest request, IfmapConfig config, String requestJson,
+                          String response, Judgement judgement, long elapsed) {
+        writeLog(tenantId, request, config, requestJson, response, judgement.isSuccess(), elapsed,
+                judgement.isSuccess() ? null : failureMessage(judgement), judgement);
+    }
+
+    private void writeLog(String tenantId, IfmapRequest request, IfmapConfig config, String requestJson,
+                          String response, boolean success, long elapsed, String errorMessage, Judgement judgement) {
         if (logSink == null) {
             return;
         }
@@ -510,12 +531,31 @@ public final class IfmapOrchestrator {
             log.setExecutionTime(elapsed);
             log.setExecutionResult(success ? "SUCCESS" : "FAIL");
             log.setErrorMsg(errorMessage);
+            if (judgement != null) {
+                log.setFailType(judgement.getFailType());
+                log.setErrorCode(judgement.getErrorCode());
+                log.setTrackId(judgement.getTrackId());
+                log.setHttpStatus(judgement.getHttpStatus());
+            }
             log.setAddUserId(request.getOperatorId());
             log.setAddRequestId(request.getRequestId());
             logSink.write(log);
         } catch (RuntimeException e) {
             LOG.warn("ifmap 写执行日志失败（不影响业务）：{}", e.getMessage());
         }
+    }
+
+    /** 失败原因（判定口径）+ 对方原文（抽到的 message）；两者都空时给 null。 */
+    private static String failureMessage(Judgement judgement) {
+        String reason = trimToNull(judgement.getReason());
+        String message = trimToNull(judgement.getMessage());
+        if (reason == null) {
+            return message;
+        }
+        if (message == null) {
+            return reason;
+        }
+        return reason + "：" + message;
     }
 
     private String protect(String text) {
@@ -550,9 +590,10 @@ public final class IfmapOrchestrator {
         private final String rawResponse;
         private final String errorMessage;
         private final String matchedBranch;
+        private final String failType;
 
         StepOutcome(boolean success, Map<String, Object> data, String rawResponse, String errorMessage,
-                    String matchedBranch) {
+                    String matchedBranch, String failType) {
             this.success = success;
             // 与 IfmapResult 一致：拷一份 + 只交出不可变视图（不拷只包，调用方仍能通过原引用改到内容）
             this.data = data == null ? Collections.<String, Object>emptyMap()
@@ -560,6 +601,7 @@ public final class IfmapOrchestrator {
             this.rawResponse = rawResponse;
             this.errorMessage = errorMessage;
             this.matchedBranch = matchedBranch;
+            this.failType = failType;
         }
 
         public boolean isSuccess() {
@@ -580,6 +622,11 @@ public final class IfmapOrchestrator {
 
         public String getMatchedBranch() {
             return matchedBranch;
+        }
+
+        /** 失败类型（成功为 null），供 {@code IfmapResult} 归因。 */
+        public String getFailType() {
+            return failType;
         }
     }
 

@@ -299,7 +299,7 @@ class JdbcExecutionLogArchiverTest {
         });
         assertEquals(new LinkedHashSet<String>(JdbcExecutionLogArchiver.ARCHIVED_COLUMNS), actual,
                 "执行日志表加了列/改了名，必须同步 JdbcExecutionLogArchiver.ARCHIVED_COLUMNS 与冷表 DDL");
-        assertEquals(17, JdbcExecutionLogArchiver.ARCHIVED_COLUMNS.size());
+        assertEquals(21, JdbcExecutionLogArchiver.ARCHIVED_COLUMNS.size());
     }
 
     @Test

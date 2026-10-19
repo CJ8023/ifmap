@@ -89,7 +89,7 @@ public class JdbcConfigWriter {
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
                 + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
-                + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,"
+                + "`request_param_template`,`response_param_template`,`result_judge`,`judge_name`,"
                 + "`pre_strategy_name`,`post_strategy_name`,`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
                 + "`add_user_id`,`add_request_id`)"
                 + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
@@ -100,7 +100,10 @@ public class JdbcConfigWriter {
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
-                    JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
+                    // result_judge 是 NOT NULL 且**无默认值**：只能 require，不能 orEmpty
+                    // （orEmpty 会把 null 悄悄写成 ""，正好绕开"必须有值"的口径）
+                    JdbcValues.require(config.getResultJudge(), "resultJudge"),
+                    JdbcValues.orEmpty(config.getJudgeName()),
                     JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
                     JdbcValues.orDefault(config.getStatus(), 1), JdbcValues.orEmpty(config.getRemark()),
                     JdbcValues.orEmpty(config.getAddUserId()), JdbcValues.orEmpty(config.getAddRequestId()));
@@ -172,7 +175,7 @@ public class JdbcConfigWriter {
                 + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
                 + " `interface_order` = ?,"
                 + " `request_param_template` = ?, `response_param_template` = ?,"
-                + " `result_flag` = ?, `success_value` = ?,"
+                + " `result_judge` = ?, `judge_name` = ?,"
                 + " `pre_strategy_name` = ?, `post_strategy_name` = ?,"
                 + " `status` = ?, `remark` = ?,"
                 + " `version` = `version` + 1, `modify_user_id` = ?, `modify_time` = CURRENT_TIMESTAMP(3),"
@@ -184,7 +187,10 @@ public class JdbcConfigWriter {
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
-                    JdbcValues.orEmpty(config.getResultFlag()), JdbcValues.orEmpty(config.getSuccessValue()),
+                    // result_judge 是 NOT NULL 且**无默认值**：只能 require，不能 orEmpty
+                    // （orEmpty 会把 null 悄悄写成 ""，正好绕开"必须有值"的口径）
+                    JdbcValues.require(config.getResultJudge(), "resultJudge"),
+                    JdbcValues.orEmpty(config.getJudgeName()),
                     JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
                     JdbcValues.orDefault(config.getStatus(), 1), JdbcValues.orEmpty(config.getRemark()),
                     JdbcValues.orEmpty(operatorId), JdbcValues.orEmpty(requestId),

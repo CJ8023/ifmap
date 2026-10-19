@@ -110,15 +110,19 @@ public class JdbcConfigRepository implements ConfigRepository {
         log.setKeyId(id);
         String sql = "INSERT INTO `" + tables.executionLogTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`biz_id`,`request_param`,`response_param`,"
-                + "`execution_time`,`execution_result`,`error_msg`,`remark`,`del_status`,"
-                + "`add_user_id`,`add_request_id`) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)";
+                + "`execution_time`,`execution_result`,`error_msg`,`http_status`,`fail_type`,`error_code`,"
+                + "`track_id`,`remark`,`del_status`,`add_user_id`,`add_request_id`)"
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)";
         jdbc.update(sql, id, tenant(log.getTenantId()),
                 JdbcValues.require(log.getInterfaceNo(), "interfaceNo"),
                 JdbcValues.require(log.getBizId(), "bizId"),
                 log.getRequestParam(), log.getResponseParam(),
                 JdbcValues.orDefault(log.getExecutionTime(), 0L),
                 JdbcValues.require(log.getExecutionResult(), "executionResult"),
-                log.getErrorMsg(), JdbcValues.orEmpty(log.getRemark()),
+                log.getErrorMsg(), log.getHttpStatus(),
+                // 失败类型/错误码/链路ID 都是 NOT NULL DEFAULT ''：显式列 + null 绑定会报错，按空串落库
+                JdbcValues.orEmpty(log.getFailType()), JdbcValues.orEmpty(log.getErrorCode()),
+                JdbcValues.orEmpty(log.getTrackId()), JdbcValues.orEmpty(log.getRemark()),
                 JdbcValues.orEmpty(log.getAddUserId()), JdbcValues.orEmpty(log.getAddRequestId()));
     }
 
@@ -264,7 +268,8 @@ public class JdbcConfigRepository implements ConfigRepository {
     /** 按业务单查执行日志（最近 N 条，按时间倒序）——运维排障用，非引擎链路。 */
     public List<ExecutionLog> recentLogs(String tenantId, String bizId, int limit) {
         String sql = "SELECT `key_id`,`tenant_id`,`interface_no`,`biz_id`,`request_param`,`response_param`,"
-                + "`execution_time`,`execution_result`,`error_msg`,`remark`,`add_user_id`,`add_request_id`"
+                + "`execution_time`,`execution_result`,`error_msg`,`http_status`,`fail_type`,`error_code`,"
+                + "`track_id`,`remark`,`add_user_id`,`add_request_id`"
                 + " FROM `" + tables.executionLogTable() + "`"
                 + " WHERE `tenant_id` = ? AND `biz_id` = ? AND `del_status` = 0"
                 + " ORDER BY `add_time` DESC LIMIT ?";

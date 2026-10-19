@@ -25,6 +25,7 @@ import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.rule.IfmapRule;
+import cn.cj.ifmap.core.spi.PartnerOutcome;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
 import cn.cj.ifmap.core.spi.DefaultLogMasker;
@@ -250,6 +251,55 @@ class IfmapOrchestratorTest {
     }
 
     @Test
+    @DisplayName("判定失败：fail_type / error_code 落库，error_msg = 判定原因 + 对方原话（两段都要）")
+    void judgeFailureColumnsAreLogged() {
+        repository.add(mainConfig("IF_J", 1, 1L));
+        CapturingGateway gateway = new CapturingGateway(
+                "{\"code\":\"9999\",\"message\":\"余额不足\",\"data\":{\"applyNo\":\"AP9\"}}");
+
+        IfmapResult result = orchestrator(gateway, new ActionRegistry()).execute(IfmapRequest.empty(), "IF_J", "GP81");
+
+        assertFalse(result.isSuccess());
+        assertEquals("VALUE_MISMATCH", result.getFailType(), "IfmapResult 要带归因，宿主重试策略靠它判断");
+        ExecutionLog log = repository.getLogs().get(0);
+        assertEquals("FAIL", log.getExecutionResult());
+        assertEquals("VALUE_MISMATCH", log.getFailType());
+        assertEquals("9999", log.getErrorCode(), "抽到的对方业务码要落库（排障第一眼看的字段）");
+        assertTrue(log.getErrorMsg().contains("$.code"), "error_msg 要含判定口径（哪个路径没过）：" + log.getErrorMsg());
+        assertTrue(log.getErrorMsg().contains("余额不足"), "error_msg 要含对方原话：" + log.getErrorMsg());
+        assertNull(log.getHttpStatus(), "宿主没上报 HTTP 状态码时留空，不能编一个 200");
+        assertNull(log.getTrackId());
+    }
+
+    @Test
+    @DisplayName("宿主上报 HTTP 500：http_status 落库、fail_type 归到 HTTP_5XX（先判通道再判报文）")
+    void httpStatusAndTrackIdAreLogged() {
+        repository.add(mainConfig("IF_H", 1, 1L));
+        PartnerServiceGateway gateway = new PartnerServiceGateway() {
+            @Override
+            public String exchange(PartnerCall call) {
+                return "{\"code\":\"0000\",\"data\":{\"applyNo\":\"AP1\"}}";
+            }
+
+            @Override
+            public PartnerOutcome exchangeForOutcome(PartnerCall call) {
+                return PartnerOutcome.of("server error", 500,
+                        "{\"code\":\"0000\",\"trackId\":\"T-1\",\"message\":\"upstream boom\"}");
+            }
+        };
+
+        IfmapResult result = orchestrator(gateway, new ActionRegistry()).execute(IfmapRequest.empty(), "IF_H", "GP81");
+
+        assertFalse(result.isSuccess());
+        assertEquals("HTTP_5XX", result.getFailType());
+        ExecutionLog log = repository.getLogs().get(0);
+        assertEquals(Integer.valueOf(500), log.getHttpStatus());
+        assertEquals("HTTP_5XX", log.getFailType());
+        assertEquals("T-1", log.getTrackId(), "对方链路ID 要落库，否则提工单时对不上账");
+        assertTrue(log.getErrorMsg().contains("upstream boom"), log.getErrorMsg());
+    }
+
+    @Test
     void rendersOutboundRequestJudgesSuccessAndWritesMaskedLog() {
         repository.add(mainConfig("IF_A", 1, 1L));
         CapturingGateway gateway = new CapturingGateway("{\"code\":\"0000\",\"data\":{\"applyNo\":\"AP1\"}}");
@@ -278,6 +328,8 @@ class IfmapOrchestratorTest {
         assertFalse(log.getRequestParam().contains("张三"), "姓名不应原文入日志");
         assertTrue(log.getResponseParam().contains("AP1"));
         assertEquals(Long.valueOf(25L), log.getExecutionTime());
+        assertNull(log.getFailType(), "成功时 fail_type 留空（不是 \"SUCCESS\"：失败类型只描述失败）");
+        assertNull(result.getFailType());
     }
 
     @Test

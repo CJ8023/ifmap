@@ -151,8 +151,8 @@ class IfmapSplitDatasourceTest {
         config.setTenantId(-1L);
         config.setRequestParamTemplate("{\"acctName\":\"$.acctName\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-        config.setResultFlag("$.code");
-        config.setSuccessValue(successValue);
+        config.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"" + successValue
+                + "\"}]}");
         writer.insert(config);
     }
 

@@ -70,6 +70,25 @@ public class IfmapSchemaInitializer implements InitializingBean {
             "db/changelog/v1.0.0/004-create-config-history.sql"
     };
 
+    /**
+     * 升级脚本（{@code ALTER TABLE}）。
+     *
+     * <p>001~004 是建表，005/006 是<b>加列/删列</b>：全新建库时两者顺序执行才落到目标结构，
+     * 存量库升级时也走同一份脚本（Liquibase 与 {@code ifmap.ddl.auto=true} 共用，不分叉）。</p>
+     *
+     * <p>为什么 005/006 不并回 001：Liquibase 按 changeset 的 checksum 判定「是否需要重跑」，
+     * 改 001 会让所有已部署库（包括检查过 DDL 的库）重跑建表而失败。便宜的做法是新增 changeset，
+     * 把 {@code result_flag/success_value} 的删除留在 005。</p>
+     */
+    private static final String[] ALTER_FILES = {
+            "db/changelog/v1.0.0/005-config-result-judge.sql",
+            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql"
+    };
+
+    /** {@code ALTER TABLE `t` ADD|DROP COLUMN `c` ...} 的识别式（只认本项目的两条形式）。 */
+    private static final Pattern ALTER_COLUMN_PATTERN = Pattern.compile(
+            "(?is)^\\s*ALTER\\s+TABLE\\s+`?([A-Za-z0-9_]+)`?\\s+(ADD|DROP)\\s+COLUMN\\s+`?([A-Za-z0-9_]+)`?.*");
+
     /** 脚本里表名前缀的占位符（与 Liquibase changelog 的 property 同名）。 */
     static final String PREFIX_PLACEHOLDER = "${tablePrefix}";
 
@@ -131,12 +150,59 @@ public class IfmapSchemaInitializer implements InitializingBean {
             created.add(table);
             log.info("ifmap 已建表：[{}]（脚本 {}）", table, DDL_FILES[i]);
         }
+        applyAlterScripts();
         if (created.isEmpty()) {
             log.info("ifmap 建表检查完成：4 张表均已存在，未做变更（前缀 {}）", tables.prefix());
         } else {
             log.info("ifmap 建表完成：新建 {} 张表 {}", created.size(), created);
         }
         return created;
+    }
+
+    /**
+     * 应用升级脚本（幂等）：{@code ADD COLUMN} 只在列不存在时执行、{@code DROP COLUMN} 只在列存在时执行。
+     *
+     * <p><b>为什么靠「列是否存在」判断而不是靠版本表</b>：{@code ifmap.ddl.auto=true} 的用户可能是
+     * 全新建库（001 建完表直接 ALTER）、也可能是手工跑过 Liquibase 的存量库（列已齐）。
+     * 用列探针判断两种情况都得到正确结果，而且不需要额外的版本表（starter 不引入 Liquibase 依赖）。</p>
+     *
+     * @return 本次实际执行的动作数（0 = 已是目标结构）
+     */
+    public int applyAlterScripts() {
+        int applied = 0;
+        for (String file : ALTER_FILES) {
+            for (String statement : splitStatements(readRaw(file).replace(PREFIX_PLACEHOLDER, tables.prefix()))) {
+                Matcher matcher = ALTER_COLUMN_PATTERN.matcher(statement);
+                if (!matcher.matches()) {
+                    throw new IfmapConfigException("升级脚本 " + file + " 出现未识别的语句（只支持 "
+                            + "ALTER TABLE ... ADD/DROP COLUMN）：" + statement.substring(0, Math.min(120, statement.length())));
+                }
+                String table = matcher.group(1);
+                boolean add = "ADD".equalsIgnoreCase(matcher.group(2));
+                String column = matcher.group(3);
+                boolean exists = columnExists(table, column);
+                if (add == exists) {
+                    continue;
+                }
+                jdbc.execute(dropTrailingSemicolon(mysqlFamily ? statement : downgradeJsonColumns(statement)));
+                applied++;
+                log.info("ifmap 升级表结构：[{}] {} 列 {}", table, add ? "新增" : "删除", column);
+            }
+        }
+        if (applied == 0) {
+            log.info("ifmap 结构升级检查完成：列均已是最新，未做变更（前缀 {}）", tables.prefix());
+        }
+        return applied;
+    }
+
+    /** 列是否存在（投一条零行查询，MySQL / H2 通用，不依赖 information_schema）。 */
+    private boolean columnExists(String table, String column) {
+        try {
+            jdbc.execute("SELECT " + column + " FROM " + table + " WHERE 1 = 0");
+            return true;
+        } catch (DataAccessException e) {
+            return false;
+        }
     }
 
     /** 单条 CREATE TABLE 执行；并发建表时（另一个实例抢先建好）不报错。 */
@@ -166,6 +232,68 @@ public class IfmapSchemaInitializer implements InitializingBean {
     /** 目标库是否 MySQL 系（决定是否剥表尾选项）。 */
     public boolean isMysqlFamily() {
         return mysqlFamily;
+    }
+
+    /** 读脚本原文（去空行与 {@code --} 注释行，保留分号以便按语句切开）。 */
+    private String readRaw(String location) {
+        Resource resource = resourceLoader.getResource("classpath:" + location);
+        if (!resource.exists()) {
+            throw new IfmapConfigException("ifmap 升级脚本不存在：" + location
+                    + "（应随 ifmap-provider-jdbc 一起在 classpath 上）");
+        }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("--")) {
+                    continue;
+                }
+                sb.append(line).append('\n');
+            }
+        } catch (IOException e) {
+            throw new IfmapConfigException("读取 ifmap 升级脚本失败：" + location, e);
+        }
+        return sb.toString();
+    }
+
+    /** 按分号切语句（跳过单引号内的分号：列注释里就有 {@code ;}）。 */
+    static java.util.List<String> splitStatements(String sql) {
+        java.util.List<String> statements = new java.util.ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (c == '\'') {
+                boolean escaped = i + 1 < sql.length() && sql.charAt(i + 1) == '\'';
+                if (escaped) {
+                    current.append(c).append(sql.charAt(++i));
+                    continue;
+                }
+                inQuote = !inQuote;
+            }
+            if (c == ';' && !inQuote) {
+                addIfNotBlank(statements, current);
+                current.setLength(0);
+                continue;
+            }
+            current.append(c);
+        }
+        addIfNotBlank(statements, current);
+        return statements;
+    }
+
+    private static void addIfNotBlank(java.util.List<String> statements, StringBuilder current) {
+        String statement = current.toString().trim();
+        if (!statement.isEmpty()) {
+            statements.add(statement);
+        }
+    }
+
+    private static String dropTrailingSemicolon(String statement) {
+        String trimmed = statement.trim();
+        return trimmed.endsWith(";") ? trimmed.substring(0, trimmed.length() - 1).trim() : trimmed;
     }
 
     /** 读脚本 + 前缀替换 + 表尾适配 + 去注释（断言式：必须是单条语句）。 */

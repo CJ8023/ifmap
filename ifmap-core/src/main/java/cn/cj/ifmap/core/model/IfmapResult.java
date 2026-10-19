@@ -37,6 +37,7 @@ public final class IfmapResult {
     private final String matchedBranch;
     private final long elapsedMs;
     private final String errorMessage;
+    private final String failType;
 
     private IfmapResult(Builder builder) {
         this.success = builder.success;
@@ -46,6 +47,7 @@ public final class IfmapResult {
         this.matchedBranch = builder.matchedBranch;
         this.elapsedMs = builder.elapsedMs;
         this.errorMessage = builder.errorMessage;
+        this.failType = builder.failType;
     }
 
     public static Builder builder() {
@@ -98,11 +100,22 @@ public final class IfmapResult {
         return errorMessage;
     }
 
+    /**
+     * 失败类型（{@code JudgeFailType} 名：TIMEOUT / TRANSPORT / HTTP_5XX / NOT_JSON / FIELD_MISSING /
+     * VALUE_MISMATCH / SPEC_INVALID …），成功时为 null。
+     *
+     * <p>只做<b>归因</b>：调用方若要重试得自己按 failType 判断（引擎不重试，也不因为它是
+     * TIMEOUT 就改变 {@code success=false} 这个结论）。</p>
+     */
+    public String getFailType() {
+        return failType;
+    }
+
     @Override
     public String toString() {
         return "IfmapResult{success=" + success + ", executed=" + executedInterfaces
                 + ", branch=" + matchedBranch + ", elapsedMs=" + elapsedMs
-                + (success ? "" : ", error=" + errorMessage) + '}';
+                + (success ? "" : ", failType=" + failType + ", error=" + errorMessage) + '}';
     }
 
     /** 构造器。 */
@@ -115,6 +128,12 @@ public final class IfmapResult {
         private String matchedBranch;
         private long elapsedMs;
         private String errorMessage;
+        private String failType;
+
+        public Builder failType(String failType) {
+            this.failType = failType;
+            return this;
+        }
 
         public Builder success(boolean success) {
             this.success = success;

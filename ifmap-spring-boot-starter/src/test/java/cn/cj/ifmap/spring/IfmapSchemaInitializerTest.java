@@ -200,10 +200,55 @@ class IfmapSchemaInitializerTest {
                 new DefaultResourceLoader()).createTablesIfAbsent();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
+        // config 列数不变（+result_judge/judge_name，−result_flag/success_value）
         assertEquals(28, columnsOf(jdbc, prefix + "config"));
         assertEquals(17, columnsOf(jdbc, prefix + "logic_branch_config"));
-        assertEquals(17, columnsOf(jdbc, prefix + "execution_log"));
+        // execution_log 新增 4 列：http_status / fail_type / error_code / track_id
+        assertEquals(21, columnsOf(jdbc, prefix + "execution_log"));
         assertEquals(11, columnsOf(jdbc, prefix + "config_history"));
+    }
+
+    @Test
+    @DisplayName("自动建表后落到目标结构：result_judge/judge_name 在、result_flag/success_value 不在（005 真的执行了）")
+    void autoDdlAppliesResultJudgeUpgrade() {
+        final String caseName = "ifmap_ddl_upgrade";
+        javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
+        String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
+        new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),
+                new DefaultResourceLoader()).createTablesIfAbsent();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        assertTrue(columnNames(jdbc, prefix + "config").containsAll(
+                java.util.Arrays.asList("result_judge", "judge_name")), "005 未生效");
+        assertFalse(columnNames(jdbc, prefix + "config").contains("result_flag"), "005 未删掉旧列");
+        assertFalse(columnNames(jdbc, prefix + "config").contains("success_value"), "005 未删掉旧列");
+        assertTrue(columnNames(jdbc, prefix + "execution_log").containsAll(
+                java.util.Arrays.asList("http_status", "fail_type", "error_code", "track_id")), "006 未生效");
+    }
+
+    @Test
+    @DisplayName("升级脚本幂等：第二次执行不再动表（存量库手工跑过 Liquibase / 重启 starter 都不报错）")
+    void applyAlterScriptsIsIdempotent() {
+        final String caseName = "ifmap_ddl_idempotent";
+        javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
+        String prefix = prefix(caseName, TableNameResolver.DEFAULT_PREFIX);
+        IfmapSchemaInitializer initializer = new IfmapSchemaInitializer(dataSource, new TableNameResolver(prefix),
+                new DefaultResourceLoader());
+
+        assertEquals(4, initializer.createTablesIfAbsent().size(), "全新建库应建 4 张表（升级动作在前一步已完成）");
+        assertEquals(0, initializer.applyAlterScripts(), "已是目标结构时不应再有动作");
+        assertEquals(java.util.Collections.emptyList(), initializer.createTablesIfAbsent(), "表已存在时不应重建");
+    }
+
+    private static java.util.Set<String> columnNames(JdbcTemplate jdbc, String table) {
+        if (TestDatabases.mysqlEnabled()) {
+            return new java.util.LinkedHashSet<String>(jdbc.queryForList(
+                    "SELECT lower(column_name) FROM information_schema.columns WHERE lower(table_name) = ?"
+                            + " AND table_schema = DATABASE()", String.class, table.toLowerCase(java.util.Locale.ROOT)));
+        }
+        return new java.util.LinkedHashSet<String>(jdbc.queryForList(
+                "SELECT lower(column_name) FROM information_schema.columns WHERE lower(table_name) = ?",
+                String.class, table.toLowerCase(java.util.Locale.ROOT)));
     }
 
     private static int columnsOf(JdbcTemplate jdbc, String table) {

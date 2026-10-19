@@ -64,7 +64,8 @@ class RemoteConfigRepositoryEngineTest {
             + "\"interface_order\":1,"
             + "\"request_param_template\":\"{\\\"orgNo\\\":\\\"@FUN(orgNo,$.orgCode)\\\",\\\"acctName\\\":\\\"$.acctName\\\"}\","
             + "\"response_param_template\":\"{\\\"applyNo\\\":\\\"$.data.applyNo\\\"}\","
-            + "\"result_flag\":\"$.code\",\"success_value\":\"0000\"}"
+            + "\"result_judge\":\"{\\\"all\\\":[{\\\"path\\\":\\\"$.code\\\","
+            + "\\\"op\\\":\\\"eq\\\",\\\"value\\\":\\\"0000\\\"}]}\"}"
             + "]";
 
     /** 远端分支报文：一条常规（按结果值命中）+ 一条兜底（flag 为空，只在常规全不命中时生效）。 */
@@ -154,8 +155,10 @@ class RemoteConfigRepositoryEngineTest {
     @Test
     @DisplayName("远端配置 + dry-run：常规分支不命中时兜底分支生效（默认分支语义在远端路径同样成立）")
     void remoteDefaultBranchFiresWhenNothingMatches() {
-        // 用成功值列表让 9999 也判成功，从而走到分支阶段：常规分支按值 0000 匹配不上，兜底分支生效
-        String configJson = CONFIG_JSON.replace("\"success_value\":\"0000\"", "\"success_value\":\"0000;9999\"");
+        // 把判定规格改成「code ∈ {0000, 9999}」让 9999 也判成功，从而走到分支阶段：
+        // 常规分支按值 0000 匹配不上，兜底分支生效
+        String configJson = CONFIG_JSON.replace("\\\"op\\\":\\\"eq\\\",\\\"value\\\":\\\"0000\\\"",
+                "\\\"op\\\":\\\"in\\\",\\\"value\\\":[\\\"0000\\\",\\\"9999\\\"]");
         ScriptedFetcher fetcher = new ScriptedFetcher()
                 .on(RemoteConfigRepository.PATH_CONFIGS, configJson)
                 .on(RemoteConfigRepository.PATH_BRANCHES, BRANCH_JSON)

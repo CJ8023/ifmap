@@ -84,8 +84,8 @@ public class ConfigSnapshotMapper {
         config.setInterfaceOrder(asInt(map.get("interfaceOrder")));
         config.setRequestParamTemplate(asString(map.get("requestParamTemplate")));
         config.setResponseParamTemplate(asString(map.get("responseParamTemplate")));
-        config.setResultFlag(asString(map.get("resultFlag")));
-        config.setSuccessValue(asString(map.get("successValue")));
+        config.setResultJudge(asString(map.get("resultJudge")));
+        config.setJudgeName(asString(map.get("judgeName")));
         config.setPreStrategyName(asString(map.get("preStrategyName")));
         config.setPostStrategyName(asString(map.get("postStrategyName")));
         config.setStatus(asInt(map.get("status")));
@@ -133,8 +133,8 @@ public class ConfigSnapshotMapper {
         map.put("interfaceOrder", config.getInterfaceOrder());
         map.put("requestParamTemplate", config.getRequestParamTemplate());
         map.put("responseParamTemplate", config.getResponseParamTemplate());
-        map.put("resultFlag", config.getResultFlag());
-        map.put("successValue", config.getSuccessValue());
+        map.put("resultJudge", config.getResultJudge());
+        map.put("judgeName", config.getJudgeName());
         map.put("preStrategyName", config.getPreStrategyName());
         map.put("postStrategyName", config.getPostStrategyName());
         map.put("status", config.getStatus());

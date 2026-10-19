@@ -45,9 +45,15 @@ class JsonConfigMapperTest {
 
     private static final JsonOps JSON = new JacksonJsonOps();
 
-    /** 一份「合法最小」报文：只给 DDL 里必填的 5 列。 */
+    /** 一份「合法最小」报文：只给 DDL 里必填的 6 列（含无默认值的 {@code result_judge}）。 */
     private static final String MINIMAL = "{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\","
-            + "\"interfaceName\":\"接口A\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\"}";
+            + "\"interfaceName\":\"接口A\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\","
+            + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}";
+
+    /** MINIMAL 追加一段字段（不能直接 replace("}")：resultJudge 的值里也有花括号）。 */
+    private static String minimalWith(String extra) {
+        return "[" + MINIMAL.substring(0, MINIMAL.length() - 1) + "," + extra + "}]";
+    }
 
     @Test
     @DisplayName("camelCase 与 snake_case 两种写法映射出完全相同的对象")
@@ -56,7 +62,7 @@ class JsonConfigMapperTest {
                 + "\"projectCode\":\"P1\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK_A\",\"partnerName\":\"甲行\","
                 + "\"financingMode\":\"0\",\"interfaceOrder\":3,"
                 + "\"requestParamTemplate\":\"{\\\"a\\\":\\\"@a\\\"}\",\"responseParamTemplate\":\"@resp\","
-                + "\"resultFlag\":\"$.code\",\"successValue\":\"0000|SUCCESS\",\"preStrategyName\":\"strategyA\",\"postStrategyName\":\"strategyB\","
+                + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"judgeName\":\"ruleSpec\",\"preStrategyName\":\"strategyA\",\"postStrategyName\":\"strategyB\","
                 + "\"status\":1,\"version\":2,\"remark\":\"备注\",\"delStatus\":0,\"deletedSeq\":0,"
                 + "\"addTime\":\"2026-01-02 03:04:05\"}]";
         String snake = camel
@@ -72,8 +78,8 @@ class JsonConfigMapperTest {
                 .replace("\"interfaceOrder\"", "\"interface_order\"")
                 .replace("\"requestParamTemplate\"", "\"request_param_template\"")
                 .replace("\"responseParamTemplate\"", "\"response_param_template\"")
-                .replace("\"resultFlag\"", "\"result_flag\"")
-                .replace("\"successValue\"", "\"success_value\"")
+                .replace("\"resultJudge\"", "\"result_judge\"")
+                .replace("\"judgeName\"", "\"judge_name\"")
                 .replace("\"preStrategyName\"", "\"pre_strategy_name\"")
                 .replace("\"postStrategyName\"", "\"post_strategy_name\"")
                 .replace("\"delStatus\"", "\"del_status\"")
@@ -95,8 +101,8 @@ class JsonConfigMapperTest {
         assertEquals(Integer.valueOf(3), fromCamel.getInterfaceOrder());
         assertEquals("{\"a\":\"@a\"}", fromCamel.getRequestParamTemplate());
         assertEquals("@resp", fromCamel.getResponseParamTemplate());
-        assertEquals("$.code", fromCamel.getResultFlag());
-        assertEquals("0000|SUCCESS", fromCamel.getSuccessValue());
+        assertEquals("{\"op\":\"always\"}", fromCamel.getResultJudge());
+        assertEquals("ruleSpec", fromCamel.getJudgeName());
         assertEquals("strategyA", fromCamel.getPreStrategyName());
         assertEquals("strategyB", fromCamel.getPostStrategyName());
         assertEquals(Integer.valueOf(2), fromCamel.getVersion());
@@ -107,7 +113,8 @@ class JsonConfigMapperTest {
         assertEquals(fromCamel.getKeyId(), fromSnake.getKeyId());
         assertEquals(fromCamel.getInterfaceOrder(), fromSnake.getInterfaceOrder());
         assertEquals(fromCamel.getRequestParamTemplate(), fromSnake.getRequestParamTemplate());
-        assertEquals(fromCamel.getResultFlag(), fromSnake.getResultFlag());
+        assertEquals(fromCamel.getResultJudge(), fromSnake.getResultJudge());
+        assertEquals(fromCamel.getJudgeName(), fromSnake.getJudgeName());
         assertEquals(fromCamel.getAddTime(), fromSnake.getAddTime());
         assertTrue(fromSnake.enabled());
     }
@@ -122,8 +129,8 @@ class JsonConfigMapperTest {
         assertEquals(Integer.valueOf(0), config.getVersion());
         assertEquals(Integer.valueOf(0), config.getDelStatus());
         assertEquals(Long.valueOf(0L), config.getDeletedSeq());
-        assertEquals("", config.getResultFlag());
-        assertEquals("", config.getSuccessValue());
+        assertEquals("{\"op\":\"always\"}", config.getResultJudge());
+        assertEquals("", config.getJudgeName());
         assertEquals("", config.getPreStrategyName());
         assertEquals("", config.getPostStrategyName());
         assertEquals("", config.getRemark());
@@ -142,7 +149,8 @@ class JsonConfigMapperTest {
     @DisplayName("改名兼容：存量报文里的 bankCode / bank_code / bankName 仍能映射（新键优先、旧键兜底）")
     void legacyBankKeysStillAccepted() {
         String camel = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
-                + "\"busiNode\":\"APPLY\",\"bankCode\":\"BANK_A\",\"bankName\":\"甲行\"}]";
+                + "\"busiNode\":\"APPLY\",\"bankCode\":\"BANK_A\",\"bankName\":\"甲行\","
+                + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}]";
         String snake = camel.replace("\"bankCode\"", "\"bank_code\"").replace("\"bankName\"", "\"bank_name\"");
 
         IfmapConfig fromCamel = only(JsonConfigMapper.toConfigs(JSON, camel, null));
@@ -159,7 +167,8 @@ class JsonConfigMapperTest {
     void partnerKeysWinOverLegacyKeys() {
         String body = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CODE_A\",\"interfaceName\":\"接口A\","
                 + "\"busiNode\":\"APPLY\",\"partnerCode\":\"NEW\",\"bankCode\":\"OLD\","
-                + "\"partnerName\":\"新名\",\"bankName\":\"旧名\"}]";
+                + "\"partnerName\":\"新名\",\"bankName\":\"旧名\","
+                + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}]";
         IfmapConfig config = only(JsonConfigMapper.toConfigs(JSON, body, null));
         assertEquals("NEW", config.getPartnerCode());
         assertEquals("新名", config.getPartnerName());
@@ -168,7 +177,7 @@ class JsonConfigMapperTest {
     @Test
     @DisplayName("入参租户优先于报文里的 tenantId（远端可能串租，查询租户才是权威）")
     void tenantIdArgumentWins() {
-        String body = "[" + MINIMAL.replace("}", ",\"tenantId\":999}") + "]";
+        String body = minimalWith("\"tenantId\":999");
         assertEquals(7L, only(JsonConfigMapper.toConfigs(JSON, body, Long.valueOf(7L))).getTenantId().longValue());
         assertEquals(-1L, only(JsonConfigMapper.toConfigs(JSON, body, null)).getTenantId().longValue());
     }
@@ -195,7 +204,8 @@ class JsonConfigMapperTest {
     @DisplayName("数字列容忍 JSON 数字与数字字符串（远端 VO 里 keyId/interfaceOrder 就是 String）")
     void numbersAcceptBothJsonNumbersAndNumericStrings() {
         String body = "[{\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"C\",\"interfaceName\":\"N\",\"busiNode\":\"B\","
-                + "\"partnerCode\":\"K\",\"keyId\":\"1001\",\"interfaceOrder\":\"3\",\"status\":\"0\"}]";
+                + "\"partnerCode\":\"K\",\"keyId\":\"1001\",\"interfaceOrder\":\"3\",\"status\":\"0\","
+                + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}]";
         IfmapConfig config = only(JsonConfigMapper.toConfigs(JSON, body, null));
         assertEquals(Long.valueOf(1001L), config.getKeyId());
         assertEquals(Integer.valueOf(3), config.getInterfaceOrder());
@@ -225,14 +235,14 @@ class JsonConfigMapperTest {
     @Test
     @DisplayName("未识别的键直接忽略（远端可以自由加字段）")
     void unknownKeysAreIgnored() {
-        String body = "[" + MINIMAL.replace("}", ",\"brandNewColumn\":\"x\",\"another_one\":123}") + "]";
+        String body = minimalWith("\"brandNewColumn\":\"x\",\"another_one\":123");
         assertEquals("IF_A", only(JsonConfigMapper.toConfigs(JSON, body, null)).getInterfaceNo());
     }
 
     @Test
     @DisplayName("文本列收到对象/数组 → 失败（不允许变成 {a=1} 这种 Java toString）")
     void objectInTextFieldFails() {
-        String body = "[" + MINIMAL.replace("}", ",\"projectCode\":{\"a\":1}}") + "]";
+        String body = minimalWith("\"projectCode\":{\"a\":1}");
         IfmapConfigException error = assertThrows(IfmapConfigException.class,
                 () -> JsonConfigMapper.toConfigs(JSON, body, null));
         assertTrue(error.getMessage().contains("projectCode"), error.getMessage());
@@ -293,11 +303,11 @@ class JsonConfigMapperTest {
     }
 
     private static String withOrder(String orderValue) {
-        return "[" + MINIMAL.replace("}", ",\"interfaceOrder\":" + orderValue + "}") + "]";
+        return minimalWith("\"interfaceOrder\":" + orderValue);
     }
 
     private static String withTime(String timeValue) {
-        return "[" + MINIMAL.replace("}", ",\"addTime\":\"" + timeValue + "\"}") + "]";
+        return minimalWith("\"addTime\":\"" + timeValue + "\"");
     }
 
     private static IfmapConfig only(List<IfmapConfig> configs) {

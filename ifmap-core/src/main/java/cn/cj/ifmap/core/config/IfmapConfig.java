@@ -69,10 +69,6 @@ public class IfmapConfig implements Serializable {
     private String requestParamTemplate;
     /** 响应参数模板（DSL），可为 null。 */
     private String responseParamTemplate;
-    /** 执行结果标志（JsonPath）。 */
-    private String resultFlag;
-    /** 成功判断值，多值以 {@code |} 分隔（大小写不敏感）。 */
-    private String successValue;
     /** 结果判定规格（JSON 文本）：{@code {"op":"always"}} / {@code {"all":[...]}} / {@code {"any":[...]}}；必填。 */
     private String resultJudge;
     /** 判定器注册名；空 = 用全局默认（{@code ruleSpec}）。 */
@@ -220,22 +216,6 @@ public class IfmapConfig implements Serializable {
 
     public void setResponseParamTemplate(String responseParamTemplate) {
         this.responseParamTemplate = responseParamTemplate;
-    }
-
-    public String getResultFlag() {
-        return resultFlag;
-    }
-
-    public void setResultFlag(String resultFlag) {
-        this.resultFlag = resultFlag;
-    }
-
-    public String getSuccessValue() {
-        return successValue;
-    }
-
-    public void setSuccessValue(String successValue) {
-        this.successValue = successValue;
     }
 
     public String getResultJudge() {

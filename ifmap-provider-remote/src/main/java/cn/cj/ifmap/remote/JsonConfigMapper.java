@@ -45,7 +45,7 @@ import java.util.regex.Pattern;
  *
  * <p><b>缺失字段按建表 DDL 的默认值补齐</b>，与 {@code JdbcConfigRepository} 读出来的对象逐字段一致：
  * {@code interface_order / version / del_status / deleted_seq → 0}、{@code status → 1}、
- * {@code result_flag / success_value / pre_strategy_name / post_strategy_name / remark → ''}。唯一例外是
+ * {@code judge_name / pre_strategy_name / post_strategy_name / remark → ''}。唯一例外是
  * {@link #toBranches} 的 {@code logic_branch_order}：远端通常不返回该列，而存量语义是
  * 「<b>按返回顺序</b>生效」，所以按下标（从 1 起）补齐，而不是一律填 0 退化成靠主键兜底。</p>
  *
@@ -110,8 +110,9 @@ public final class JsonConfigMapper {
         c.setInterfaceOrder(integer(row, "interfaceOrder", source, 0));
         c.setRequestParamTemplate(text(row, "requestParamTemplate"));
         c.setResponseParamTemplate(text(row, "responseParamTemplate"));
-        c.setResultFlag(orEmpty(row, "resultFlag"));
-        c.setSuccessValue(orEmpty(row, "successValue"));
+        // result_judge 是 NOT NULL 且无默认值 ⇒ 远端必须给（缺了就在入口失败，别等运行期静默放行）
+        c.setResultJudge(required(row, "resultJudge", source));
+        c.setJudgeName(orEmpty(row, "judgeName"));
         c.setPreStrategyName(orEmpty(row, "preStrategyName"));
         c.setPostStrategyName(orEmpty(row, "postStrategyName"));
         c.setStatus(integer(row, "status", source, 1));

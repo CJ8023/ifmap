@@ -118,7 +118,7 @@ class IfmapAdminWebEndpointTest {
                 });
         assertEquals("WEB_IF_1", detail.getBody().get("interfaceNo"));
 
-        // 保存前校验：故意给错 successValue 仍然合法，但去掉 partnerCode 会 422
+        // 保存前校验：result_judge 的规格错误要到 validate 才拦，这里先验证「去掉 partnerCode → 422」
         IfmapConfig broken = sample("WEB_IF_2", 1);
         broken.setPartnerCode(null);
         ResponseEntity<Map<String, Object>> badValidate = rest.exchange(BASE + "/configs/validate", HttpMethod.POST,
@@ -131,7 +131,7 @@ class IfmapAdminWebEndpointTest {
         // 乐观锁冲突 → 业务码 conflict=true（HTTP 200 + ok=false）
         IfmapConfig change = AdminTestSupport.config("WEB_IF_1", "apply", 1);
         change.setTenantId(7L);
-        change.setSuccessValue("0001");
+        change.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0001\"}]}");
         ResponseEntity<Map<String, Object>> conflict = rest.exchange(BASE + "/configs/" + keyId, HttpMethod.PUT,
                 new HttpEntity<Map<String, Object>>(Map.of("config", change, "expectedVersion", 99, "reason", "版本过期"),
                         headers()),
@@ -170,7 +170,8 @@ class IfmapAdminWebEndpointTest {
         ResponseEntity<Map<String, Object>> afterRollback = rest.exchange(BASE + "/configs/" + keyId, HttpMethod.GET,
                 new HttpEntity<Void>(headers()), new ParameterizedTypeReference<Map<String, Object>>() {
                 });
-        assertEquals("0000", afterRollback.getBody().get("successValue"));
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}",
+                afterRollback.getBody().get("resultJudge"));
 
         // 停用 → 再删除
         ResponseEntity<Map<String, Object>> disabled = rest.exchange(BASE + "/configs/" + keyId + "/status",

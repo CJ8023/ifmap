@@ -40,7 +40,7 @@ public final class IfmapRowMappers {
     static final String CONFIG_COLUMNS =
             "`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
             + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
-            + "`request_param_template`,`response_param_template`,`result_flag`,`success_value`,"
+            + "`request_param_template`,`response_param_template`,`result_judge`,`judge_name`,"
             + "`pre_strategy_name`,`post_strategy_name`,"
             + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
             + "`add_user_id`,`add_time`,`add_request_id`,`modify_user_id`,`modify_time`,`modify_request_id`";
@@ -77,8 +77,8 @@ public final class IfmapRowMappers {
                 c.setInterfaceOrder(rs.getInt("interface_order"));
                 c.setRequestParamTemplate(rs.getString("request_param_template"));
                 c.setResponseParamTemplate(rs.getString("response_param_template"));
-                c.setResultFlag(rs.getString("result_flag"));
-                c.setSuccessValue(rs.getString("success_value"));
+                c.setResultJudge(rs.getString("result_judge"));
+                c.setJudgeName(rs.getString("judge_name"));
                 c.setPreStrategyName(rs.getString("pre_strategy_name"));
                 c.setPostStrategyName(rs.getString("post_strategy_name"));
                 c.setStatus(rs.getInt("status"));
@@ -134,6 +134,11 @@ public final class IfmapRowMappers {
                 log.setExecutionTime(rs.getLong("execution_time"));
                 log.setExecutionResult(rs.getString("execution_result"));
                 log.setErrorMsg(rs.getString("error_msg"));
+                int httpStatus = rs.getInt("http_status");
+                log.setHttpStatus(rs.wasNull() ? null : Integer.valueOf(httpStatus));
+                log.setFailType(rs.getString("fail_type"));
+                log.setErrorCode(rs.getString("error_code"));
+                log.setTrackId(rs.getString("track_id"));
                 log.setRemark(rs.getString("remark"));
                 log.setAddUserId(rs.getString("add_user_id"));
                 log.setAddRequestId(rs.getString("add_request_id"));

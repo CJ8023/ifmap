@@ -92,12 +92,19 @@ public final class TestDatabases {
     /** 真库档密码（可空）。 */
     public static final String PASSWORD_ENV = "IFMAP_JDBC_PASSWORD";
 
-    /** 生产建表脚本（Liquibase changelog 的 4 个 DDL），顺序即建表顺序。 */
+    /**
+     * 生产 DDL（Liquibase changelog 的全部脚本），顺序即执行顺序。
+     *
+     * <p>001~004 是 {@code CREATE TABLE}，005/006 是 {@code ALTER TABLE}：新库顺序执行同样落到
+     * 目标结构，「存量库升级」与「全新建库」不会分叉。</p>
+     */
     public static final List<String> PRODUCTION_DDL = Collections.unmodifiableList(Arrays.asList(
             "db/changelog/v1.0.0/001-create-ifmap-config.sql",
             "db/changelog/v1.0.0/002-create-logic-branch.sql",
             "db/changelog/v1.0.0/003-create-execution-log.sql",
-            "db/changelog/v1.0.0/004-create-config-history.sql"));
+            "db/changelog/v1.0.0/004-create-config-history.sql",
+            "db/changelog/v1.0.0/005-config-result-judge.sql",
+            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql"));
 
     /** 执行日志归档冷表（可选运维脚本，字面量前缀需自行替换）。 */
     public static final String ARCHIVE_DDL = "db/optional/execution-log-partition/04-create-archive-table.sql";
@@ -262,10 +269,69 @@ public final class TestDatabases {
     }
 
     private static void applyOne(DataSource ds, String prefix, String rawDdl, int expectedJson) {
-        String ddl = mysqlEnabled()
-                ? toMysql(rawDdl, prefix)
-                : toH2(rawDdl, prefix, expectedJson);
-        execute(ds, ddl);
+        // 一个文件可能有多条语句（005/006 是 ALTER）：先按分号切开，再逐条做档位适配。
+        for (String statement : splitStatements(rawDdl.replace("${tablePrefix}", prefix))) {
+            String ddl = mysqlEnabled() ? statement : toH2Statement(statement, expectedJson);
+            execute(ds, ddl);
+        }
+    }
+
+    /**
+     * 按分号切语句（引号内的分号不算，例如列注释 {@code COMMENT '删除标识;0:未删除'}）。
+     */
+    public static List<String> splitStatements(String ddl) {
+        String withoutComments = ddl.replaceAll("(?m)^--.*$", "");
+        List<String> statements = new ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < withoutComments.length(); i++) {
+            char c = withoutComments.charAt(i);
+            if (c == '\'') {
+                boolean escaped = i + 1 < withoutComments.length() && withoutComments.charAt(i + 1) == '\'';
+                if (escaped) {
+                    current.append(c).append(withoutComments.charAt(++i));
+                    continue;
+                }
+                inQuote = !inQuote;
+            }
+            if (c == ';' && !inQuote) {
+                addStatement(statements, current);
+                current.setLength(0);
+                continue;
+            }
+            current.append(c);
+        }
+        addStatement(statements, current);
+        return statements;
+    }
+
+    private static void addStatement(List<String> statements, StringBuilder current) {
+        String trimmed = current.toString().trim();
+        if (!trimmed.isEmpty()) {
+            statements.add(trimmed);
+        }
+    }
+
+    /**
+     * 单条语句的 H2 适配：{@code CREATE TABLE} 走「剥表尾 + json 降级」，
+     * {@code ALTER TABLE} 不涉及表尾选项，只做 json 降级（005/006 里预期 0 个）。
+     */
+    public static String toH2Statement(String statement, int expectedJsonColumns) {
+        String trimmed = statement.trim();
+        if (trimmed.regionMatches(true, 0, "ALTER", 0, 5)) {
+            return downgradeJsonColumns(trimmed, 0);
+        }
+        int idx = trimmed.indexOf(H2_TAIL);
+        if (idx < 0) {
+            throw new IllegalStateException("DDL 未匹配预期的表尾存储引擎选项，请同步更新 TestDatabases.toH2：" + H2_TAIL);
+        }
+        // 语句已按分号切开，表尾形如 COMMENT='...'（结尾的单引号是整条语句的最后一个字符）
+        int commentEnd = trimmed.lastIndexOf('\'');
+        if (commentEnd < idx) {
+            throw new IllegalStateException("DDL 表尾 COMMENT 未以 \"' 结束");
+        }
+        return downgradeJsonColumns(trimmed.substring(0, idx) + ")" + trimmed.substring(commentEnd + 1),
+                expectedJsonColumns);
     }
 
     private static void execute(DataSource ds, String ddl) {

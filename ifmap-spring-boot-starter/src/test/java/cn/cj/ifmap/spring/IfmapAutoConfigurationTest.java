@@ -267,6 +267,7 @@ class IfmapAutoConfigurationTest {
             config.setInterfaceName("测试接口");
             config.setPartnerCode("CMB");
             config.setTenantId(1001L);
+            config.setResultJudge("{\"op\":\"always\"}");
             writer.insert(config);
 
             assertEquals(1, repository.queryConfigs("1001", "BIZ_APPLY", "apply").size());

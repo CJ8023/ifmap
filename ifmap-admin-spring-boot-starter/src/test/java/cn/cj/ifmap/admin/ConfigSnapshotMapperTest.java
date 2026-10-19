@@ -43,6 +43,7 @@ class ConfigSnapshotMapperTest {
     void snapshotRoundTripKeepsBusinessFields() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 2);
         config.setKeyId(1001L);
+        config.setJudgeName("ruleSpec");
         config.setPreStrategyName("demoStrategy");
         config.setPostStrategyName("auditStrategy");
 
@@ -59,8 +60,9 @@ class ConfigSnapshotMapperTest {
         assertEquals(2, ((Number) restored.getInterfaceOrder()).intValue());
         assertEquals(config.getRequestParamTemplate(), restored.getRequestParamTemplate());
         assertEquals(config.getResponseParamTemplate(), restored.getResponseParamTemplate());
-        assertEquals("$.resultCode", restored.getResultFlag());
-        assertEquals("0000", restored.getSuccessValue());
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}",
+                restored.getResultJudge());
+        assertEquals("ruleSpec", restored.getJudgeName());
         assertEquals("demoStrategy", restored.getPreStrategyName());
         assertEquals("auditStrategy", restored.getPostStrategyName());
         assertEquals(1, ((Number) restored.getStatus()).intValue());
@@ -71,19 +73,19 @@ class ConfigSnapshotMapperTest {
     void diffOnlyContainsChangedFields() {
         IfmapConfig before = AdminTestSupport.config("IF_A", "apply", 1);
         IfmapConfig after = AdminTestSupport.config("IF_A", "apply", 1);
-        after.setSuccessValue("0001");
+        after.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0001\"}]}");
         after.setRemark("改了");
 
         String diff = mapper.diff(before, after);
         assertNotNull(diff);
-        assertTrue(diff.contains("successValue"), diff);
+        assertTrue(diff.contains("resultJudge"), diff);
         assertTrue(diff.contains("0001"), diff);
         assertTrue(diff.contains("改了"), diff);
         assertFalse(diff.contains("interfaceCode"), "未变化字段不应进 diff：" + diff);
 
         Map<?, ?> parsed = (Map<?, ?>) AdminTestSupport.snapshots().parseJsonOrNull(diff);
         assertNotNull(parsed);
-        assertTrue(parsed.containsKey("successValue"));
+        assertTrue(parsed.containsKey("resultJudge"));
         assertTrue(parsed.containsKey("remark"));
         assertEquals(2, parsed.size());
     }

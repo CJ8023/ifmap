@@ -159,13 +159,14 @@ class ConfigAdminServiceTest {
         long keyId = service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
 
         IfmapConfig change = service.get(keyId);
-        change.setSuccessValue("0001");
+        change.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0001\"}]}");
         assertFalse(service.update(change, 999, "过期版本", OPERATOR, REQ), "过期版本必须被拒");
         assertEquals(1, service.history(keyId, null).size(), "被拒的修改不能产生历史");
 
         assertTrue(service.update(change, 0, "改成功值", OPERATOR, REQ));
         IfmapConfig after = service.get(keyId);
-        assertEquals("0001", after.getSuccessValue());
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0001\"}]}",
+                after.getResultJudge());
         assertEquals(1, ((Number) after.getVersion()).intValue(), "成功修改 version 自增");
 
         List<HistoryView> views = service.history(keyId, null);
@@ -173,7 +174,7 @@ class ConfigAdminServiceTest {
         assertEquals(IfmapConfigHistory.UPDATE, views.get(0).getChangeType());
         Map<?, ?> diff = (Map<?, ?>) views.get(0).getDiff();
         assertNotNull(diff);
-        assertTrue(diff.containsKey("successValue"), String.valueOf(diff));
+        assertTrue(diff.containsKey("resultJudge"), String.valueOf(diff));
     }
 
     @Test
@@ -225,12 +226,14 @@ class ConfigAdminServiceTest {
         long createdHistoryId = service.history(keyId, null).get(0).getKeyId();
 
         IfmapConfig change = service.get(keyId);
-        change.setSuccessValue("9999");
+        change.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"9999\"}]}");
         assertTrue(service.update(change, 0, "改坏", OPERATOR, REQ));
-        assertEquals("9999", service.get(keyId).getSuccessValue());
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"9999\"}]}",
+                service.get(keyId).getResultJudge());
 
         assertTrue(service.rollback(keyId, createdHistoryId, 1, "回滚", OPERATOR, REQ));
-        assertEquals("0000", service.get(keyId).getSuccessValue(), "回滚后回到快照值");
+        assertEquals("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}",
+                service.get(keyId).getResultJudge(), "回滚后回到快照值");
 
         List<HistoryView> views = service.history(keyId, null);
         assertEquals(3, views.size());

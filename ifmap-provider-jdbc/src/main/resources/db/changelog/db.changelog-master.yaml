@@ -17,3 +17,9 @@ databaseChangeLog:
       file: db/changelog/v1.0.0/003-create-execution-log.sql
   - include:
       file: db/changelog/v1.0.0/004-create-config-history.sql
+  # 005/006 是「存量库升级」changeset（ALTER，不是 CREATE）：新库按顺序执行同样落到同一份结构。
+  # 复用存量表且存量模块仍在跑的场景（tablePrefix=bankint_）要裁掉 005 里的两条 DROP，见文件内注释。
+  - include:
+      file: db/changelog/v1.0.0/005-config-result-judge.sql
+  - include:
+      file: db/changelog/v1.0.0/006-execution-log-judge-columns.sql

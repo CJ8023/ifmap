@@ -73,7 +73,8 @@ public class JdbcExecutionLogArchiver {
      */
     public static final List<String> ARCHIVED_COLUMNS = Collections.unmodifiableList(Arrays.asList(
             "key_id", "tenant_id", "interface_no", "biz_id", "request_param", "response_param",
-            "execution_time", "execution_result", "error_msg", "remark", "del_status",
+            "execution_time", "execution_result", "error_msg",
+            "http_status", "fail_type", "error_code", "track_id", "remark", "del_status",
             "add_user_id", "add_time", "add_request_id", "modify_user_id", "modify_time",
             "modify_request_id"));
 

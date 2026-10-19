@@ -58,7 +58,7 @@ class RemoteConfigRepositoryTest {
                 + "\"interfaceName\":\"接口" + keyId + "\",\"busiNode\":\"APPLY\",\"partnerCode\":\"BANK\","
                 + "\"interfaceOrder\":" + order + ",\"status\":" + status + ",\"delStatus\":" + delStatus + ","
                 + "\"requestParamTemplate\":\"{\\\"bizNo\\\":\\\"@bizNo\\\"}\","
-                + "\"resultFlag\":\"$.code\",\"successValue\":\"0000\"}";
+                + "\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"judgeName\":\"ruleSpec\"}";
     }
 
     @Test
@@ -82,7 +82,7 @@ class RemoteConfigRepositoryTest {
         assertEquals(Long.valueOf(10L), configs.get(0).getKeyId());
         assertEquals(7L, configs.get(0).getTenantId().longValue());
         assertEquals("{\"bizNo\":\"@bizNo\"}", configs.get(0).getRequestParamTemplate());
-        assertEquals("$.code", configs.get(0).getResultFlag());
+        assertEquals("{\"op\":\"always\"}", configs.get(0).getResultJudge());
         assertTrue(configs.get(0).enabled());
     }
 

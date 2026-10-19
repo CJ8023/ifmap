@@ -55,6 +55,14 @@ public class ExecutionLog implements Serializable {
     private String executionResult;
     /** 失败原因（截断）。 */
     private String errorMsg;
+    /** HTTP 状态码（宿主未上报时为空）。 */
+    private Integer httpStatus;
+    /** 失败类型（{@code JudgeFailType} 名；成功为空）。 */
+    private String failType;
+    /** 对方业务错误码（判定路径抽出的值）。 */
+    private String errorCode;
+    /** 对方链路 ID。 */
+    private String trackId;
     /** 备注。 */
     private String remark;
     /** 添加人。 */
@@ -177,5 +185,37 @@ public class ExecutionLog implements Serializable {
 
     public void setAddRequestId(String addRequestId) {
         this.addRequestId = addRequestId;
+    }
+
+    public Integer getHttpStatus() {
+        return httpStatus;
+    }
+
+    public void setHttpStatus(Integer httpStatus) {
+        this.httpStatus = httpStatus;
+    }
+
+    public String getFailType() {
+        return failType;
+    }
+
+    public void setFailType(String failType) {
+        this.failType = failType;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
+    }
+
+    public String getTrackId() {
+        return trackId;
+    }
+
+    public void setTrackId(String trackId) {
+        this.trackId = trackId;
     }
 }

@@ -30,38 +30,40 @@ public final class PartnerOutcome {
     private final String body;
     private final Integer statusCode;
     private final boolean timedOut;
+    private final boolean failed;
     private final String message;
 
-    private PartnerOutcome(String body, Integer statusCode, boolean timedOut, String message) {
+    private PartnerOutcome(String body, Integer statusCode, boolean timedOut, boolean failed, String message) {
         this.body = body;
         this.statusCode = statusCode;
         this.timedOut = timedOut;
+        this.failed = failed;
         this.message = message;
     }
 
     /** 只有响应体（无状态码）：{@code exchange} 的默认回落形态。 */
     public static PartnerOutcome ofBody(String body) {
-        return new PartnerOutcome(body, null, false, null);
+        return new PartnerOutcome(body, null, false, false, null);
     }
 
     /** 拿到 HTTP 状态码（含非 2xx）：body 由调用方另行传入或置空。 */
     public static PartnerOutcome of(String message, int statusCode) {
-        return new PartnerOutcome(null, Integer.valueOf(statusCode), false, message);
+        return new PartnerOutcome(null, Integer.valueOf(statusCode), false, false, message);
     }
 
     /** 带状态码与响应体。 */
     public static PartnerOutcome of(String message, int statusCode, String body) {
-        return new PartnerOutcome(body, Integer.valueOf(statusCode), false, message);
+        return new PartnerOutcome(body, Integer.valueOf(statusCode), false, false, message);
     }
 
     /** 读超时（与普通传输失败区分：{@code TIMEOUT} vs {@code TRANSPORT}）。 */
     public static PartnerOutcome timeout(String message) {
-        return new PartnerOutcome(null, null, true, message);
+        return new PartnerOutcome(null, null, true, true, message);
     }
 
     /** 连接/IO 类传输失败（没有状态码）。 */
     public static PartnerOutcome failure(String message) {
-        return new PartnerOutcome(null, null, false, message);
+        return new PartnerOutcome(null, null, false, true, message);
     }
 
     public String getBody() {
@@ -77,6 +79,11 @@ public final class PartnerOutcome {
         return timedOut;
     }
 
+    /** 是否发生了传输层失败（超时 / 连接 / IO），无状态码可判。 */
+    public boolean isFailure() {
+        return failed;
+    }
+
     /** 传输层错误消息（写日志用）。 */
     public String getMessage() {
         return message;
@@ -84,6 +91,7 @@ public final class PartnerOutcome {
 
     @Override
     public String toString() {
-        return "PartnerOutcome{status=" + statusCode + ", timedOut=" + timedOut + ", message=" + message + '}';
+        return "PartnerOutcome{status=" + statusCode + ", timedOut=" + timedOut + ", failed=" + failed
+                + ", message=" + message + '}';
     }
 }

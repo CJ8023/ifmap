@@ -30,6 +30,7 @@ class PartnerOutcomeTest {
         assertEquals("{\"code\":\"0000\"}", outcome.getBody());
         assertNull(outcome.getStatusCode());
         assertFalse(outcome.isTimedOut());
+        assertFalse(outcome.isFailure());
         assertNull(outcome.getMessage());
     }
 
@@ -54,6 +55,7 @@ class PartnerOutcomeTest {
     void failureIsTransportWithoutStatus() {
         PartnerOutcome outcome = PartnerOutcome.failure("connection refused");
         assertFalse(outcome.isTimedOut());
+        assertTrue(outcome.isFailure());
         assertNull(outcome.getStatusCode());
         assertEquals("connection refused", outcome.getMessage());
         assertNull(outcome.getBody());

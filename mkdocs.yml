@@ -71,6 +71,7 @@ exclude_docs: |
   audit_report.md
   bankintconfig模块优化方案_v1.md
   ifmap-内置规则审计与优化_v1.md
+  ifmap-过度设计诊断_v1.md
   ifmap-整体设计_v1.md
   tools/
 

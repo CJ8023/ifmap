@@ -23,6 +23,17 @@
       <groupId>cn.cj</groupId>
       <artifactId>ifmap-spring-boot-starter</artifactId>
     </dependency>
+    <!-- 管理端宿主：带上 admin starter 才有 Web 能力（spring-boot-starter-web 由它传递）。
+         但「是否真的开 Web」由 Spring 属性控制，不用 Maven profile ——
+         IDEA 里切换 Maven profile 容易漏（classpath 不带 web，应用退化成 CLI 后直接退出，端口无人监听）。
+         默认档 application.yml 写 spring.main.web-application-type: none → 仍是 CLI 示例（java -jar 跑完 exit=0）；
+         mysql 档 application-mysql.yml 写 servlet + ifmap.admin.enabled: true → 起 Tomcat 兼管理端。
+         根 pom 的 dependencyManagement 未管这个 artifact，version 必须显式写。 -->
+    <dependency>
+      <groupId>cn.cj</groupId>
+      <artifactId>ifmap-admin-spring-boot-starter</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter</artifactId>

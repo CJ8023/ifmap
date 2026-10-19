@@ -2,20 +2,41 @@
 #
 # 默认 profile（application.yml）用 H2 内存库，开箱即跑；本 profile 才连真 MySQL。
 # 连接信息走环境变量，别把库密码提交进仓库：
-#   IFMAP_JDBC_URL / IFMAP_JDBC_USER / IFMAP_JDBC_PASSWORD
+#   IFMAP_DB（只给库地址这一截，如 192.168.137.14:31929/ifmap）
+#   IFMAP_JDBC_USER / IFMAP_JDBC_PASSWORD
+# 其余参数（字符集、SSL、时区）与环境无关，固定写在本文件里，不用每次重复。
 #
 # 注意 serverTimezone + sessionVariables=time_zone：驱动按 serverTimezone 解释返回的 datetime，
 # 而库里 CURRENT_TIMESTAMP(3) 用的是会话时区，两者必须成对配置，否则时间列会整体偏移。
 # time_zone 用数字偏移（如 '+08:00'）而不是 'Asia/Shanghai'，后者要求服务端装了时区表。
+#
+# ⚠️ 偏移里的 `+` 在 URL 查询串中会被解码成**空格**，必须编码成 `%2B`（两处都要）：
+#     serverTimezone=+08:00            → 驱动收到 " 08:00"
+#     sessionVariables=time_zone='+08:00' → 建连时执行 SET time_zone=' 08:00'
+#       → MySQL 1298 Unknown or incorrect time zone → Spring 只报笼统的 CannotGetJdbcConnectionException
+
+# 本 profile 兼做管理端宿主，端口单独指定（避开本机 8080/8081 上常驻的其它服务）。
+# 优先级：命令行 --server.port > -Dserver.port > 环境变量 SERVER_PORT > 本文件 > application.yml > 默认 8080
+# 注意 TCP 端口合法范围是 1~65535：写成 80990 会在启动时抛 IllegalArgumentException: port out of range:80990
+server:
+  port: 8090
+
 spring:
+  main:
+    # 本档兼做管理端宿主：覆盖 application.yml 里的 none，起内嵌 Tomcat
+    web-application-type: servlet
   datasource:
-    url: ${IFMAP_JDBC_URL:jdbc:mysql://localhost:3306/ifmap?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=+08:00&sessionVariables=time_zone='+08:00'}
-    username: ${IFMAP_JDBC_USER:root}
-    password: ${IFMAP_JDBC_PASSWORD:root}
+    url: "jdbc:mysql://${IFMAP_DB:192.168.137.14:31929/ifmap}?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=%2B08:00&sessionVariables=time_zone='%2B08:00'"
+    username: "${IFMAP_JDBC_USER:root}"
+    password: "${IFMAP_JDBC_PASSWORD:root}"
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 ifmap:
   # 复用存量 ECC 表时改成 bankint_；一套前缀对应一套表，多环境可共用一个库
   table-prefix: ifmap_
   ddl:
-    auto: true
+    auto: false
+  # 本 profile 兼任管理端宿主：REST 在 /ifmap/admin，页面在 /ifmap/admin/ui/
+  # 三重门控：enabled=true + classpath 有 Web 与 JdbcTemplate + 有 DataSource（均已满足）
+  admin:
+    enabled: true

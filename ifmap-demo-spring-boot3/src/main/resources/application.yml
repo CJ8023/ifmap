@@ -1,6 +1,11 @@
 spring:
   application:
     name: ifmap-demo-spring-boot3
+  main:
+    # 本档是 CLI 示例：admin starter 虽在 classpath（带 Web 依赖），这里显式关掉内嵌容器，
+    # 应用跑完 DemoRunner 就退出（docs/08 与设计文档承诺的「非 Web 应用 java -jar exit=0」）。
+    # mysql 档会覆盖成 servlet，兼做管理端宿主。
+    web-application-type: none
   datasource:
     # 生产用 MySQL；这里用 H2 内存库演示（MODE=MySQL 让 MySQL 语法如 KEY idx_... / tinyint(1) 可解析）
     url: jdbc:h2:mem:ifmapdemo;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE

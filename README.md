@@ -33,17 +33,18 @@
 | 版本 | `0.1.0-SNAPSHOT`（里程碑 1，未发布到中央仓库） |
 | 已落地模块 | `ifmap-core`、`ifmap-json-jackson`、`ifmap-json-fastjson`、`ifmap-json-tck`、`ifmap-testkit`、`ifmap-provider-jdbc`、`ifmap-provider-remote`、`ifmap-spring-boot-starter`、`ifmap-admin-spring-boot-starter`、`ifmap-demo-pure-java`、`ifmap-demo-spring-boot3` |
 | 编译验证 | JDK **8** 与 JDK **17** 均 `BUILD SUCCESS`（core/json/provider 字节码目标 Java 8，`major version: 52`；starter 为 Java 17，`major version: 61`） |
-| 测试 | **508 个**单元/端到端测试全绿（core 160 + json-jackson 69 + json-fastjson 76 + testkit 14 + provider-jdbc 53 + **provider-remote 27** + starter 44 + admin 61 + demo-sb3 4；JDK 8 侧 399 个，Spring Boot 3 模块按剖面跳过） |
+| 测试 | **580 个**单元/端到端测试全绿（core 198 + json-jackson 75 + json-fastjson 82 + testkit 14 + provider-jdbc 61 + **provider-remote 27** + starter 46 + admin 73 + demo-sb3 4；JDK 8 侧 443 个，Spring Boot 3 模块按剖面跳过） |
 | 静态分析 | SpotBugs（`effort=max` / `threshold=medium`，绑定 `verify`，JDK 11+ 启用）：**10 个模块 0 缺陷**；排除清单逐条写明理由（`spotbugs-exclude.xml`） |
 | 开源合规 | Apache-2.0 `LICENSE` + `NOTICE` + 全量源文件许可头（`LicenseHeaderTest` 在 `mvn test` 里自动拦漏加）；`CONTRIBUTING.md` + 文档站 |
 | 文档站 | MkDocs + Material（`mkdocs.yml`，`--strict` 全绿：12 页），CI 独立 job 构建 |
 | 迁移预热 | 存量表迁移 SQL kit（加列/回填/改类型/改表名，含体检与核对脚本）、`JsonOps` 一致性 TCK、[`docs/10-迁移指南.md`](docs/10-迁移指南.md) |
-| 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog；starter 可启动期自动建表（`ifmap.ddl.auto`） |
+| 建表 | MySQL 5.7 / 8.0 兼容 DDL ×4 张表 + Liquibase changelog（含 `005`/`006` 判定列的两条 `ALTER`，老库按列存在性幂等补跑）；starter 可启动期自动建表（`ifmap.ddl.auto`） |
 | 配置来源可换 | 三选一、**引擎侧无感知**：JDBC（自带建表脚本）、**远端 HTTP**（`ifmap-provider-remote`，直连存量配置接口，**一行表都不用迁**，见 [`docs/11`](docs/11-远端配置源.md)）、自研（实现 `ConfigRepository` 即可） |
 | 配置库 / 日志库分离 | **不做多数据源框架**（设计 Q10）：读配置与写日志本来就是两个 SPI，宿主声明一个 `logDataSource` + 一个 `ExecutionLogSink` bean 即可（Spring Boot 官方双数据源写法，[`docs/05`](docs/05-SpringBoot集成.md) §3.5）；日志库不可用**不会**回落到配置库 |
 | 日志分区/冷热分离 | **可选手册**（默认不启用）：`db/optional/execution-log-partition/` 6 步脚本（体检 → 按月分区改造 → 每月加分区 → 校验 → 建冷表 → 归档回收）；归档器 `JdbcExecutionLogArchiver` **可重入**（先写冷表再删热表，中断可重跑）、**列清单写死并自检**（热表加列忘了同步会直接失败而不是静默少归档）；`DROP PARTITION` 秒级回收 |
 | Spring Boot 3 | 引一个依赖 + 几行 yml 即用：自动建表、装配仓储（带缓存）、装配引擎、自动收集宿主机 `@IfmapRule` 与 5 类策略 bean |
 | 执行编排 | 编排器：租户解析 → 取该业务节点内的有序步骤（`interface_order`，并从起点截断）→ 组包（含**跨步骤共享池**）→ 渲染 → **前序**策略 → 出网 → 响应渲染 → **后序**策略 → 判定 → 入池 → 分支动作 → 脱敏落日志；宿主可用 `payload.pool` 预置数据、用 `IfmapResult.data.pool` 取回各步骤产物；支持 dry-run 试跑与部署前契约自检 |
+| 结果判定 | **单列 `result_judge` 规格**（JSON，必填）取代 `result_flag` + `success_value`：7 个算子（`eq`/`ne`/`in`/`notIn`/`exists`/`notBlank`/`regex`）+ `all`/`any` 组合；四段管线（通道 → 规格 → 抽取 → 归因）；「不判定」必须显式写 `{"op":"always"}`，空规格是**非法**的；失败归因 9 类 `fail_type` 落库，换判定实现走 `ResultJudge` SPI（见 [`docs/06`](docs/06-执行编排与策略扩展.md) §7） |
 | 管理端 REST | 配置 CRUD + 保存前校验（422 带明细）+ 乐观锁 + 变更历史快照/差异 + 一键回滚 + 逻辑分支维护 + 全量巡检（Markdown 报告）；**默认关闭**，需自行加鉴权 |
 | 可视化页面 | 随 starter 打包的零构建页面（`{base-path}/ui/`）：配置/分支/巡检/规则与字典四个页签，**无 CDN、无前端框架、无构建链**（内网离线可用）；字典走可选 SPI `IfmapEnumProvider`（不注册就返回 `{}`）；页面脚本自带的静态契约测试盯住路径白名单、前缀不硬编码、DOM id 对得上 |
 | 日志与合规 | 执行日志脱敏（值形态 + 字段名）+ 超长截断 + 写日志失败降级 + **保留期清理**（默认 90 天，分批删除防主从延迟；cron 可配，守护线程调度、不依赖 `@EnableScheduling`） |

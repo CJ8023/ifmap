@@ -21,6 +21,12 @@
 > 2. **`strategy_name` 已拆成 `pre_strategy_name` / `post_strategy_name`**：`SpecialDealStrategy` 分
 >    `PRE`（出网前）/ `POST`（回参产物之后、判定之前）两个相位。
 > 3. **`ConfigValidator` 的校验清单**已去掉「前置链成环」、新增「池引用只能指向本节点更早的步骤」。
+> 4. **成败判定已换成 `result_judge` 单列**（`result_flag` / `success_value` 两列连同 `ResponseJudge` 一起删除）：
+>    本文里凡写「`result_flag` + `success_value`」「判定三态」的段落都是当时的形态，
+>    现状是「JSON 规格 + 四段判定管线 + `fail_type` 归因」，见
+>    [`docs/06`](./06-执行编排与策略扩展.md) §7 与
+>    [`判定管线设计`](./superpowers/specs/2026-10-14-判定管线-design.md)。**本文其余内容不改** ——
+>    历史档留着，才能回答"当时为什么这么定"。
 >
 > 现状口径见 [`CHANGELOG.md`](../CHANGELOG.md) 的「Changed（编排定序、跨步骤共享池与前后序策略）」与
 > [`docs/06-执行编排与策略扩展.md`](./06-执行编排与策略扩展.md)。

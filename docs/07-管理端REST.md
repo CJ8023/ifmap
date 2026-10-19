@@ -137,7 +137,9 @@ ifmap:
 
 | 校验 | 依据 |
 |---|---|
-| 必填列非空 | `interfaceNo` / `interfaceCode` / `interfaceName` / `busiNode` / `partnerCode` |
+| 必填列非空 | `interfaceNo` / `interfaceCode` / `interfaceName` / `busiNode` / `partnerCode` / `resultJudge`（空串与空白都算缺；`POST /configs/validate` 返回的 `errors` 里写明字段名） |
+| `result_judge` 规符合法 | 复用 core 的 `ResultJudgeSpec.validate`（**不写第二套**）：空/`{}`/`{"all":[]}`/未知 op/`in` 空数组/嵌套超 3 层/`always` 带 `path` 一律拒；报错点名写错的那个词（如 `$.code 的 op 非法：between`）。配置了引擎时由 `ContractValidator` 统一报，**不重复报两遍** |
+| 判定形态提示 | `{"op":"always"}` 合法但给 `warnings`（该接口不做结果判定，只受通道/HTTP 状态约束）—— `always` 只警告、**不拦保存** |
 | 模板是合法 JSON | `request_param_template` / `response_param_template` |
 | `$.path` 路径合法 | `JsonOps.isValidPath` —— Jackson 实现只做 JsonPath 编译，**拦不住 `$.a[`**；`ifmap-json-fastjson` 的实现额外要求引号外括号配对，能拦住（差异见 [`docs/05`](05-SpringBoot集成.md) §3.2） |
 | `@FUN` 规则存在且参数可匹配重载 | `ContractValidator`（引擎在位时）；引擎缺席时**至少校验模板 JSON 合法**（历史脏数据真实存在，不能静默放过） |
@@ -217,7 +219,7 @@ POST /ifmap/admin/configs/dry-run
 |---|---|
 | `ConfigAdminServiceTest` | 14 个用例：CRUD / 乐观锁 / 回滚 / 分支 / 试跑 / 校验 |
 | `IfmapAdminWebEndpointTest` | 5 个用例：前缀、状态码语义、审计链、分支 + 试跑 |
-| `ConfigValidatorTest` | 13 个用例：§5 校验清单逐条正反例 |
+| `ConfigValidatorTest` | 21 个用例：§5 校验清单逐条正反例（含判定规格非法被 422、`always` 只告警） |
 | `ConfigAuditorTest` | 3 个用例：巡检报告（含 Markdown） |
 | `IfmapAdminAutoConfigurationTest` | 7 个用例：三重门控（默认关闭）、字典 bean 两态 |
 | `ConfigSnapshotMapperTest` | 4 个用例：快照与差异序列化 |
@@ -246,6 +248,7 @@ REST 是给机器和 curl 用的，运营同学要的是能点的页面。所以
 | 页签 | 能力 |
 |---|---|
 | 配置 | 分页查询（租户 / 接口 / 节点 / 资方 / 状态 / 含已删）、新建、编辑、**保存前校验**、**试跑**、启停、逻辑删除、变更历史、一键回滚 |
+| 配置 · 判定编辑器 | `result_judge` 三选一：**不判定**（`{"op":"always"}`）/ **单条件**（path + op + value + ignoreCase，`exists`/`notBlank` 自动禁用 value、`in`/`notIn` 收逗号分隔数组）/ **原始 JSON**（多条件、`any` 嵌套等复杂组合照原样提交，页面不把它降级成单条件） |
 | 逻辑分支 | 按接口查分支（含兜底分支标记）、新建 / 编辑 / 删除（`logic_branch_flag` 留空即兜底分支） |
 | 巡检 | 全量巡检结果分条展示，一键**复制 Markdown 报告**（直接贴工单） |
 | 规则与字典 | 已注册规则（`@FUN` 可用项）、动作（`method_flag`）、策略、宿主机字典——**全部由服务端 `/rules`、`/actions`、`/strategies`、`/enums` 提供，页面不硬编码** |
@@ -257,7 +260,7 @@ REST 是给机器和 curl 用的，运营同学要的是能点的页面。所以
 | 约束 | 原因 |
 |---|---|
 | 零 CDN | 这套东西部署在**内网**，外网 CDN 拿不到会白屏（打包时也不能保证能联网） |
-| 零前端框架、零构建链 | 加了 React/Vue 就多一条 Node 构建链要维护、要发版；页面本身就是一堆表单与表格，原生 JS 够用（`app.js` 约 900 行） |
+| 零前端框架、零构建链 | 加了 React/Vue 就多一条 Node 构建链要维护、要发版；页面本身就是一堆表单与表格，原生 JS 够用（`app.js` 约 1150 行） |
 | 资源**不缓存**（`Cache-Control: no-cache`） | 升级 ifmap 后刷新必须立刻是新版页面，避免"页面是旧的、接口是新的"这种最难查的错 |
 
 ### 11.3 字典 SPI：`IfmapEnumProvider`（可选，不强制）
@@ -286,7 +289,7 @@ public IfmapEnumProvider partnerEnums() {
 
 | 测试 | 钉住的东西 |
 |---|---|
-| `IfmapAdminUiScriptTest` | ① `app.js` 里出现的每个接口路径都在白名单内（写错一个字母 = 空白页面，编译期发现不了）；② **不许硬编码 `/ifmap/admin`**（前缀可配，写死就整页 404）；③ `el('xxx')` 引用的元素必须在 `index.html` 里存在（否则交互静默失效）；④ 页面无任何外链（内网可用）；⑤ 有 `node` 时跑 `node --check`（没有则跳过，不让构建挂） |
+| `IfmapAdminUiScriptTest` | ① `app.js` 里出现的每个接口路径都在白名单内（写错一个字母 = 空白页面，编译期发现不了）；② **不许硬编码 `/ifmap/admin`**（前缀可配，写死就整页 404）；③ `el('xxx')` 引用的元素必须在 `index.html` 里存在（否则交互静默失效）；④ 页面无任何外链（内网可用）；⑤ 有 `node` 时跑 `node --check`（没有则跳过，不让构建挂）；⑥ 判定编辑器必须存在（`resultJudge`/`judgeName`/`ed-judge-*` 控件），且 `resultFlag`/`successValue` 一个都不许再出现 |
 | `IfmapAdminUiEndpointTest` | 真 Tomcat 下发 HTTP：`/ui` 302、三个静态资源 200 且类型正确、静态资源**不越界**（`/ui/../` 与 `META-INF/...` 都 404）、`/enums` 真的带出宿主字典 |
 
 > 页面只是 REST 的消费者：**关掉它不影响任何端点**，去掉静态资源也不影响引擎（引擎侧本就不依赖管理端）。

@@ -4,6 +4,59 @@
 
 ## [Unreleased]
 
+### Changed（判定管线 —— 破坏性）
+- **判定入口换成单列 `result_judge`（必填）**：`ifmap_config` 删 `result_flag` + `success_value`，新增
+  `result_judge text NOT NULL`（**无 `DEFAULT`**）与 `judge_name varchar(64) NOT NULL DEFAULT ''`。
+  必填口径沿用「DDL 里 `NOT NULL` 且没有 `DEFAULT`」⇒ 远端配置源的必填清单 5 → **6 列**
+  （`JsonConfigMapper` 缺 `resultJudge` 直接抛异常，**不补空串** —— 补了会把"远端忘了发"变成"每条都判失败还不报错"）。
+  管理端保存期 422、运行期 fail-closed 两层兜住"非空白"（DDL 表达不了）。
+- **`{"op":"always"}` 成为唯一的"不判定"写法**：旧语义是「`result_flag` 为空 = 成功」，而**空规格现在是非法的**
+  （`""` / `{}` / `{"all":[]}` → `fail_type=SPEC_INVALID` + WARN，不抛异常）。也就是说
+  「没配判定」不再等于「一定成功」，这是本次最重要的语义反转。
+- **`ignoreCase` 默认 `false`（严格相等）**：旧 `success_value` 比较时**忽略大小写**，现在要忽略必须显式写
+  `"ignoreCase":true`。判定是资金链路的仲裁点，`SUCCESS` 与 `success` 的差异不该被默认吃掉。
+- **`notBlank` 没有 falsy 魔法**：旧「`success_value` 为空 = 取值非空即成功」把 `0` / `false` 当失败，现在它们算**非空**；
+  要判 `0` 请写 `{"op":"eq","value":"0"}`。同理存量 `success_value` 的 `!a` 取反写法正式表达为 `{"op":"ne","value":"a"}`。
+- **`ResponseJudge` 删除，判定拆成四段管线**（`cn.cj.ifmap.core.orchestrator.judgement`）：
+  ① 通道（宿主可选上报的 `statusCode`/超时）→ ② 业务（`ResultJudge` SPI，默认 `ruleSpec`）→
+  ③ 抽取（固定候选路径取 message / trackId，只影响日志）→ ④ 归因（`fail_type`）。
+  新增 SPI：`ResultJudge` / `ResultJudgeContext` / `PartnerOutcome`；`PartnerServiceGateway` 增
+  `exchangeForOutcome`（默认回落到 `exchange`，老实现**零改动**）。
+- **`Judgement` 换成不可变值对象**（10 个字段）：`isSuccess()` / `getActualValue()` / `getExpectedValue()` /
+  `getReason()` 四个既有访问器保留，新增 `stage` / `failType` / `errorCode` / `httpStatus` / `trackId`。
+  `errorCode` 记的是**失败时取到的实际码**，不再写死 `"1"`。
+- **`ifmap_execution_log` 17 → 21 列**：新增 `http_status` / `fail_type` / `error_code` / `track_id`。
+  `execution_result` 值域**不动**（`SUCCESS/FAIL/SKIP/TIMEOUT` 已被下游消费），失败归因只走 `fail_type`；
+  `error_msg` 形态变为「判定原因：抽到的对方原话」。`IfmapResult` 增 `failType`（宿主不必再解析 `errorMessage`）。
+- **建表脚本**：新增 `005-config-result-judge.sql`（add 2 / drop 2）与 `006-execution-log-judge-columns.sql`（add 4）并加入
+  `db.changelog-master.yaml`；**`001` 故意不改**（改它会让已部署库的 Liquibase checksum 变化）。
+  `ifmap.ddl.auto=true` 时 `IfmapSchemaInitializer` 按「列是否存在」幂等补跑这两条，老库升级不用手工执行。
+  ⚠️ `005` 的两条 `DROP COLUMN` 对「复用存量表且存量模块仍在跑」的共存期路径**必须先裁掉**（脚本里已用注释标出）。
+
+### Added（判定管线）
+- **`ResultJudgeSpec`**（core，零 JSON 库依赖）：规格解析 / 校验 / 求值。7 个算子闭合集合
+  （`eq` / `ne` / `in` / `notIn` / `exists` / `notBlank` / `regex`）、`all` / `any` 组合（嵌套上限 3 层）、
+  单条条件 `{path, op, value?, ignoreCase?}`；`validate` 返回违规清单（点名出错的算子与路径），
+  `parse(...).isAlways()` 供统计使用。
+- **`fail_type` 9 值闭合枚举**：`TRANSPORT` / `TIMEOUT` / `HTTP_4XX` / `HTTP_5XX` / `SPEC_INVALID` / `NOT_JSON` /
+  `FIELD_MISSING` / `VALUE_MISMATCH` / `EXTRACT_FAILED`（仅 WARN，不改判定结论）。
+- **判定器 SPI 与注册表**：`ResultJudgeRegistry` 按 `judge_name` 取名（大小写不敏感，兜底默认 `ruleSpec`）；
+  宿主注册 bean 即可换实现。规范：**判定实现不抛异常** —— 判定是结果裁决不是配置求值，抛异常会炸掉整条编排链。
+- **契约自检扩两项 + 判定形态统计**：`ContractValidator` 校验 `result_judge` 规格合法性、统计「条件判定 / 不判定」条数
+  （`ContractReport.totalConfigs()` / `alwaysCount()` / `judgeSpecViolations()`），Markdown 报告加 `### 判定形态统计`
+  —— 治的是「以为配了校验、其实全是 `always`」的审计盲区。
+- **管理端**：保存前校验复用 core 的同一个 `ResultJudgeSpec.validate`（**不写第二套**），`always` 只给 `warnings` 不拦保存；
+  内嵌页面（仍零 CDN / 零框架 / 零构建链）加判定编辑器三选一：不判定 / 单条件 / 原始 JSON，
+  复杂组合**不降级成单条件**（静默丢条件 = 判定被放宽）；`ConfigSnapshotMapper` 读老快照时把 `result_flag` + `success_value`
+  只读转换为新规格（历史行内容不改写，审计看到的是"当时写了什么"）。
+- **TCK 新契约**：`JudgeConsistencyTestBase` —— 同一批 fixture 在 `ifmap-json-jackson` 与 `ifmap-json-fastjson`
+  下**逐条同结论**（含 `10.00` 尾零、数组下标、`any` 组、非 JSON 归因），断言绝对值而非两边互比。
+- **测试**：core 新增 `JudgeOpTest` 6 / `ResultJudgeSpecTest` 9 / `RuleSpecJudgeTest` 7 / `JudgementPipelineTest` 5 /
+  `JudgementTest` 5 / `PartnerOutcomeTest` 4，`IfmapOrchestratorTest` 改造为 27；admin 新增 4（判定规格 422、
+  `always` 只告警、老快照转换 3 例）；provider-jdbc 新增 `ResultJudgeSchemaTest` 5（**逐列**断言 `COLUMN_TYPE` /
+  `IS_NULLABLE` / `COLUMN_DEFAULT`，不数总列 —— `result_flag`→`result_judge` 会让列数一模一样，正好掩盖就是这种漂移）；
+  json-tck 新增 2 套实现 × 6 条 fixture。
+
 ### Changed（编排定序、跨步骤共享池与前后序策略 —— 破坏性）
 - **`ifmap_config` 删 1 列 / 拆 1 列**：删 `front_interface_no`（连带索引 `idx_config_front`）—— 它和
   `interface_order` 表达的是同一件事（步骤先后），两套机制并存让「谁是前序」有了两个答案；

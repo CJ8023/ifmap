@@ -83,6 +83,37 @@ class ConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("result_judge 为空 / 非法 → error（保存前拦住；运行期只会表现为每条都判失败，不报错）")
+    void invalidJudgeSpecIsRejected() {
+        IfmapConfig blank = AdminTestSupport.config("IF_J1", "apply", 1);
+        blank.setResultJudge("");
+        ValidationResult blankResult = validator.validate(blank, true);
+        assertFalse(blankResult.isPassed());
+        assertTrue(String.valueOf(blankResult.getErrors()).contains("result_judge 不能为空"),
+                String.valueOf(blankResult.getErrors()));
+
+        IfmapConfig badOp = AdminTestSupport.config("IF_J2", "apply", 1);
+        badOp.setResultJudge("{\"all\":[{\"path\":\"$.code\",\"op\":\"between\",\"value\":\"1\"}]}");
+        ValidationResult badOpResult = validator.validate(badOp, true);
+        assertFalse(badOpResult.isPassed());
+        assertTrue(String.valueOf(badOpResult.getErrors()).contains("between"),
+                String.valueOf(badOpResult.getErrors()));
+    }
+
+    @Test
+    @DisplayName("always 是合法配置，但要给 warning「该接口不做结果判定」——不拦保存，只提醒")
+    void alwaysJudgeSpecOnlyWarns() {
+        IfmapConfig config = AdminTestSupport.config("IF_J3", "apply", 1);
+        config.setResultJudge("{\"op\":\"always\"}");
+
+        ValidationResult result = validator.validate(config, true);
+
+        assertTrue(result.isPassed(), String.valueOf(result.getErrors()));
+        assertTrue(String.valueOf(result.getWarnings()).contains("不做结果判定"),
+                String.valueOf(result.getWarnings()));
+    }
+
+    @Test
     @DisplayName("必填字段缺失 → 逐字段报错（不让 NULL 走到 SQL）")
     void requiredFieldsAreReported() {
         IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);

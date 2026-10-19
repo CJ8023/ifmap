@@ -19,6 +19,7 @@ import cn.cj.ifmap.core.config.ConfigQuery;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.json.JsonOps;
+import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeSpec;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
 import cn.cj.ifmap.core.template.DslExpressions;
@@ -94,6 +95,7 @@ public class ConfigValidator {
         required(result, "partnerCode", config.getPartnerCode());
 
         checkTemplateContract(config, result);
+        checkJudgeSpec(config, result);
         checkJsonPaths(config, result);
         checkStrategyName(config, result);
         checkUniqueKey(config, result);
@@ -180,6 +182,29 @@ public class ConfigValidator {
         // 这类脏数据在历史库里真实存在（手改 SQL / 旧版本写入），不拦就会带到线上首次调用才炸。
         checkTemplateJson(config.getRequestParamTemplate(), "request_param_template", result);
         checkTemplateJson(config.getResponseParamTemplate(), "response_param_template", result);
+    }
+
+    /**
+     * 判定规格校验（§8.3 新增一层）：非法规格进 error，{@code always} 只进 warning。
+     *
+     * <p>{@code always} 不是错 —— 有些接口确实只看通不通；但也不能静默，否则"以为配了校验、
+     * 其实任何回参都算成功"这类事故没人能提前发现。</p>
+     */
+    private void checkJudgeSpec(IfmapConfig config, ValidationResult result) {
+        List<String> specErrors = ResultJudgeSpec.validate(config.getResultJudge(), jsonOps);
+        if (!specErrors.isEmpty()) {
+            // 有 ContractValidator 时它已经用同一套 ResultJudgeSpec.validate 报过这批错误
+            // （见 checkTemplateContract），这里只补「没有引擎的巡检路径」，避免 422 里同一句话出现两遍
+            if (contractValidator == null) {
+                for (String error : specErrors) {
+                    result.error(error);
+                }
+            }
+            return;
+        }
+        if (ResultJudgeSpec.parse(config.getResultJudge(), jsonOps).isAlways()) {
+            result.warning("result_judge = always：该接口不做结果判定（任何响应都按成功处理，只受通道/HTTP 状态约束）");
+        }
     }
 
     /** 模板必须是合法 JSON（可为空）。 */

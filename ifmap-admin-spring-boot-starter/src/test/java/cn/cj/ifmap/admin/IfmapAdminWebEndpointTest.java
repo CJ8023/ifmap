@@ -128,6 +128,17 @@ class IfmapAdminWebEndpointTest {
         assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, badValidate.getStatusCode());
         assertNotNull(badValidate.getBody().get("errors"));
 
+        // 判定规格为空 → 422，且 errors 里点名 result_judge（不是笼统的"校验失败"）
+        IfmapConfig noJudge = sample("WEB_IF_3", 3);
+        noJudge.setResultJudge("");
+        ResponseEntity<Map<String, Object>> judgeRejected = rest.exchange(BASE + "/configs/validate", HttpMethod.POST,
+                new HttpEntity<Map<String, Object>>(Map.of("config", noJudge, "isCreate", true), headers()),
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                });
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, judgeRejected.getStatusCode());
+        assertTrue(String.valueOf(judgeRejected.getBody().get("errors")).contains("result_judge 不能为空"),
+                String.valueOf(judgeRejected.getBody().get("errors")));
+
         // 乐观锁冲突 → 业务码 conflict=true（HTTP 200 + ok=false）
         IfmapConfig change = AdminTestSupport.config("WEB_IF_1", "apply", 1);
         change.setTenantId(7L);

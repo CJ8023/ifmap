@@ -21,12 +21,16 @@ import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
+import cn.cj.ifmap.core.exception.IfmapRemoteException;
 import cn.cj.ifmap.core.exception.IfmapStrategyException;
 import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.model.PartnerCall;
+import cn.cj.ifmap.core.orchestrator.judgement.JudgementPipeline;
+import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeRegistry;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.rule.RuleContext;
+import cn.cj.ifmap.core.spi.PartnerOutcome;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ClockProvider;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
@@ -93,7 +97,7 @@ public final class IfmapOrchestrator {
     private final ExecutionLogSink logSink;
     private final LogMasker logMasker;
     private final ClockProvider clock;
-    private final ResponseJudge judge;
+    private final JudgementPipeline pipeline;
     private final boolean stopOnFailure;
     private final boolean failOnMissingStrategy;
     private final int truncateThreshold;
@@ -112,7 +116,9 @@ public final class IfmapOrchestrator {
         this.logSink = builder.logSink;
         this.logMasker = builder.logMasker;
         this.clock = builder.clock == null ? SystemClockProvider.INSTANCE : builder.clock;
-        this.judge = new ResponseJudge(this.jsonOps);
+        this.pipeline = new JudgementPipeline(
+                builder.resultJudges != null ? builder.resultJudges : ResultJudgeRegistry.withDefaults(this.jsonOps),
+                this.jsonOps);
         this.stopOnFailure = builder.stopOnFailure;
         this.failOnMissingStrategy = builder.failOnMissingStrategy;
         this.truncateThreshold = builder.truncateThreshold;
@@ -238,12 +244,14 @@ public final class IfmapOrchestrator {
         context.setRequestJson(requestJson);
         requestJson = applySpecialDeal(context, ruleContext, requestJson);
 
-        String response = mockResponse != null ? mockResponse : exchange(context, requestJson);
+        PartnerOutcome outcome = mockResponse != null ? PartnerOutcome.ofBody(mockResponse)
+                : exchange(context, requestJson);
+        String response = outcome.getBody();
         context.setResponseJson(response);
 
         Map<String, Object> data = applyPostDeal(context, renderResponse(config, response, ruleContext));
         // 判定读**原始回参**：后序策略只能加工产物，改不动成败
-        Judgement judgement = judge.evaluate(config, response);
+        Judgement judgement = pipeline.judge(config, response, outcome);
         if (judgement.isSuccess()) {
             pool.put(config.getInterfaceNo(), data);
         }
@@ -351,14 +359,26 @@ public final class IfmapOrchestrator {
         return flat;
     }
 
-    private String exchange(StrategyContext context, String requestJson) {
+    /**
+     * 出网：把宿主实现包成 {@link PartnerOutcome}。
+     *
+     * <p>{@link IfmapRemoteException} 在这里被<b>收敛成判定失败</b>（而不是抛给宿主）：
+     * 传输失败也要能落库归因，并且遵守 {@code stopOnFailure}；其他 {@code RuntimeException}
+     * 仍然照原样传播（配置/编程错误不该被判定层吞掉）。</p>
+     */
+    private PartnerOutcome exchange(StrategyContext context, String requestJson) {
         if (gateway == null) {
             LOG.warn("ifmap 未配置 PartnerServiceGateway，interfaceNo={} 只做本地渲染（dry-run）",
                     context.getConfig().getInterfaceNo());
-            return null;
+            return PartnerOutcome.ofBody(null);
         }
         PartnerCall call = PartnerCall.of(context.getConfig(), context.getRequest(), requestJson, context.getParams());
-        return gateway.exchange(call);
+        try {
+            return gateway.exchangeForOutcome(call);
+        } catch (IfmapRemoteException e) {
+            LOG.warn("ifmap 出网失败，interfaceNo={}：{}", context.getConfig().getInterfaceNo(), e.getMessage());
+            return PartnerOutcome.failure(e.getMessage());
+        }
     }
 
     private Map<String, Object> renderResponse(IfmapConfig config, String response, RuleContext ruleContext) {
@@ -579,6 +599,7 @@ public final class IfmapOrchestrator {
         private ExecutionLogSink logSink;
         private LogMasker logMasker;
         private ClockProvider clock;
+        private ResultJudgeRegistry resultJudges;
         private boolean stopOnFailure = true;
         private boolean failOnMissingStrategy = true;
         private int truncateThreshold;
@@ -655,6 +676,11 @@ public final class IfmapOrchestrator {
 
         public Builder failOnMissingStrategy(boolean failOnMissingStrategy) {
             this.failOnMissingStrategy = failOnMissingStrategy;
+            return this;
+        }
+
+        public Builder resultJudges(ResultJudgeRegistry resultJudges) {
+            this.resultJudges = resultJudges;
             return this;
         }
 

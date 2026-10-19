@@ -19,6 +19,7 @@ import cn.cj.ifmap.core.IfmapEngine;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
+import cn.cj.ifmap.core.exception.IfmapRemoteException;
 import cn.cj.ifmap.core.exception.IfmapStrategyException;
 import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.model.IfmapRequest;
@@ -58,6 +59,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 编排器端到端：渲染 → 出网 → 判定 → 分支动作 → 日志（全部用内存 stub，不碰 DB / 网络）。 */
 class IfmapOrchestratorTest {
+
+    /** always 形态：不读响应，等效于"整段不判"。 */
+    private static final String ALWAYS = "{\"op\":\"always\"}";
+    /** 最常见的单条件形态：$.code == 0000。 */
+    private static final String CODE_0000 =
+            "{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}";
 
     /** 宿主规则。 */
     public static class Rules {
@@ -183,8 +190,7 @@ class IfmapOrchestratorTest {
         config.setRequestParamTemplate("{\"orgNo\":\"@FUN(orgNo,$.orgCode)\",\"acctName\":\"$.acctName\""
                 + ",\"fullParam\":\"$.fullParam\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-        config.setResultFlag("$.code");
-        config.setSuccessValue("0000");
+        config.setResultJudge(CODE_0000);
         return config;
     }
 
@@ -211,6 +217,36 @@ class IfmapOrchestratorTest {
                 .logMasker(new DefaultLogMasker())
                 .clock(clock)
                 .build();
+    }
+
+    @Test
+    @DisplayName("always 形态：响应不是 JSON 也判成功（短路，不去解析回参）")
+    void nonJsonResponseWithAlwaysStillSucceeds() {
+        IfmapConfig config = TestConfigs.config("IF_A", "GP81", 1, 1L);   // 不配响应模板：少一层 JSON 依赖
+        config.setResultJudge(ALWAYS);
+        repository.add(config);
+        IfmapResult result = orchestrator(new CapturingGateway("<html>502 Bad Gateway</html>"), new ActionRegistry())
+                .execute(IfmapRequest.empty(), "IF_A", "GP81", "<html>502 Bad Gateway</html>");
+        assertTrue(result.isSuccess(), "always 形态不读响应，非 JSON 不能判成 NOT_JSON");
+    }
+
+    @Test
+    @DisplayName("宿主抛 IfmapRemoteException：收敛成步骤失败 + 落日志，而不是抛给调用方")
+    void remoteExceptionBecomesStepFailureAndIsLogged() {
+        repository.add(mainConfig("IF_A", 1, 1L));
+        PartnerServiceGateway failing = new PartnerServiceGateway() {
+            @Override
+            public String exchange(PartnerCall call) {
+                throw new IfmapRemoteException("connection refused");
+            }
+        };
+        IfmapResult result = orchestrator(failing, new ActionRegistry())
+                .execute(IfmapRequest.empty(), "IF_A", "GP81");
+
+        assertFalse(result.isSuccess());
+        assertEquals("connection refused", result.getErrorMessage());
+        assertEquals(1, repository.getLogs().size());
+        assertEquals("FAIL", repository.getLogs().get(0).getExecutionResult());
     }
 
     @Test
@@ -249,7 +285,7 @@ class IfmapOrchestratorTest {
         IfmapConfig config = TestConfigs.config("IF_B", "GP81", 1, 1L);
         config.setPreStrategyName("extraParamStrategy");
         config.setRequestParamTemplate("{\"extra\":\"$.extra\"}");
-        config.setResultFlag(null);
+        config.setResultJudge(ALWAYS);
         repository.add(config);
         CapturingGateway gateway = new CapturingGateway("{\"ok\":true}");
 
@@ -277,7 +313,7 @@ class IfmapOrchestratorTest {
         IfmapConfig config = TestConfigs.config("IF_C2", "GP81", 1, 1L);
         config.setPreStrategyName("notRegistered");
         config.setRequestParamTemplate("{\"a\":\"$.a\"}");
-        config.setResultFlag(null);
+        config.setResultJudge(ALWAYS);
         repository.add(config);
 
         IfmapOrchestrator orchestrator = IfmapOrchestrator.builder()
@@ -304,7 +340,7 @@ class IfmapOrchestratorTest {
         config.setPostStrategyName("phaseRecording");
         config.setRequestParamTemplate("{\"pre\":\"$.preApplied\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-        config.setResultFlag(null);
+        config.setResultJudge(ALWAYS);
         repository.add(config);
 
         PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
@@ -329,8 +365,7 @@ class IfmapOrchestratorTest {
         IfmapConfig config = TestConfigs.config("IF_P2", "GP81", 1, 1L);
         config.setPostStrategyName("phaseRecording");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
-        config.setResultFlag("$.code");
-        config.setSuccessValue("0000");
+        config.setResultJudge(CODE_0000);
         repository.add(config);
 
         PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
@@ -351,11 +386,11 @@ class IfmapOrchestratorTest {
     void poolCarriesEarlierStepOutputToLaterStep() {
         IfmapConfig first = TestConfigs.config("IF_1", "GP81", 1, 1L);
         first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
-        first.setResultFlag(null);
+        first.setResultJudge(ALWAYS);
         IfmapConfig second = TestConfigs.config("IF_2", "GP81", 2, 2L);
         second.setRequestParamTemplate("{\"exact\":\"$.pool.IF_1.firstKey\",\"flat\":\"$.firstKey\"}");
         second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
-        second.setResultFlag(null);
+        second.setResultJudge(ALWAYS);
         repository.add(first).add(second);
 
         CapturingGateway gateway = new CapturingGateway("{\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
@@ -377,11 +412,10 @@ class IfmapOrchestratorTest {
     void failedStepStaysOutOfFlatData() {
         IfmapConfig first = TestConfigs.config("IF_3", "GP81", 1, 1L);
         first.setResponseParamTemplate("{\"firstKey\":\"$.data.applyNo\"}");
-        first.setResultFlag(null);
+        first.setResultJudge(ALWAYS);
         IfmapConfig second = TestConfigs.config("IF_4", "GP81", 2, 2L);
         second.setResponseParamTemplate("{\"secondKey\":\"$.data.echo\"}");
-        second.setResultFlag("$.code");
-        second.setSuccessValue("0000");
+        second.setResultJudge(CODE_0000);
         repository.add(first).add(second);
 
         CapturingGateway gateway = new CapturingGateway("{\"code\":\"9999\",\"data\":{\"applyNo\":\"AP1\",\"echo\":\"E1\"}}");
@@ -398,7 +432,7 @@ class IfmapOrchestratorTest {
     void presetPoolFromPayloadSeedsThePoolAndIsNotWrittenBack() {
         IfmapConfig config = TestConfigs.config("IF_S", "GP81", 2, 2L);
         config.setRequestParamTemplate("{\"exact\":\"$.pool.IF_0.old\",\"flat\":\"$.old\"}");
-        config.setResultFlag(null);
+        config.setResultJudge(ALWAYS);
         repository.add(config);
 
         Map<String, Object> presetStep = new LinkedHashMap<String, Object>();
@@ -493,14 +527,14 @@ class IfmapOrchestratorTest {
         IfmapConfig failing = mainConfig("IF_F", 1, 1L);
         repository.add(failing);
         IfmapConfig later = TestConfigs.config("IF_F2", "GP81", 2, 2L);
-        later.setResultFlag(null);
+        later.setResultJudge(ALWAYS);
         repository.add(later);
 
         IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"9999\"}"), new ActionRegistry())
                 .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_F", "GP81");
 
         assertFalse(result.isSuccess());
-        assertTrue(result.getErrorMessage().contains("未命中成功值"));
+        assertTrue(result.getErrorMessage().contains("未命中"), result.getErrorMessage());
         assertEquals(Collections.singletonList("IF_F"), result.getExecutedInterfaces(), "失败即停止（stopOnFailure=true）");
         assertEquals("FAIL", repository.getLogs().get(0).getExecutionResult());
     }
@@ -510,7 +544,7 @@ class IfmapOrchestratorTest {
     void planRunsFromOrderAndDataMerges() {
         IfmapConfig pre = TestConfigs.config("PRE", "GP81", 1, 10L);
         pre.setResponseParamTemplate("{\"preField\":\"$.data.applyNo\"}");
-        pre.setResultFlag(null);
+        pre.setResultJudge(ALWAYS);
         IfmapConfig main = mainConfig("MAIN", 2, 20L);
         repository.add(pre);
         repository.add(main);
@@ -530,10 +564,10 @@ class IfmapOrchestratorTest {
     void startPointSkipsEarlierSteps() {
         IfmapConfig first = TestConfigs.config("S1", "GP81", 1, 1L);
         first.setResponseParamTemplate("{\"k1\":\"$.data.applyNo\"}");
-        first.setResultFlag(null);
+        first.setResultJudge(ALWAYS);
         IfmapConfig second = TestConfigs.config("S2", "GP81", 2, 2L);
         second.setResponseParamTemplate("{\"k2\":\"$.data.echo\"}");
-        second.setResultFlag(null);
+        second.setResultJudge(ALWAYS);
         repository.add(first).add(second);
 
         CapturingGateway gateway = new CapturingGateway("{\"data\":{\"echo\":\"E2\"}}");

@@ -245,6 +245,7 @@ public final class ResultJudgeSpec {
     public static final class Evaluation {
         private boolean matched;
         private String actual;
+        private String failedActual;
         private String missedPath;
         private String reason;
 
@@ -256,8 +257,9 @@ public final class ResultJudgeSpec {
             this.matched = matched;
         }
 
+        /** 判定读到的值：失败时优先取"真正没对上的那个字段"，成功时取首个条件的值。 */
         public String getActual() {
-            return actual;
+            return failedActual != null ? failedActual : actual;
         }
 
         /** 第一个未命中条件里取不到值的路径（非空 → FIELD_MISSING）。 */
@@ -273,11 +275,19 @@ public final class ResultJudgeSpec {
             this.reason = reason;
         }
 
-        private void record(JudgeCondition condition, boolean present, String actualValue) {
-            if (this.missedPath == null && !present) {
-                this.missedPath = condition.getPath();
-            }
-            if (this.actual == null) {
+        /**
+         * 记录一次条件求值。
+         *
+         * <p><b>命中也要记</b>：判定成功时的 {@code actual_value} 是分支匹配
+         * （{@code logic_branch_value}）和日志的唯一依据，成功却不记就等于丢了这个值。</p>
+         */
+        private void record(JudgeCondition condition, boolean present, String actualValue, boolean hit) {
+            if (!hit) {
+                if (this.missedPath == null && !present) {
+                    this.missedPath = condition.getPath();
+                }
+                this.failedActual = actualValue;
+            } else if (this.actual == null) {
                 this.actual = actualValue;
             }
         }
@@ -355,9 +365,7 @@ public final class ResultJudgeSpec {
             boolean present = raw != null || readWithoutLeafPadding(ctx, condition.getPath());
             String actual = raw == null ? null : String.valueOf(raw);
             boolean hit = condition.getOp().matches(condition, present, actual);
-            if (!hit) {
-                evaluation.record(condition, present, actual);
-            }
+            evaluation.record(condition, present, actual, hit);
             return hit;
         }
 

@@ -34,7 +34,7 @@ import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.core.IfmapEngine;
@@ -96,7 +96,7 @@ class ConfigAdminServiceTest {
         actions.register(new SubmitAction());
         ConfigValidator validator = new ConfigValidator(
                 new ContractValidator(IfmapEngine.builder().jsonOps(jsonOps).build()),
-                jsonOps, new SpecialDealStrategyRegistry(), actions, repository);
+                jsonOps, new StrategyHookRegistry(), actions, repository);
 
         IfmapAdminProperties properties = new IfmapAdminProperties();
         service = new ConfigAdminService(writer, repository, historyRepository, AdminTestSupport.snapshots(),
@@ -323,7 +323,7 @@ class ConfigAdminServiceTest {
     void dryRunWithoutOrchestrator() {
         IfmapAdminProperties properties = new IfmapAdminProperties();
         ConfigValidator validator = new ConfigValidator(null, new JacksonJsonOps(),
-                new SpecialDealStrategyRegistry(), new ActionRegistry(), repository);
+                new StrategyHookRegistry(), new ActionRegistry(), repository);
         ConfigAdminService noOrchestrator = new ConfigAdminService(writer, repository, historyRepository,
                 AdminTestSupport.snapshots(), validator, new ConfigAuditor(repository, validator, 100),
                 provider(null), provider(null), properties);
@@ -355,7 +355,7 @@ class ConfigAdminServiceTest {
                 .jsonOps(jsonOps)
                 .actions(actions)
                 .logicBranches(new LogicBranchStrategyRegistry())
-                .specialDeals(new SpecialDealStrategyRegistry())
+                .strategyHooks(new StrategyHookRegistry())
                 .fullParams(new FullParamStrategyRegistry())
                 .callbacks(new CallbackRegistry())
                 .gateway(new FailingGateway())

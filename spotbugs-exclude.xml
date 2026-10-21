@@ -29,7 +29,7 @@
 
       · RuleContext#getAttributes / StrategyContext#getConfig|getParams：规则求值与策略要读写这些对象，
         每个规则一次深拷贝会让单次映射从"零拷贝"变成"多次深拷贝"；
-      · IfmapEngine#getTemplateEngine、IfmapOrchestrator$Builder#actions|logSink|specialDeals：
+      · IfmapEngine#getTemplateEngine、IfmapOrchestrator$Builder#actions|logSink|strategyHooks：
         装配期把无状态协作者交给引擎，拷贝会破坏"全局共用一个实例"的语义（注册表/缓存尤其如此）；
       · PartnerCall#getConfig、StrategyContext$Builder#config：交给宿主的出网网关/策略，按只读约定使用；
       · RuleContext/StrategyContext 的属性表在构造时已经拷过一份，之后不再被外部改动。

@@ -21,8 +21,8 @@ import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategy;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
@@ -61,14 +61,14 @@ class ConfigValidatorTest {
         JdbcConfigRepository repository = db.repository();
         writer = db.writer();
 
-        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
-        specialDeals.register("demoStrategy", new DemoStrategy());
+        StrategyHookRegistry strategyHooks = new StrategyHookRegistry();
+        strategyHooks.register("demoStrategy", new DemoStrategy());
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction());
 
         JacksonJsonOps jsonOps = new JacksonJsonOps();
         IfmapEngine engine = IfmapEngine.builder().jsonOps(jsonOps).build();
-        validator = new ConfigValidator(new ContractValidator(engine), jsonOps, specialDeals, actions, repository);
+        validator = new ConfigValidator(new ContractValidator(engine), jsonOps, strategyHooks, actions, repository);
     }
 
     @Test
@@ -195,10 +195,10 @@ class ConfigValidatorTest {
         config.setPostStrategyName("demoStrategy");
 
         ConfigValidator emptyStrategies = new ConfigValidator(null, new JacksonJsonOps(),
-                new SpecialDealStrategyRegistry(), new ActionRegistry(), db.repository());
+                new StrategyHookRegistry(), new ActionRegistry(), db.repository());
         ValidationResult warning = emptyStrategies.validate(config, true);
         assertTrue(warning.isPassed(), warning.getErrors().toString());
-        assertTrue(warning.getWarnings().toString().contains("尚未注册任何特殊处理策略"),
+        assertTrue(warning.getWarnings().toString().contains("尚未注册任何策略钩子"),
                 warning.getWarnings().toString());
     }
 
@@ -403,7 +403,7 @@ class ConfigValidatorTest {
         }
     }
 
-    static class DemoStrategy implements SpecialDealStrategy {
+    static class DemoStrategy implements IfmapStrategyHook {
         @Override
         public Map<String, Object> apply(StrategyContext context) {
             return new LinkedHashMap<String, Object>();

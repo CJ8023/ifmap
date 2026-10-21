@@ -26,18 +26,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** {@link SpecialDealStrategyRegistry} 的三 key 注册与歧义记录。 */
-class SpecialDealStrategyRegistryTest {
+/** {@link StrategyHookRegistry} 的三 key 注册与歧义记录。 */
+class StrategyHookRegistryTest {
 
     /** 类名用于"宽松兜底 key"断言，必须是 public 顶层类（注解/实例化都可见）。 */
-    public static class CmbSpecialDealStrategy implements SpecialDealStrategy {
+    public static class CmbIfmapStrategyHook implements IfmapStrategyHook {
         @Override
         public Map<String, Object> apply(StrategyContext context) {
             return Collections.emptyMap();
         }
     }
 
-    public static class OtherSpecialDealStrategy implements SpecialDealStrategy {
+    public static class OtherIfmapStrategyHook implements IfmapStrategyHook {
         @Override
         public Map<String, Object> apply(StrategyContext context) {
             return Collections.emptyMap();
@@ -46,49 +46,49 @@ class SpecialDealStrategyRegistryTest {
 
     @Test
     void resolvesByBeanNameWithoutAliasHit() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        CmbSpecialDealStrategy strategy = new CmbSpecialDealStrategy();
-        registry.register("cmbSpecialDealStrategy", strategy);
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        CmbIfmapStrategyHook strategy = new CmbIfmapStrategyHook();
+        registry.register("cmbIfmapStrategyHook", strategy);
 
-        assertSame(strategy, registry.lookup("cmbSpecialDealStrategy"));
+        assertSame(strategy, registry.lookup("cmbIfmapStrategyHook"));
         assertTrue(registry.getAliasHits().isEmpty(), "bean 名精确命中不应记宽松命中");
         assertEquals(1, registry.size());
     }
 
     @Test
     void resolvesBySimpleNameAsLooseKey() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        CmbSpecialDealStrategy strategy = new CmbSpecialDealStrategy();
-        registry.register("cmbSpecialDealStrategy", strategy);
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        CmbIfmapStrategyHook strategy = new CmbIfmapStrategyHook();
+        registry.register("cmbIfmapStrategyHook", strategy);
 
-        assertSame(strategy, registry.lookup("CmbSpecialDealStrategy"));
+        assertSame(strategy, registry.lookup("CmbIfmapStrategyHook"));
         assertEquals(1, registry.getAliasHits().size());
-        assertTrue(registry.getAliasHits().contains("CmbSpecialDealStrategy"));
+        assertTrue(registry.getAliasHits().contains("CmbIfmapStrategyHook"));
     }
 
     @Test
     void resolvesByDecapitalizedSimpleName() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        CmbSpecialDealStrategy strategy = new CmbSpecialDealStrategy();
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        CmbIfmapStrategyHook strategy = new CmbIfmapStrategyHook();
         registry.register("beanname", strategy);
 
-        assertSame(strategy, registry.lookup("cmbSpecialDealStrategy"));
+        assertSame(strategy, registry.lookup("cmbIfmapStrategyHook"));
         assertEquals(1, registry.getAliasHits().size());
     }
 
     @Test
     void unknownNameReturnsNull() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        registry.register("a", new CmbSpecialDealStrategy());
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        registry.register("a", new CmbIfmapStrategyHook());
         assertNull(registry.lookup("notExist"));
         assertFalse(registry.contains("notExist"));
     }
 
     @Test
     void keepsFirstWhenTwoStrategiesCollideOnAlias() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        CmbSpecialDealStrategy first = new CmbSpecialDealStrategy();
-        OtherSpecialDealStrategy second = new OtherSpecialDealStrategy();
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        CmbIfmapStrategyHook first = new CmbIfmapStrategyHook();
+        OtherIfmapStrategyHook second = new OtherIfmapStrategyHook();
         // 两个不同策略注册到同一个 bean 名 -> 歧义，保留先注册者
         registry.register("sameBeanName", first);
         registry.register("sameBeanName", second);
@@ -99,18 +99,18 @@ class SpecialDealStrategyRegistryTest {
 
     @Test
     void keysContainAllThreeForms() {
-        SpecialDealStrategyRegistry registry = new SpecialDealStrategyRegistry();
-        registry.register("cmbSpecialDealStrategy", new CmbSpecialDealStrategy());
+        StrategyHookRegistry registry = new StrategyHookRegistry();
+        registry.register("cmbIfmapStrategyHook", new CmbIfmapStrategyHook());
 
-        assertTrue(registry.keys().contains("cmbSpecialDealStrategy"));
-        assertTrue(registry.keys().contains("CmbSpecialDealStrategy"));
+        assertTrue(registry.keys().contains("cmbIfmapStrategyHook"));
+        assertTrue(registry.keys().contains("CmbIfmapStrategyHook"));
     }
 
     @Test
     void decapitalizeLooseOnlyTouchesFirstChar() {
-        assertEquals("aBC", SpecialDealStrategyRegistry.decapitalizeLoose("ABC"));
-        assertEquals("abc", SpecialDealStrategyRegistry.decapitalizeLoose("abc"));
-        assertNull(SpecialDealStrategyRegistry.decapitalizeLoose(null));
-        assertEquals("", SpecialDealStrategyRegistry.decapitalizeLoose(""));
+        assertEquals("aBC", StrategyHookRegistry.decapitalizeLoose("ABC"));
+        assertEquals("abc", StrategyHookRegistry.decapitalizeLoose("abc"));
+        assertNull(StrategyHookRegistry.decapitalizeLoose(null));
+        assertEquals("", StrategyHookRegistry.decapitalizeLoose(""));
     }
 }

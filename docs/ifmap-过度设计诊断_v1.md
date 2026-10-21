@@ -102,16 +102,16 @@
 
 ### 2.5 P1-3② → `aliasHits` 改 `Set`（`0571a94`）
 
-**缺陷**：`SpecialDealStrategyRegistry.aliasHits` 是普通 `ArrayList`，`lookup()` 命中宽松 key 时**无条件 `add`、不去重、无上界**；而 `lookup()` 在 `IfmapOrchestrator.applySpecialDeal()`（`:244`）里**每笔请求**都会被调用 —— 只要某个接口的 `strategy_name` 一直用宽松写法，每笔请求就多留一个字符串，**内存随流量线性增长**。
+**缺陷**：`StrategyHookRegistry.aliasHits` 是普通 `ArrayList`，`lookup()` 命中宽松 key 时**无条件 `add`、不去重、无上界**；而 `lookup()` 在 `IfmapOrchestrator.applyPreStrategy()`（`:244`）里**每笔请求**都会被调用 —— 只要某个接口的 `strategy_name` 一直用宽松写法，每笔请求就多留一个字符串，**内存随流量线性增长**。
 
-**同时是死代码**：`getAliasHits()` 只有测试在用，javadoc 声称的"启动期审计报表"并不存在（管理端用的是 `keys()`）。对照 `getConflicts()` **不删** —— 它只在注册期写入，不随请求增长，且是三个注册表（SpecialDeal / FullParam / Action）的统一模式。
+**同时是死代码**：`getAliasHits()` 只有测试在用，javadoc 声称的"启动期审计报表"并不存在（管理端用的是 `keys()`）。对照 `getConflicts()` **不删** —— 它只在注册期写入，不随请求增长，且是三个注册表（StrategyHook / FullParam / Action）的统一模式。
 
 **修法（比"直接删"更好）**：改 `LinkedHashSet`。
 记录值只可能取自 `aliases` 的 key（`lookup` 仅在 `aliases.get(name) != null` 时记录），**去重后上界天然就是「已注册别名数」**，不需要额外常数；且**不破坏 public API**（`getAliasHits()` 签名与返回形态不变），**4 条现有测试断言原样通过** —— 这本身就是"可观测行为未变"的证明。
 
 **顺带修掉的两处文档问题**：
 1. `docs/10-迁移指南.md` §4.1 的 `strategy_name` 行「默认 **warn 后跳过**（可配成快速失败）」**两半都反了**：`IfmapProperties.Orchestrator.failOnMissingStrategy` 默认 `true` → `IfmapOrchestrator:246` 抛 `IfmapStrategyException`，"warn 后跳过"是 `false` 那一支（`:249`）。`docs/05` §2 写的是对的，两份文档矛盾。
-   *（后续：该列已拆为 `pre_strategy_name` / `post_strategy_name`，`docs/10` §4.1 行已随之改写；本条的"默认快速失败"结论对两列同样成立，代码位置改到 `IfmapOrchestrator.applySpecialDeal` / `applyPostDeal`。）*
+   *（后续：该列已拆为 `pre_strategy_name` / `post_strategy_name`，`docs/10` §4.1 行已随之改写；本条的"默认快速失败"结论对两列同样成立，代码位置改到 `IfmapOrchestrator.applyPreStrategy` / `applyPostStrategy`。）*
 2. 补上「两个宽松别名」的公开说明（`docs/06` §3 指针 + `docs/10` §4.1 全文）：**代码此前比文档容忍得多**，宽容行为没有写出来。
 
 ---
@@ -148,7 +148,7 @@
 
 ### 3.3 P1-3① · 策略注册表「第三别名」→ 撤回
 
-**原判**：`SpecialDealStrategyRegistry` 的第三个别名（`decapitalizeLoose(simpleName)`）多余。
+**原判**：`StrategyHookRegistry` 的第三个别名（`decapitalizeLoose(simpleName)`）多余。
 
 **证据**：它是正式设计决策，用来修正式立项的 **P0-7 缺陷**（详见内部档 `bankintconfig模块优化方案_v1.md`，该档未纳入版本库）：
 
@@ -242,7 +242,7 @@
 | 迁移 kit + 分区手册（2190 行） | `provider-jdbc/.../db/` | 文档承诺「随 jar 发布」+ 5 处常量/测试引用（§3.2） |
 | `JsonConfigMapper` 的 DDL 默认值 | `provider-remote` | 「与 JDBC 读出对象逐字段一致」的契约（§3.7） |
 | 25 个配置键 | `IfmapProperties` | 全部有消费点与文档；`clean-*` 是运维旋钮（§3.7） |
-| 策略注册表三 key + `getConflicts()` | `SpecialDealStrategyRegistry` | P0-7 修复；`conflicts` 是三个注册表的统一模式（§3.3） |
+| 策略注册表三 key + `getConflicts()` | `StrategyHookRegistry` | P0-7 修复；`conflicts` 是三个注册表的统一模式（§3.3） |
 | ~~`InterfaceOrdering` 拓扑排序 + 环检测~~ | `core.ordering` | 当时判"前置接口链的正确性基础，非排序工具"；**后续该机制连同 `front_interface_no` 一起被删除**（`interface_order` 单一定序 + 起点截断 + 跨步骤共享池取代，见顶部更新说明），本行结论已作废 |
 | `Values` 数字格式化 | `core.template` | 数字保真契约（`10.00` 不得变 `10.0`、不得出科学计数法） |
 | `JsonOps` SPI + `ifmap-json-tck` | `json-tck` / `json-*` | 换 JSON 库时的一致性套件，只进测试范围 |

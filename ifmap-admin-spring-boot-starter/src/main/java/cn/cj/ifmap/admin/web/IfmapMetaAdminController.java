@@ -25,7 +25,7 @@ import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -50,7 +50,7 @@ public class IfmapMetaAdminController {
 
     private final ConfigAdminService service;
     private final RuleRegistry rules;
-    private final SpecialDealStrategyRegistry specialDeals;
+    private final StrategyHookRegistry strategyHooks;
     private final FullParamStrategyRegistry fullParams;
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
@@ -58,7 +58,7 @@ public class IfmapMetaAdminController {
     private final IfmapEnumCatalog enums;
 
     public IfmapMetaAdminController(ConfigAdminService service, RuleRegistry rules,
-                                    SpecialDealStrategyRegistry specialDeals,
+                                    StrategyHookRegistry strategyHooks,
                                     FullParamStrategyRegistry fullParams,
                                     LogicBranchStrategyRegistry logicBranches,
                                     ActionRegistry actions, CallbackRegistry callbacks,
@@ -66,7 +66,7 @@ public class IfmapMetaAdminController {
         this.enums = enums == null ? IfmapEnumCatalog.empty() : enums;
         this.service = service;
         this.rules = rules;
-        this.specialDeals = specialDeals;
+        this.strategyHooks = strategyHooks;
         this.fullParams = fullParams;
         this.logicBranches = logicBranches;
         this.actions = actions;
@@ -89,7 +89,7 @@ public class IfmapMetaAdminController {
     @GetMapping("/strategies")
     public Map<String, Object> strategies() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("specialDeals", specialDeals.keys());
+        result.put("strategyHooks", strategyHooks.keys());
         result.put("fullParams", fullParams.keys());
         result.put("logicBranches", logicBranches.keys());
         result.put("actions", actions.keys());

@@ -26,8 +26,8 @@ import java.util.Map;
 /**
  * 一次接口执行中传给策略/动作的上下文。
  *
- * <p>{@code params} 是<b>可变</b>的：主参数组包（{@code FullParamStrategy}）与特殊处理
- * （{@code SpecialDealStrategy}）在其中补充/覆盖字段，这就是存量引擎"补参数"的替代形态。</p>
+ * <p>{@code params} 是<b>可变</b>的：主参数组包（{@code FullParamStrategy}）与策略钩子
+ * （{@code IfmapStrategyHook}）在其中补充/覆盖字段，这就是存量引擎"补参数"的替代形态。</p>
  *
  * @author caijun
  */

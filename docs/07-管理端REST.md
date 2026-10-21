@@ -92,7 +92,7 @@ ifmap:
 |---|---|---|
 | GET | `/rules` | 已注册规则清单（`@FUN` 可用项，含签名与示例） |
 | GET | `/actions` | 已注册动作（`method_flag` 取值） |
-| GET | `/strategies` | 已注册策略：`specialDeals` / `fullParams` / `logicBranches` / `actions` / `callbacks` |
+| GET | `/strategies` | 已注册策略：`strategyHooks` / `fullParams` / `logicBranches` / `actions` / `callbacks` |
 | GET | `/audit?tenantId=&busiNode=&markdown=` | 全量巡检，`markdown=true` 返回可贴工单的报告 |
 | GET | `/enums` | 字典：**框架自带**（`strategyName` ← 已注册的前/后序策略、`status`）**＋** 宿主机字典（可选 SPI，同名 key 覆盖，见 §11.3） |
 
@@ -168,7 +168,7 @@ ifmap:
 | 模板是合法 JSON | `request_param_template` / `response_param_template` |
 | `$.path` 路径合法 | `JsonOps.isValidPath` —— Jackson 实现只做 JsonPath 编译，**拦不住 `$.a[`**；`ifmap-json-fastjson` 的实现额外要求引号外括号配对，能拦住（差异见 [`docs/05`](05-SpringBoot集成.md) §3.2） |
 | `@FUN` 规则存在且参数可匹配重载 | `ContractValidator`（引擎在位时）；引擎缺席时**至少校验模板 JSON 合法**（历史脏数据真实存在，不能静默放过） |
-| `pre_strategy_name` / `post_strategy_name` 已注册 | `SpecialDealStrategyRegistry` |
+| `pre_strategy_name` / `post_strategy_name` 已注册 | `StrategyHookRegistry` |
 | 请求模板里的 `$.pool.<接口号>` 指向**本节点内更早**的步骤 | `ConfigRepository.queryConfigsByBusiNode`（同序或后续步骤、自引用、拼错的接口号一律拒；响应模板不判——它的根是对方原始回参，可能真有个叫 `pool` 的业务字段） |
 | 唯一键不冲突（**两个维度**） | `(tenant_id, interface_no, deleted_seq)`（接口号租户内唯一）+ `(tenant_id, busi_node, interface_order, deleted_seq)`（顺序节点内唯一） |
 | 分支集合：默认兜底 ≤ 1、顺序唯一、`method_flag` 已注册 | `validateBranches` / `validateBranch` |
@@ -295,7 +295,7 @@ ifmap **不建字典表**（设计 Q8）：码值含义是宿主机业务，引�
 
 | dict key | 页面字段 | 选项来源 |
 |---|---|---|
-| `strategyName` | 前序策略 / 后序策略 | `SpecialDealStrategyRegistry.keys()`（已注册了什么策略就能选到什么） |
+| `strategyName` | 前序策略 / 后序策略 | `StrategyHookRegistry.keys()`（已注册了什么策略就能选到什么） |
 | `status` | 状态 | 固定 `1 启用` / `0 停用` |
 | `#actions`（特殊 key） | 分支的 `method_flag` | `GET /actions`（`ActionRegistry.keys()`），不走 `/enums` |
 

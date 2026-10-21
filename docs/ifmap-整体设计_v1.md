@@ -18,7 +18,7 @@
 >    表达的是同一件事，现由 `interface_order`（业务节点内的步骤序号）单一定序 + 起点截断 + **跨步骤共享池**
 >    表达；唯一键相应由一把五列拆成 `uk_ifmap_config_biz` + `uk_ifmap_config_order` 两把，
 >    `ConfigRepository` 增加 `queryConfigsByBusiNode(tenantId, busiNode)`。
-> 2. **`strategy_name` 已拆成 `pre_strategy_name` / `post_strategy_name`**：`SpecialDealStrategy` 分
+> 2. **`strategy_name` 已拆成 `pre_strategy_name` / `post_strategy_name`**：`IfmapStrategyHook` 分
 >    `PRE`（出网前）/ `POST`（回参产物之后、判定之前）两个相位。
 > 3. **`ConfigValidator` 的校验清单**已去掉「前置链成环」、新增「池引用只能指向本节点更早的步骤」。
 > 4. **成败判定已换成 `result_judge` 单列**（`result_flag` / `success_value` 两列连同 `ResponseJudge` 一起删除）：
@@ -230,7 +230,7 @@ cn.cj.ifmap.core                     引擎本体
 ├── dsl              模板解析、表达式求值、@FUN 调用协议
 ├── json             JsonOps（SPI）、JsonPath 封装、ReadContext（一次解析多次取数）
 ├── rule             ConvertRule（内置规则）、@IfmapRule、RuleRegistry
-├── strategy         SpecialDealStrategy / FullParamStrategy / LogicBranchStrategy + 三个工厂
+├── strategy         IfmapStrategyHook / FullParamStrategy / LogicBranchStrategy + 三个工厂
 ├── action           ActionRegistry（method_flag → 动作）
 ├── spi              全部扩展点接口（§5）
 ├── cache            ConfigCache（抽象）、默认 Caffeine/内存实现
@@ -346,12 +346,12 @@ public interface ConfigRepository {
 
 | SPI | ECC 现状 | 注册键 | 说明 |
 |---|---|---|---|
-| `SpecialDealStrategy` | 38 个 Impl，`strategy_name` = Spring bean 名（落地后**拆为 `pre_strategy_name` / `post_strategy_name` 两列**，分 `PRE` / `POST` 相位） | **bean 名 / 类简单名 / 宽松小写名**（三 key，解决 P0-7） | 特殊处理（补参数、文件上传…） |
+| `IfmapStrategyHook` | 38 个 Impl，`strategy_name` = Spring bean 名（落地后**拆为 `pre_strategy_name` / `post_strategy_name` 两列**，分 `PRE` / `POST` 相位） | **bean 名 / 类简单名 / 宽松小写名**（三 key，解决 P0-7） | 策略钩子（补参数、文件上传…） |
 | `FullParamStrategy` | 20 个 Impl，`@FullParam(partnerCode, busiNode)` | 注解值 | 主参数组包（如 961 行的 `FinancingFullParamStrategyImpl`） |
 | `LogicBranchStrategy` | 12 个 Impl，`@LogicBranch` + 反射 `getDeclaredMethod` | 注解值 + **Action Key** | 分支动作（改走 ActionRegistry，不再反射方法名，见 TS-6） |
 | `IfmapCallbackHandler` | `IfmapConfigApplication` 17 个回调 | `interfaceNo` | 银行回调（上传通知、放款结果…） |
 
-**`SpecialDealStrategy` 三 key 注册**（直接解决 P0-7，且对宿主机零风险）：
+**`IfmapStrategyHook` 三 key 注册**（直接解决 P0-7，且对宿主机零风险）：
 
 ```java
 registry.register(beanName, strategy);            // Spring 真实 bean 名（权威值）
@@ -452,8 +452,8 @@ CREATE TABLE `ifmap_config` (
   `response_param_template`   longtext                              COMMENT '响应参数模板（DSL）',
   `result_flag`               varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】执行结果标志（JsonPath）',
   `success_value`             varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】成功判断值，多值以 , 或 ; 分隔（大小写不敏感）',
-  `pre_strategy_name`         varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】前序特殊处理策略标识（=Spring bean 名），出网前执行',
-  `post_strategy_name`        varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】后序特殊处理策略标识（=Spring bean 名），回参产物之后执行',
+  `pre_strategy_name`         varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】前序策略钩子标识（=Spring bean 名），出网前执行',
+  `post_strategy_name`        varchar(128) NOT NULL DEFAULT ''         COMMENT '【扩】后序策略钩子标识（=Spring bean 名），回参产物之后执行',
   `status`                    tinyint(1)   NOT NULL DEFAULT 1           COMMENT '【新】状态：1启用 0停用',
   `version`                   int          NOT NULL DEFAULT 0           COMMENT '【新】乐观锁版本',
   `remark`                    varchar(512) NOT NULL DEFAULT ''         COMMENT '【扩】备注',
@@ -832,10 +832,10 @@ IfmapRequest
   → [执行计划] 取该 busi_node 内的有序步骤（interface_order 升序），截断到起点 interfaceNo
   → [主参数组包] FullParamStrategy（按 partnerCode + busiNode）+ payload + 跨步骤共享池
   → [请求模板渲染] @FUN 规则 + JsonPath 取数（ReadContext 一次解析多次取数）
-  → [前序特殊处理] SpecialDealStrategy（pre_strategy_name，相位 PRE）
+  → [前序策略钩子] IfmapStrategyHook（pre_strategy_name，相位 PRE）
   → [出网调用] 宿主机提供的 PartnerServiceGateway SPI
   → [响应模板解析] response_param_template → 本步骤产物
-  → [后序特殊处理] SpecialDealStrategy（post_strategy_name，相位 POST）
+  → [后序策略钩子] IfmapStrategyHook（post_strategy_name，相位 POST）
   → [结果判定] result_flag + success_value（多值）；**成功才把产物写进共享池**
   → [逻辑分支] logic_branch_order 升序匹配 → ActionRegistry 执行
   → [执行日志] ExecutionLogSink（脱敏后落库）
@@ -1062,7 +1062,7 @@ public interface LogMasker {
 | 阶段 | 动作 | 出口条件 |
 |---|---|---|
 | M1 数据迁移 | 在 starter 库建表（§6 DDL）→ 执行 §6.7 迁移脚本 → 回填 `deleted_seq`/`logic_branch_order` → 加唯一键与索引 | 行数一致；`deleted_seq` 回填完成；唯一键建立成功 |
-| M2 规则与策略对齐 | ECC 侧为 `ConvertRule` 的 52 个唯一名加 `@IfmapRule`；38 个策略实现 `SpecialDealStrategy`；`discSuccess`/`discFail` 注册为 Action | 启动期契约自检 **0 违规**（用 §8 的 `/audit`）；`RuleRegistry` 覆盖内置规则数 = 0（无意外覆盖） |
+| M2 规则与策略对齐 | ECC 侧为 `ConvertRule` 的 52 个唯一名加 `@IfmapRule`；38 个策略实现 `IfmapStrategyHook`；`discSuccess`/`discFail` 注册为 Action | 启动期契约自检 **0 违规**（用 §8 的 `/audit`）；`RuleRegistry` 覆盖内置规则数 = 0（无意外覆盖） |
 | M3 切流 | 按 `busi_node` / 银行灰度切流；保留 ECC 原链路作为回退开关 | 全量切换 + 观察期结束 |
 
 ### 10.3 数据迁移风险
@@ -1211,8 +1211,8 @@ public interface LogMasker {
 |---|---|---|
 | `TenantResolver`（W3 顺延） | ✅ core `spi/TenantResolver` + `HeaderTenantResolver`（优先级：上下文 `tenantId` > 请求头 > 默认 `-1`；请求头名与默认租户可配） | — |
 | `IfmapRequest` 门面 | ✅ `model/IfmapRequest`（不可变 + Builder、`of(Map)`、`empty()`、大小写不敏感 `getHeader`、`withAttribute`）与 `model/IfmapResult`、`model/PartnerCall` | 模型放 `model` 包（设计稿写作"门面"） |
-| 三类策略 SPI | ✅ `SpecialDealStrategy` / `FullParamStrategy` / `LogicBranchStrategy`（方法名 `match(StrategyContext)`）+ `IfmapActionHandler` + `IfmapCallbackHandler` | 四/五类（含动作与回调）一并落地，比计划多 |
-| "三工厂" → 注册表 | ✅ `SpecialDealStrategyRegistry`（key = **bean 名**，含 `decapitalizeLoose` 别名与冲突诊断）/ `FullParamStrategyRegistry`（key = `bank\|busi`，查找 exact → `(partner,*)` → `(*,busi)` → `(*,*)`）/ `LogicBranchStrategyRegistry`（key → 多实现） | 用注册表替代"工厂 + 反射按方法名调用"，对应方案 v1 P0-7 / TS-6 |
+| 三类策略 SPI | ✅ `IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy`（方法名 `match(StrategyContext)`）+ `IfmapActionHandler` + `IfmapCallbackHandler` | 四/五类（含动作与回调）一并落地，比计划多 |
+| "三工厂" → 注册表 | ✅ `StrategyHookRegistry`（key = **bean 名**，含 `decapitalizeLoose` 别名与冲突诊断）/ `FullParamStrategyRegistry`（key = `bank\|busi`，查找 exact → `(partner,*)` → `(*,busi)` → `(*,*)`）/ `LogicBranchStrategyRegistry`（key → 多实现） | 用注册表替代"工厂 + 反射按方法名调用"，对应方案 v1 P0-7 / TS-6 |
 | `ActionRegistry` | ✅ `@IfmapAction("submit")` 或显式 key；`failOnMissingAction` 默认 `true`（缺失即抛 `IfmapStrategyException`） | 取代 `method_flag` 反射（方法重命名不再静默失效） |
 | `CallbackRegistry` | ✅ `@IfmapCallback("IF_X")` 或显式 key；未注册接口号直接抛异常（不再静默什么都不做） | 取代存量 17 个回调方法 |
 | 执行顺序与环检测 | ✅ `orchestrator/InterfaceOrdering`：`topological(sort(enabled))`（DFS + 环检测，异常含"循环依赖"与完整路径）；**并递归加载 `front_interface_no` 前置链**（`MAX_FRONT_DEPTH = 64` 护栏） | 递归加载是计划外补充 —— 仓储按单一 `interface_no` 查询，不递归拿不到前置接口；**该形态随后被整体删除**（改为 `interface_order` 单一定序 + 起点截断，见顶部「历史稿提示」） |
@@ -1256,7 +1256,7 @@ public interface LogMasker {
 | 装配门控 | ✅ 三重门控：`ifmap.admin.enabled=true`（**默认 false**）+ classpath `DispatcherServlet`/`JdbcTemplate` + `DataSource`；全部 bean `@ConditionalOnMissingBean` | 管理端能改线上配置，默认必须关；**不内置鉴权**（不绑定宿主认证体系），文档明确要求挂网关 |
 | CRUD | ✅ `GET/POST /configs`、`GET/PUT/DELETE /configs/{id}`、`POST /configs/{id}/status`（启停） | — |
 | §8.3 校验 | ✅ `ConfigValidator`：必填列、模板 JSON 合法、`$.path` 合法（`JsonOps.isValidPath`）、`@FUN` 规则与重载可匹配（`ContractValidator`）、`pre_/post_strategy_name` 已注册、**池引用只指向本节点更早的步骤**、唯一键冲突（两个维度）、分支默认兜底 ≤1、分支顺序唯一、`method_flag` 已注册 | 无引擎时**至少**做模板 JSON 语法校验（历史脏数据真实存在，不能静默放过）；原「前置链自指/成环」一项已随 `front_interface_no` 删除 |
-| 试跑 | ✅ `POST /configs/dry-run`：走完整编排链路（前置链 → 拓扑 → 渲染 → 特殊处理 → 判定 → 分支动作），只把出网换成 `mockResponse` | 计划稿路径为 `/configs/{id}/dry-run`，落地改为请求体承载（含 `tenantId` + `params: Map`），REST 语义更顺 |
+| 试跑 | ✅ `POST /configs/dry-run`：走完整编排链路（前置链 → 拓扑 → 渲染 → 策略钩子 → 判定 → 分支动作），只把出网换成 `mockResponse` | 计划稿路径为 `/configs/{id}/dry-run`，落地改为请求体承载（含 `tenantId` + `params: Map`），REST 语义更顺 |
 | 历史 / 回滚 | ✅ `GET /configs/{id}/history` + `POST /configs/{id}/rollback`；快照 = **显式业务列 → 有序 Map → `JsonOps.toJson`**，附字段级 `diff` | 快照序列化放 admin 模块（provider-jdbc 保持零 JSON 依赖）；不用 Bean 反射序列化（少 JSR-310 模块、不写 `version`/审计列、字段增删不静默丢字段） |
 | `/audit` | ✅ `ConfigAuditor`：跨租户全量巡检 + `audit-max-configs` 上限 + `truncated` 标记，可输出 Markdown | — |
 | `/rules`、`/actions`、`/strategies` | ✅ 由服务端提供（`RuleRegistry.getDescriptors()` / `ActionRegistry.keys()` / 四个策略注册表） | 前端**不要硬编码**：这些值由宿主机代码决定 |
@@ -1370,7 +1370,7 @@ public interface LogMasker {
 |---|---|---|
 | M1 迁移 SQL kit | ✅ `ifmap-provider-jdbc/src/main/resources/db/migration/ecc-to-ifmap/`：`README.md` + `00-precheck` / `01-add-columns` / `02-backfill` / `03-modify-and-index` / `04-rename-tables` / `05-verify`（共 7 文件、约 53 KB） | 计划稿只写"迁移脚本"；落地把**执行顺序按"何时能做"重排**：`04-rename-tables` 是**切换时刻**才执行的秒级元数据操作，放在最后（放最前会在共存期就切断 ECC 依赖）。`README` 另给"大表按体量分岔"（< 50 万行 COPY / ≥ 50 万行走 gh-ost）与 11 行排错表 |
 | kit 是否随 changelog 自动执行 | ✅ **不自动**：不在 `db/changelog/` 主入口下、文件名也不符合 Flyway `V<版本>__<描述>.sql` 规范 → 必须运维手工执行；`README` 首节写明这一点 | 计划稿未提；这是最容易出事的隐含假设（以为引了 jar 就自动迁移） |
-| M2 规则/策略对齐 | ✅ 落到公开文档 `docs/10-迁移指南.md`：**"配置里的字符串 → ifmap 注册点"对照表**（`@FUN(名字)` → 内置 18 规则 / `@IfmapRule`；`method_flag` → `@IfmapAction`；分支标识 → `@LogicBranch`；`strategy_name`（落地后为前序 / 后序两列）→ `SpecialDealStrategy` bean 名）+ **启动期自检动作**（`/audit`、`/rules`、`/actions`、`/strategies`、`/configs/validate`、`/configs/dry-run`） | 计划稿写的"52 个规则名映射清单"**不进公开仓**（`cmbInvoiceType`/`cebFilePathJoin` 这类名字属"银行合作细节"）→ 改为**通用方法论 + 自检机制**：对照表 + 巡检 0 违规作为验收动作 |
+| M2 规则/策略对齐 | ✅ 落到公开文档 `docs/10-迁移指南.md`：**"配置里的字符串 → ifmap 注册点"对照表**（`@FUN(名字)` → 内置 18 规则 / `@IfmapRule`；`method_flag` → `@IfmapAction`；分支标识 → `@LogicBranch`；`strategy_name`（落地后为前序 / 后序两列）→ `IfmapStrategyHook` bean 名）+ **启动期自检动作**（`/audit`、`/rules`、`/actions`、`/strategies`、`/configs/validate`、`/configs/dry-run`） | 计划稿写的"52 个规则名映射清单"**不进公开仓**（`cmbInvoiceType`/`cebFilePathJoin` 这类名字属"银行合作细节"）→ 改为**通用方法论 + 自检机制**：对照表 + 巡检 0 违规作为验收动作 |
 | D2 JsonOps TCK | ✅ 新模块 `ifmap-json-tck`：`JsonOpsConformanceTestBase`（**24 用例**）+ `JdkNativeValues`（递归断言"返回值只含 JDK 原生类型"）；`JacksonJsonOpsConformanceTest` 空壳继承 | 计划稿写"TCK"；落地把它做成**独立模块**（而非 core 的 test-jar）——外部实现者继承一个类即可，避免 test-jar 打包复杂度。24 个用例里 2 个首跑失败，**是我的期望写错而非实现有问题**（见下"实测证据"） |
 | D4 通用迁移指南 | ✅ `docs/10-迁移指南.md`（M0 摸底 → M1 → M2 → M3 切换与回滚；共存三路径；10 条行为对齐清单；排错速查）；`mkdocs.yml` nav 加页（**11 页**）；README / CHANGELOG 同步 | 计划稿只写"迁移指南"；落地定下"**M2 契约自检 0 违规 + 切换 checklist**"作为可判定的门槛（否则"迁移做完了吗"没法回答） |
 | **P0 级实现缺陷修复（W8 顺带）** | ✅ `IfmapOrchestrator` 的**兜底分支从不生效** → 改为**两趟匹配**（常规分支优先，全部未命中才走兜底） | **设计文档 §6.3 / 附录 C 与 `ConfigValidator` 都假定兜底分支会生效（`logic_branch_flag` 为空 = 兜底），但引擎实现把 blank flag 判 `false` 并打 WARN** → 存量（ECC `BankintConfigManager`）正是用"空标志"表达兜底 → 直接迁过来会出现**"分支命中不到 → 业务回调静默不执行"**。TDD：先加 2 个用例（红：`expected: <[fallback]> but was: <[]>`）→ 改引擎 → 绿。**数据零改动**（不需要回填 `logic_branch_flag`） |

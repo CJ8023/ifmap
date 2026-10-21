@@ -18,17 +18,22 @@ package cn.cj.ifmap.core.strategy;
 import java.util.Map;
 
 /**
- * 特殊处理策略（对应存量 38 个 {@code *SpecialDealStrategyImpl}）。
+ * 前序 / 后序策略钩子：在出网前或判定前插入一段宿主自定义处理。
+ *
+ * <p>名字里是 {@code Hook} 而不是 {@code Pre}/{@code Post}：同一个实现可以挂在任一时机，
+ * 由 {@code ifmap_config.pre_strategy_name} / {@code post_strategy_name} 决定，
+ * 运行时用 {@link StrategyContext#getPhase()} 区分。存量系统里这类实现的类名叫
+ * {@code *SpecialDealStrategyImpl}（当时中文叫「特殊处理策略」），本仓库已统一改称为 StrategyHook。</p>
  *
  * <p>按 <b>bean 名</b> 注册（与 {@code ifmap_config.pre_strategy_name} / {@code post_strategy_name} 对齐），
  * 注册表同时接受"类简单名"与"首字母小写名"两个宽松 key（解决 P0-7），命中宽松 key 时记 WARN。</p>
  *
  * @author caijun
  */
-public interface SpecialDealStrategy {
+public interface IfmapStrategyHook {
 
     /**
-     * 执行特殊处理；用 {@link StrategyContext#getPhase()} 区分前序 / 后序。
+     * 执行钩子；用 {@link StrategyContext#getPhase()} 区分前序 / 后序。
      *
      * <table border="1">
      *   <caption>前后序差异</caption>

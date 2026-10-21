@@ -127,7 +127,7 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmapTenantResolver` | `TenantResolver` | `HeaderTenantResolver`（读 `ifmap.tenant-header`） |
 | `ifmapLogMasker` | `LogMasker` | `DefaultLogMasker`（值形态 + 字段名两种脱敏） |
 | `ifmapClockProvider` | `ClockProvider` | `SystemClockProvider`（测试可换假时钟） |
-| `ifmapSpecialDealStrategyRegistry` | `SpecialDealStrategyRegistry` | 特殊处理策略注册表（key = bean 名） |
+| `ifmapStrategyHookRegistry` | `StrategyHookRegistry` | 策略钩子注册表（key = bean 名） |
 | `ifmapFullParamStrategyRegistry` | `FullParamStrategyRegistry` | 组包策略注册表（key = `partner|busi`） |
 | `ifmapLogicBranchStrategyRegistry` | `LogicBranchStrategyRegistry` | 分支条件策略注册表（key = 分支 flag） |
 | `ifmapActionRegistry` | `ActionRegistry` | 分支动作注册表（key = `method_flag`） |
@@ -259,9 +259,9 @@ public class MyJsonConfig {
 ### 3.4 编排器与策略：写个 bean 就行（W4）
 
 ```java
-// 1) 特殊处理策略：key = bean 名，配置里 pre_strategy_name / post_strategy_name 直接写 czbApplyStrategy
+// 1) 策略钩子（前序 / 后序）：key = bean 名，配置里 pre_strategy_name / post_strategy_name 直接写 czbApplyStrategy
 @Component
-public class CzbApplyStrategy implements SpecialDealStrategy {
+public class CzbApplyStrategy implements IfmapStrategyHook {
     @Override
     public Map<String, Object> apply(StrategyContext context) {
         return Collections.singletonMap("channelCode", "ECC");
@@ -302,7 +302,7 @@ public IfmapResult call(IfmapRequest request) {
 
 | 要点 | 说明 |
 | --- | --- |
-| 自动收集 | 5 类策略 bean（`SpecialDealStrategy` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler` / `IfmapCallbackHandler`）由 `ifmapStrategyRegistrar` 启动期注册 |
+| 自动收集 | 5 类策略 bean（`IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler` / `IfmapCallbackHandler`）由 `ifmapStrategyRegistrar` 启动期注册 |
 | 启动期快速失败 | 实现了策略接口但**缺注解**（`@FullParam` / `@LogicBranch` / `@IfmapAction` / `@IfmapCallback`）→ 启动即报错并指出 bean 名 + 类名 |
 | 代理安全 | 注解查找会沿父类链与接口链进行，AOP 代理过的 bean 同样识别 |
 | 编排器不装配？ | 编排器依赖 `ConfigRepository`，而仓储依赖 `DataSource`。**没有 `DataSource` 时编排器不装配**，但注册表/解析器/脱敏器照常 |
@@ -518,7 +518,7 @@ starter 与手工装配**可以混用**：宿主想要哪个 bean 就自己声�
 | 启动报 `ifmap 表前缀非法` | `ifmap.table-prefix` 含非法字符 / 超长 / 数字开头 |
 | 表建了但查不到配置 | 检查 `del_status=0` 与 `status=1`（仓储只返回这两类），见 `docs/04` §3 |
 | 自定义规则不生效 | 规则类的 bean 没被 Spring 管到；日志会打印 `ifmap 已注册宿主机规则 bean：[...]，类 [...]`，看不到即未扫到 |
-| 启动报策略 bean 缺注解 | 实现了 `SpecialDealStrategy`/`FullParamStrategy`/`LogicBranchStrategy`/`IfmapActionHandler`/`IfmapCallbackHandler` 就必须带对应注解（`SpecialDealStrategy` 例外，它按 bean 名注册），报错信息里有 bean 名与类名 |
+| 启动报策略 bean 缺注解 | 实现了 `IfmapStrategyHook`/`FullParamStrategy`/`LogicBranchStrategy`/`IfmapActionHandler`/`IfmapCallbackHandler` 就必须带对应注解（`IfmapStrategyHook` 例外，它按 bean 名注册），报错信息里有 bean 名与类名 |
 | 启动期契约自检有违规 | 用 `ContractValidator.validate(configs).toMarkdown()` 打印明细；常见原因是模板不是合法 JSON、`@FUN` 规则名拼错（如 `farmatDate`） |
 | `IfmapOrchestrator` 注入不到 | 编排器需要 `ConfigRepository`（即需要 `DataSource`）。无数据源时它不装配；也可自行 `IfmapOrchestrator.builder()` 声明 bean |
 | 想看装配了什么 | `--debug` 启动，或看 `IfmapRuleRegistrar` / `IfmapStrategyRegistrar` / `IfmapSchemaInitializer` 的 INFO 日志 |

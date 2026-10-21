@@ -39,9 +39,9 @@ import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.LogicBranch;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategy;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategy;
+import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
 import cn.cj.ifmap.core.spi.LogMasker;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
@@ -77,12 +77,12 @@ class IfmapOrchestratorAutoConfigurationTest {
     @LogicBranch("loanResult")
     @IfmapAction("submitApply")
     public static class AllInOneStrategy
-            implements SpecialDealStrategy, FullParamStrategy, LogicBranchStrategy, IfmapActionHandler {
+            implements IfmapStrategyHook, FullParamStrategy, LogicBranchStrategy, IfmapActionHandler {
 
         @Override
         public Map<String, Object> apply(StrategyContext context) {
             Map<String, Object> extra = new LinkedHashMap<String, Object>();
-            extra.put("fromSpecialDeal", "YES");
+            extra.put("fromStrategyHook", "YES");
             return extra;
         }
 
@@ -140,7 +140,7 @@ class IfmapOrchestratorAutoConfigurationTest {
     void wiresOrchestrationByDefault() {
         runner("ifmap_orc_default").run(context -> {
             assertNull(context.getStartupFailure());
-            assertNotNull(context.getBean(SpecialDealStrategyRegistry.class));
+            assertNotNull(context.getBean(StrategyHookRegistry.class));
             assertNotNull(context.getBean(FullParamStrategyRegistry.class));
             assertNotNull(context.getBean(LogicBranchStrategyRegistry.class));
             assertNotNull(context.getBean(ActionRegistry.class));
@@ -158,8 +158,8 @@ class IfmapOrchestratorAutoConfigurationTest {
                 .withBean("allInOneStrategy", AllInOneStrategy.class, AllInOneStrategy::new)
                 .withBean("cmbCallback", CmbCallback.class, CmbCallback::new)
                 .run(context -> {
-                    SpecialDealStrategyRegistry specialDeals = context.getBean(SpecialDealStrategyRegistry.class);
-                    assertTrue(specialDeals.contains("allInOneStrategy"), "pre_/post_strategy_name 应按 bean 名直接可用");
+                    StrategyHookRegistry strategyHooks = context.getBean(StrategyHookRegistry.class);
+                    assertTrue(strategyHooks.contains("allInOneStrategy"), "pre_/post_strategy_name 应按 bean 名直接可用");
 
                     FullParamStrategyRegistry fullParams = context.getBean(FullParamStrategyRegistry.class);
                     assertTrue(fullParams.contains("CMB", "apply"));

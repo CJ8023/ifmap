@@ -30,7 +30,7 @@ import java.util.TreeSet;
  * 框架自带的字典：引擎自己就能算出可选项的那些字段，不该让宿主机再抄一遍。
  *
  * <p>起因：页面把「前序策略 / 后序策略」渲染成下拉，而这两列的可选值本来就是
- * {@code SpecialDealStrategyRegistry} 里注册了什么 —— 之前这份清单只喂给了「元数据」页的标签，
+ * {@code StrategyHookRegistry} 里注册了什么 —— 之前这份清单只喂给了「元数据」页的标签，
  * 没接到表单，于是宿主机不额外注册 {@code IfmapEnumProvider} 时，前序策略的下拉只有一个「（空）」，
  * <b>值根本填不进去</b>。</p>
  *

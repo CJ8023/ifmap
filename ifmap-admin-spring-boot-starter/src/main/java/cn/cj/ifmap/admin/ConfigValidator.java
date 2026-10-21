@@ -21,7 +21,7 @@ import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeSpec;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.template.DslExpressions;
 import cn.cj.ifmap.core.template.TemplateScanner;
 import cn.cj.ifmap.core.validate.ContractValidator;
@@ -43,7 +43,7 @@ import java.util.Set;
  *       （复用引擎的 {@link ContractValidator}，与启动期自检同一套逻辑）；</li>
  *   <li><b>引用合法性</b>：模板里的 JsonPath 语法必须合法；请求模板里的 {@code $.pool.<接口号>} 必须是本业务节点内
  *       <b>更早步骤</b>的接口号（T2，见 {@code checkPoolRefs}）；
- *       {@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的特殊处理策略里；</li>
+ *       {@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的策略钩子里；</li>
  *   <li><b>结构约束</b>：{@code (tenant_id, interface_no)} 与 {@code (tenant_id, busi_node, interface_order)}
  *       两组唯一键都不能重复；分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、
  *       {@code method_flag} 必须是已注册动作。</li>
@@ -58,12 +58,12 @@ public class ConfigValidator {
 
     private final ContractValidator contractValidator;
     private final JsonOps jsonOps;
-    private final SpecialDealStrategyRegistry specialDeals;
+    private final StrategyHookRegistry strategyHooks;
     private final ActionRegistry actions;
     private final JdbcConfigRepository repository;
 
     public ConfigValidator(ContractValidator contractValidator, JsonOps jsonOps,
-                           SpecialDealStrategyRegistry specialDeals, ActionRegistry actions,
+                           StrategyHookRegistry strategyHooks, ActionRegistry actions,
                            JdbcConfigRepository repository) {
         if (jsonOps == null) {
             throw new IllegalArgumentException("jsonOps 不能为空");
@@ -73,7 +73,7 @@ public class ConfigValidator {
         }
         this.contractValidator = contractValidator;
         this.jsonOps = jsonOps;
-        this.specialDeals = specialDeals;
+        this.strategyHooks = strategyHooks;
         this.actions = actions;
         this.repository = repository;
     }
@@ -404,15 +404,15 @@ public class ConfigValidator {
 
     /** 前序 / 后序策略共用同一注册表，只有列名不同。 */
     private void checkStrategy(String column, String strategyName, ValidationResult result) {
-        if (isBlank(strategyName) || specialDeals == null) {
+        if (isBlank(strategyName) || strategyHooks == null) {
             return;
         }
-        if (specialDeals.size() == 0) {
-            result.warning("尚未注册任何特殊处理策略（SpecialDealStrategy），" + column + " 无法校验");
+        if (strategyHooks.size() == 0) {
+            result.warning("尚未注册任何策略钩子（IfmapStrategyHook），" + column + " 无法校验");
             return;
         }
-        if (!specialDeals.contains(strategyName)) {
-            result.error(column + " 未注册：" + strategyName + "（已注册：" + specialDeals.keys() + "）");
+        if (!strategyHooks.contains(strategyName)) {
+            result.error(column + " 未注册：" + strategyName + "（已注册：" + strategyHooks.keys() + "）");
         }
     }
 

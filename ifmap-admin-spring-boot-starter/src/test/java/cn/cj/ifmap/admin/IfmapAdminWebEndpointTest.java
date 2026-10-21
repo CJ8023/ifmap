@@ -311,7 +311,7 @@ class IfmapAdminWebEndpointTest {
         ResponseEntity<Map<String, Object>> strategies = rest.exchange(BASE + "/strategies", HttpMethod.GET,
                 new HttpEntity<Void>(headers()), new ParameterizedTypeReference<Map<String, Object>>() {
                 });
-        assertTrue(strategies.getBody().containsKey("specialDeals"));
+        assertTrue(strategies.getBody().containsKey("strategyHooks"));
 
         ResponseEntity<Map<String, Object>> audit = rest.exchange(BASE + "/audit?markdown=true", HttpMethod.GET,
                 new HttpEntity<Void>(headers()), new ParameterizedTypeReference<Map<String, Object>>() {

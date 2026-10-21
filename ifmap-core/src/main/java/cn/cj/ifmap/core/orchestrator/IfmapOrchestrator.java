@@ -41,8 +41,8 @@ import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategy;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.util.Logs;
 import org.slf4j.Logger;
@@ -61,7 +61,7 @@ import java.util.Map;
  * IfmapRequest
  *   → 租户解析（含 tenantId 的缓存键在仓储/缓存层）
  *   → 按 busi_node 取整条计划 + 启用过滤 + interface_order 升序 + 按起点截断
- *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 特殊处理 SpecialDealStrategy
+ *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 策略钩子 IfmapStrategyHook
  *   → 出网调用 PartnerServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
  *   → 响应模板解析 → 结果判定 result_flag + success_value
  *   → 逻辑分支（logic_branch_order 升序，首个命中；兜底分支最后）→ ActionRegistry 执行动作
@@ -88,7 +88,7 @@ public final class IfmapOrchestrator {
     private final JsonOps jsonOps;
     private final ConfigRepository repository;
     private final TenantResolver tenantResolver;
-    private final SpecialDealStrategyRegistry specialDeals;
+    private final StrategyHookRegistry strategyHooks;
     private final FullParamStrategyRegistry fullParams;
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
@@ -107,7 +107,7 @@ public final class IfmapOrchestrator {
         this.jsonOps = builder.jsonOps != null ? builder.jsonOps : builder.engine.getJsonOps();
         this.repository = builder.repository;
         this.tenantResolver = builder.tenantResolver;
-        this.specialDeals = builder.specialDeals;
+        this.strategyHooks = builder.strategyHooks;
         this.fullParams = builder.fullParams;
         this.logicBranches = builder.logicBranches;
         this.actions = builder.actions;
@@ -243,14 +243,14 @@ public final class IfmapOrchestrator {
         context.putParams(requestParams);
         String requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
         context.setRequestJson(requestJson);
-        requestJson = applySpecialDeal(context, ruleContext, requestJson);
+        requestJson = applyPreStrategy(context, ruleContext, requestJson);
 
         PartnerOutcome outcome = mockResponse != null ? PartnerOutcome.ofBody(mockResponse)
                 : exchange(context, requestJson);
         String response = outcome.getBody();
         context.setResponseJson(response);
 
-        Map<String, Object> data = applyPostDeal(context, renderResponse(config, response, ruleContext));
+        Map<String, Object> data = applyPostStrategy(context, renderResponse(config, response, ruleContext));
         // 判定读**原始回参**：后序策略只能加工产物，改不动成败
         Judgement judgement = pipeline.judge(config, response, outcome);
         if (judgement.isSuccess()) {
@@ -264,17 +264,17 @@ public final class IfmapOrchestrator {
                 judgement.getFailType());
     }
 
-    private String applySpecialDeal(StrategyContext context, RuleContext ruleContext, String requestJson) {
+    private String applyPreStrategy(StrategyContext context, RuleContext ruleContext, String requestJson) {
         context.setPhase(StrategyContext.Phase.PRE);
         String strategyName = trimToNull(context.getConfig().getPreStrategyName());
         if (strategyName == null) {
             return requestJson;
         }
-        SpecialDealStrategy strategy = specialDeals.lookup(strategyName);
+        IfmapStrategyHook strategy = strategyHooks.lookup(strategyName);
         if (strategy == null) {
             if (failOnMissingStrategy) {
                 throw new IfmapStrategyException("前序策略未注册：pre_strategy_name=" + strategyName
-                        + "（可查 " + specialDeals.keys() + "）");
+                        + "（可查 " + strategyHooks.keys() + "）");
             }
             LOG.warn("ifmap 前序策略未注册，已跳过：pre_strategy_name={}", strategyName);
             return requestJson;
@@ -298,16 +298,16 @@ public final class IfmapOrchestrator {
      * 或返回一个 Map 与产物合并（返回键覆盖同键的已有值）。判定读原始回参，故后序策略
      * 影响不了成败判定。</p>
      */
-    private Map<String, Object> applyPostDeal(StrategyContext context, Map<String, Object> data) {
+    private Map<String, Object> applyPostStrategy(StrategyContext context, Map<String, Object> data) {
         String strategyName = trimToNull(context.getConfig().getPostStrategyName());
         if (strategyName == null) {
             return data;
         }
-        SpecialDealStrategy strategy = specialDeals.lookup(strategyName);
+        IfmapStrategyHook strategy = strategyHooks.lookup(strategyName);
         if (strategy == null) {
             if (failOnMissingStrategy) {
                 throw new IfmapStrategyException("后序策略未注册：post_strategy_name=" + strategyName
-                        + "（可查 " + specialDeals.keys() + "）");
+                        + "（可查 " + strategyHooks.keys() + "）");
             }
             LOG.warn("ifmap 后序策略未注册，已跳过：post_strategy_name={}", strategyName);
             return data;
@@ -637,7 +637,7 @@ public final class IfmapOrchestrator {
         private JsonOps jsonOps;
         private ConfigRepository repository;
         private TenantResolver tenantResolver;
-        private SpecialDealStrategyRegistry specialDeals;
+        private StrategyHookRegistry strategyHooks;
         private FullParamStrategyRegistry fullParams;
         private LogicBranchStrategyRegistry logicBranches;
         private ActionRegistry actions;
@@ -671,8 +671,8 @@ public final class IfmapOrchestrator {
             return this;
         }
 
-        public Builder specialDeals(SpecialDealStrategyRegistry specialDeals) {
-            this.specialDeals = specialDeals;
+        public Builder strategyHooks(StrategyHookRegistry strategyHooks) {
+            this.strategyHooks = strategyHooks;
             return this;
         }
 
@@ -746,8 +746,8 @@ public final class IfmapOrchestrator {
             if (tenantResolver == null) {
                 throw new IllegalArgumentException("tenantResolver 不能为 null");
             }
-            if (specialDeals == null) {
-                this.specialDeals = new SpecialDealStrategyRegistry();
+            if (strategyHooks == null) {
+                this.strategyHooks = new StrategyHookRegistry();
             }
             if (fullParams == null) {
                 this.fullParams = new FullParamStrategyRegistry();

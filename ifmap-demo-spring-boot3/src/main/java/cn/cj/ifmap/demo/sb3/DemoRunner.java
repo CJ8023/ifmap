@@ -88,7 +88,7 @@ public class DemoRunner implements ApplicationRunner {
         String rendered = engine.render(configs.get(0).getRequestParamTemplate(), source);
         log.info("仅渲染（不经编排）结果：{}", rendered);
 
-        // W4：走完整编排 —— 特殊处理策略 → 组包策略 → 渲染 → 出网 → 判定 → 分支动作 → 落执行日志
+        // W4：走完整编排 —— 策略钩子 → 组包策略 → 渲染 → 出网 → 判定 → 分支动作 → 落执行日志
         IfmapRequest request = IfmapRequest.builder()
                 .tenantId(TENANT)
                 .bizId("BIZ-20250101-0001")
@@ -121,7 +121,7 @@ public class DemoRunner implements ApplicationRunner {
         config.setRequestParamTemplate(REQUEST_TEMPLATE);
         config.setResponseParamTemplate(RESPONSE_TEMPLATE);
         config.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
-        // 按 bean 名指定特殊处理策略（DemoStrategy 的 bean 名 = demoStrategy）
+        // 按 bean 名指定策略钩子（DemoStrategy 的 bean 名 = demoStrategy）
         config.setPreStrategyName("demoStrategy");
         config.setStatus(Integer.valueOf(1));
         long keyId = writer.insert(config);

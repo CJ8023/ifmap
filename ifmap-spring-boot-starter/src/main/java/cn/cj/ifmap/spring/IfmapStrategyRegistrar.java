@@ -24,8 +24,8 @@ import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.spi.IfmapCallbackHandler;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategy;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategy;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
@@ -45,7 +45,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p>识别规则（一个 bean 可实现多个接口）：</p>
  * <ul>
- *   <li>{@link SpecialDealStrategy} → 按 <b>bean 名</b>注册（对齐 {@code pre_strategy_name} / {@code post_strategy_name} 列）</li>
+ *   <li>{@link IfmapStrategyHook} → 按 <b>bean 名</b>注册（对齐 {@code pre_strategy_name} / {@code post_strategy_name} 列）</li>
  *   <li>{@link FullParamStrategy} → 按 {@code @FullParam(partnerCode, busiNode)} 注册</li>
  *   <li>{@link LogicBranchStrategy} → 按 {@code @LogicBranch} 注册</li>
  *   <li>{@link IfmapActionHandler} → 按 {@code @IfmapAction} 注册</li>
@@ -75,8 +75,8 @@ public class IfmapStrategyRegistrar implements BeanPostProcessor, BeanFactoryAwa
             return bean;
         }
         boolean registered = false;
-        if (bean instanceof SpecialDealStrategy) {
-            beanFactory.getBean(SpecialDealStrategyRegistry.class).register(beanName, (SpecialDealStrategy) bean);
+        if (bean instanceof IfmapStrategyHook) {
+            beanFactory.getBean(StrategyHookRegistry.class).register(beanName, (IfmapStrategyHook) bean);
             registered = true;
         }
         if (bean instanceof FullParamStrategy) {
@@ -105,7 +105,7 @@ public class IfmapStrategyRegistrar implements BeanPostProcessor, BeanFactoryAwa
     /** 注册表自身与编排器不是策略 bean，跳过以免自注册。 */
     private static boolean isInfrastructure(Object bean) {
         return bean instanceof IfmapOrchestrator
-                || bean instanceof SpecialDealStrategyRegistry
+                || bean instanceof StrategyHookRegistry
                 || bean instanceof FullParamStrategyRegistry
                 || bean instanceof LogicBranchStrategyRegistry
                 || bean instanceof ActionRegistry

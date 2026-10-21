@@ -152,7 +152,7 @@ ifmap:
 之后直接 `@Autowired IfmapEngine engine;` / `@Autowired ConfigRepository repository;` / `@Autowired IfmapOrchestrator orchestrator;` 即可：
 
 - 自定义规则只要是个 Spring bean（方法带 `@IfmapRule`）就会被自动收集；
-- 自定义策略只要是个 Spring bean（`SpecialDealStrategy` / `@FullParam` 的 `FullParamStrategy` / `@LogicBranch` / `@IfmapAction`）就会被自动注册，**缺注解启动即失败**。
+- 自定义策略只要是个 Spring bean（`IfmapStrategyHook` / `@FullParam` 的 `FullParamStrategy` / `@LogicBranch` / `@IfmapAction`）就会被自动注册，**缺注解启动即失败**。
 
 ```java
 IfmapResult result = orchestrator.execute(

@@ -27,26 +27,27 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 特殊处理策略注册表：<b>三 key</b> 注册，直接解决存量 P0-7（配置里写的是 bean 名、
+ * 策略钩子注册表（{@code pre_strategy_name} / {@code post_strategy_name} 的唯一解析点）：
+ * <b>三 key</b> 注册，直接解决存量 P0-7（配置里写的是 bean 名、
  * 代码里改过类名/包名 → 线上"策略找不到"静默跳过）。
  *
  * <pre>
- * register("cmbSpecialDealStrategy", strategy)      // 权威 key：Spring bean 名
- *   → "cmbSpecialDealStrategy"                      // ① bean 名，精确命中，无告警
- *   → "CmbSpecialDealStrategy"                      // ② 类简单名，命中记 WARN（宽松兜底）
- *   → "cmbSpecialDealStrategy"                      // ③ 首字母小写名，命中记 WARN（人工配置）
+ * register("cmbStrategyHook", strategy)      // 权威 key：Spring bean 名
+ *   → "cmbStrategyHook"                     // ① bean 名，精确命中，无告警
+ *   → "CmbStrategyHook"                     // ② 类简单名，命中记 WARN（宽松兜底）
+ *   → "cmbStrategyHook"                     // ③ 首字母小写名，命中记 WARN（人工配置）
  * </pre>
  *
  * <p>不同策略注册到同一 key 时<b>保留先注册者</b>并记录歧义（启动期可打印/断言）。</p>
  *
  * @author caijun
  */
-public final class SpecialDealStrategyRegistry {
+public final class StrategyHookRegistry {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SpecialDealStrategyRegistry.class);
+    private static final Logger LOG = LoggerFactory.getLogger(StrategyHookRegistry.class);
 
-    private final Map<String, SpecialDealStrategy> authoritative = new LinkedHashMap<String, SpecialDealStrategy>();
-    private final Map<String, SpecialDealStrategy> aliases = new LinkedHashMap<String, SpecialDealStrategy>();
+    private final Map<String, IfmapStrategyHook> authoritative = new LinkedHashMap<String, IfmapStrategyHook>();
+    private final Map<String, IfmapStrategyHook> aliases = new LinkedHashMap<String, IfmapStrategyHook>();
     private final Map<String, List<String>> conflicts = new LinkedHashMap<String, List<String>>();
     /**
      * 命中过宽松 key 的记录（启动期审计用）。用 {@code Set} 而非 {@code List}：
@@ -62,7 +63,7 @@ public final class SpecialDealStrategyRegistry {
      * @param beanName Spring bean 名（权威 key，可为 null —— 此时只用类名兜底）
      * @param strategy 策略实例
      */
-    public void register(String beanName, SpecialDealStrategy strategy) {
+    public void register(String beanName, IfmapStrategyHook strategy) {
         if (strategy == null) {
             return;
         }
@@ -76,8 +77,8 @@ public final class SpecialDealStrategyRegistry {
         }
     }
 
-    private void put(Map<String, SpecialDealStrategy> target, String key, SpecialDealStrategy strategy, String owner) {
-        SpecialDealStrategy exist = target.get(key);
+    private void put(Map<String, IfmapStrategyHook> target, String key, IfmapStrategyHook strategy, String owner) {
+        IfmapStrategyHook exist = target.get(key);
         if (exist == null) {
             target.put(key, strategy);
             return;
@@ -96,22 +97,22 @@ public final class SpecialDealStrategyRegistry {
         if (!owners.contains(owner)) {
             owners.add(owner);
         }
-        LOG.warn("ifmap 特殊处理策略注册歧义：key={} 已由 {} 占用，保留先注册者", key, owners);
+        LOG.warn("ifmap 策略钩子注册歧义：key={} 已由 {} 占用，保留先注册者", key, owners);
     }
 
     /** 按名称查找；先精确（bean 名），再宽松（类简单名 / 首字母小写名）。找不到返回 null。 */
-    public SpecialDealStrategy lookup(String name) {
+    public IfmapStrategyHook lookup(String name) {
         if (name == null || name.isEmpty()) {
             return null;
         }
-        SpecialDealStrategy exact = authoritative.get(name);
+        IfmapStrategyHook exact = authoritative.get(name);
         if (exact != null) {
             return exact;
         }
-        SpecialDealStrategy loose = aliases.get(name);
+        IfmapStrategyHook loose = aliases.get(name);
         if (loose != null) {
             aliasHits.add(name);
-            LOG.warn("ifmap 特殊处理策略 [{}] 命中宽松 key（建议把配置改为 Spring bean 名）", name);
+            LOG.warn("ifmap 策略钩子 [{}] 命中宽松 key（建议把配置改为 Spring bean 名）", name);
             return loose;
         }
         return null;

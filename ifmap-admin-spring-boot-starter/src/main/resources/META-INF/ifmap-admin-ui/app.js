@@ -971,7 +971,7 @@
     })));
     setHtml('meta-actions', chips(META.actions));
     var strategies = META.strategies || {};
-    setHtml('meta-strategies', ['specialDeals', 'fullParams', 'logicBranches', 'actions', 'callbacks'].map(function (key) {
+    setHtml('meta-strategies', ['strategyHooks', 'fullParams', 'logicBranches', 'actions', 'callbacks'].map(function (key) {
       return '<div class="row"><span class="muted" style="min-width:130px">' + esc(key) + '</span>' +
         chips(strategies[key]) + '</div>';
     }).join(''));

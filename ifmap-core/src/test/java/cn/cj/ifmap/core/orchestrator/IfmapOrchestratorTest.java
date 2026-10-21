@@ -37,8 +37,8 @@ import cn.cj.ifmap.core.strategy.FullParamStrategy;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategy;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.testkit.TestConfigs;
 import cn.cj.ifmap.core.testkit.TestJsonOps;
@@ -76,7 +76,7 @@ class IfmapOrchestratorTest {
     }
 
     /** 补参数策略。 */
-    public static class ExtraParamStrategy implements SpecialDealStrategy {
+    public static class ExtraParamStrategy implements IfmapStrategyHook {
         @Override
         public Map<String, Object> apply(StrategyContext context) {
             Map<String, Object> extra = new LinkedHashMap<String, Object>();
@@ -86,7 +86,7 @@ class IfmapOrchestratorTest {
     }
 
     /** 记录相位；后序返回 {@code postApplied}，前序返回 {@code preApplied}。 */
-    static final class PhaseRecordingStrategy implements SpecialDealStrategy {
+    static final class PhaseRecordingStrategy implements IfmapStrategyHook {
         final List<StrategyContext.Phase> phases = new ArrayList<StrategyContext.Phase>();
 
         @Override
@@ -196,13 +196,13 @@ class IfmapOrchestratorTest {
     }
 
     private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions) {
-        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
-        specialDeals.register("extraParamStrategy", new ExtraParamStrategy());
-        return orchestrator(gateway, actions, specialDeals);
+        StrategyHookRegistry strategyHooks = new StrategyHookRegistry();
+        strategyHooks.register("extraParamStrategy", new ExtraParamStrategy());
+        return orchestrator(gateway, actions, strategyHooks);
     }
 
     private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions,
-                                           SpecialDealStrategyRegistry specialDeals) {
+                                           StrategyHookRegistry strategyHooks) {
         FullParamStrategyRegistry fullParams = new FullParamStrategyRegistry();
         fullParams.register(new CmbFullParam());
         return IfmapOrchestrator.builder()
@@ -210,7 +210,7 @@ class IfmapOrchestratorTest {
                 .jsonOps(jsonOps)
                 .repository(repository)
                 .tenantResolver(new HeaderTenantResolver())
-                .specialDeals(specialDeals)
+                .strategyHooks(strategyHooks)
                 .fullParams(fullParams)
                 .actions(actions)
                 .gateway(gateway)
@@ -333,7 +333,7 @@ class IfmapOrchestratorTest {
     }
 
     @Test
-    void specialDealStrategyAddsParamAndRequestIsRenderedAgain() {
+    void preStrategyHookAddsParamAndRequestIsRenderedAgain() {
         IfmapConfig config = TestConfigs.config("IF_B", "GP81", 1, 1L);
         config.setPreStrategyName("extraParamStrategy");
         config.setRequestParamTemplate("{\"extra\":\"$.extra\"}");
@@ -349,7 +349,7 @@ class IfmapOrchestratorTest {
     }
 
     @Test
-    void missingSpecialDealStrategyFailsLoudly() {
+    void missingStrategyHookFailsLoudly() {
         IfmapConfig config = TestConfigs.config("IF_C", "GP81", 1, 1L);
         config.setPreStrategyName("notRegistered");
         repository.add(config);
@@ -396,11 +396,11 @@ class IfmapOrchestratorTest {
         repository.add(config);
 
         PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
-        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
-        specialDeals.register("phaseRecording", strategy);
+        StrategyHookRegistry strategyHooks = new StrategyHookRegistry();
+        strategyHooks.register("phaseRecording", strategy);
 
         CapturingGateway gateway = new CapturingGateway("{\"data\":{\"applyNo\":\"AP1\"}}");
-        IfmapResult result = orchestrator(gateway, new ActionRegistry(), specialDeals)
+        IfmapResult result = orchestrator(gateway, new ActionRegistry(), strategyHooks)
                 .execute(IfmapRequest.empty(), "IF_P1", "GP81");
 
         assertTrue(result.isSuccess(), result.getErrorMessage());
@@ -421,11 +421,11 @@ class IfmapOrchestratorTest {
         repository.add(config);
 
         PhaseRecordingStrategy strategy = new PhaseRecordingStrategy();
-        SpecialDealStrategyRegistry specialDeals = new SpecialDealStrategyRegistry();
-        specialDeals.register("phaseRecording", strategy);
+        StrategyHookRegistry strategyHooks = new StrategyHookRegistry();
+        strategyHooks.register("phaseRecording", strategy);
 
         CapturingGateway gateway = new CapturingGateway("{\"code\":\"9999\",\"data\":{\"applyNo\":\"AP1\"}}");
-        IfmapResult result = orchestrator(gateway, new ActionRegistry(), specialDeals)
+        IfmapResult result = orchestrator(gateway, new ActionRegistry(), strategyHooks)
                 .execute(IfmapRequest.empty(), "IF_P2", "GP81");
 
         assertFalse(result.isSuccess(), "判定读原始回参，后序策略加字段不能把失败洗成成功");

@@ -18,7 +18,7 @@ package cn.cj.ifmap.admin;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigWriter;
@@ -58,7 +58,7 @@ class ConfigAuditorTest {
         JacksonJsonOps jsonOps = new JacksonJsonOps();
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction());
-        ConfigValidator validator = new ConfigValidator(null, jsonOps, new SpecialDealStrategyRegistry(),
+        ConfigValidator validator = new ConfigValidator(null, jsonOps, new StrategyHookRegistry(),
                 actions, repository);
         auditor = new ConfigAuditor(repository, validator, 100);
     }
@@ -104,7 +104,7 @@ class ConfigAuditorTest {
         writer.insert(AdminTestSupport.config("IF_1", "apply", 1));
         writer.insert(AdminTestSupport.config("IF_2", "apply", 2));
         ConfigAuditor small = new ConfigAuditor(db.repository(),
-                new ConfigValidator(null, new JacksonJsonOps(), new SpecialDealStrategyRegistry(),
+                new ConfigValidator(null, new JacksonJsonOps(), new StrategyHookRegistry(),
                         new ActionRegistry(), db.repository()), 1);
         AuditReport report = small.audit(null, null);
         assertTrue(report.isTruncated());

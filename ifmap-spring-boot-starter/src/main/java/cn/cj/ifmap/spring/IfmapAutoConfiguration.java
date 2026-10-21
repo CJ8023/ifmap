@@ -39,7 +39,7 @@ import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
 import cn.cj.ifmap.jdbc.JdbcExecutionLogCleaner;
@@ -157,8 +157,8 @@ public class IfmapAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public SpecialDealStrategyRegistry ifmapSpecialDealStrategyRegistry() {
-        return new SpecialDealStrategyRegistry();
+    public StrategyHookRegistry ifmapStrategyHookRegistry() {
+        return new StrategyHookRegistry();
     }
 
     @Bean
@@ -211,7 +211,7 @@ public class IfmapAutoConfiguration {
         public IfmapOrchestrator ifmapOrchestrator(IfmapEngine engine, JsonOps jsonOps,
                                                    ConfigRepository repository,
                                                    TenantResolver tenantResolver,
-                                                   SpecialDealStrategyRegistry specialDeals,
+                                                   StrategyHookRegistry strategyHooks,
                                                    FullParamStrategyRegistry fullParams,
                                                    LogicBranchStrategyRegistry logicBranches,
                                                    ActionRegistry actions,
@@ -227,7 +227,7 @@ public class IfmapAutoConfiguration {
                     .jsonOps(jsonOps)
                     .repository(repository)
                     .tenantResolver(tenantResolver)
-                    .specialDeals(specialDeals)
+                    .strategyHooks(strategyHooks)
                     .fullParams(fullParams)
                     .logicBranches(logicBranches)
                     .actions(actions)

@@ -56,7 +56,7 @@ public final class PartnerCall {
         return request;
     }
 
-    /** 渲染 + 特殊处理后的请求报文（JSON 文本）。 */
+    /** 渲染 + 策略钩子处理后的请求报文（JSON 文本）。 */
     public String getRequestJson() {
         return requestJson;
     }

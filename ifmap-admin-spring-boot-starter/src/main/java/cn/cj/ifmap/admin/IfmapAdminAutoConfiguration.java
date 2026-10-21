@@ -29,7 +29,7 @@ import cn.cj.ifmap.core.strategy.ActionRegistry;
 import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
-import cn.cj.ifmap.core.strategy.SpecialDealStrategyRegistry;
+import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.validate.ContractValidator;
 import cn.cj.ifmap.jdbc.JdbcConfigHistoryRepository;
 import cn.cj.ifmap.jdbc.JdbcConfigRepository;
@@ -111,10 +111,10 @@ public class IfmapAdminAutoConfiguration {
     @ConditionalOnMissingBean
     public ConfigValidator ifmapAdminConfigValidator(ObjectProvider<ContractValidator> contractValidatorProvider,
                                                      JsonOps jsonOps,
-                                                     SpecialDealStrategyRegistry specialDeals,
+                                                     StrategyHookRegistry strategyHooks,
                                                      ActionRegistry actions,
                                                      AdminConfigRepository repository) {
-        return new ConfigValidator(contractValidatorProvider.getIfAvailable(), jsonOps, specialDeals,
+        return new ConfigValidator(contractValidatorProvider.getIfAvailable(), jsonOps, strategyHooks,
                 actions, repository.get());
     }
 
@@ -155,16 +155,16 @@ public class IfmapAdminAutoConfiguration {
      * <p>用 {@link ObjectProvider} 取而不是 {@code @ConditionalOnBean}：page 需要的是
      * "有则用、无则空"，而不是两个不同的 bean 定义。</p>
      *
-     * <p>为什么要把策略名内置：前序策略的可选值本来就是 {@code SpecialDealStrategyRegistry} 里注册了什么，
+     * <p>为什么要把策略名内置：前序策略的可选值本来就是 {@code StrategyHookRegistry} 里注册了什么，
      * 之前这份清单只给「元数据」页当标签展示，表单里的下拉永远是空的 —— 宿主机不额外抄一份
      * {@code strategyName} 字典就根本填不进去。</p>
      */
     @Bean
     @ConditionalOnMissingBean
     public IfmapEnumCatalog ifmapEnumCatalog(ObjectProvider<IfmapEnumProvider> enumProviderProvider,
-                                            SpecialDealStrategyRegistry specialDeals) {
+                                            StrategyHookRegistry strategyHooks) {
         return IfmapEnumCatalog.of(enumProviderProvider.getIfAvailable(),
-                IfmapBuiltinEnums.of(specialDeals.keys()));
+                IfmapBuiltinEnums.of(strategyHooks.keys()));
     }
 
     /**
@@ -207,13 +207,13 @@ public class IfmapAdminAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public IfmapMetaAdminController ifmapMetaAdminController(ConfigAdminService service, RuleRegistry rules,
-                                                             SpecialDealStrategyRegistry specialDeals,
+                                                             StrategyHookRegistry strategyHooks,
                                                              FullParamStrategyRegistry fullParams,
                                                              LogicBranchStrategyRegistry logicBranches,
                                                              ActionRegistry actions,
                                                              CallbackRegistry callbacks,
                                                              IfmapEnumCatalog enums) {
-        return new IfmapMetaAdminController(service, rules, specialDeals, fullParams, logicBranches, actions,
+        return new IfmapMetaAdminController(service, rules, strategyHooks, fullParams, logicBranches, actions,
                 callbacks, enums);
     }
 

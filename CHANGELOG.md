@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### Changed（策略钩子 SPI 改名 —— 破坏性）
+- `SpecialDealStrategy` → **`IfmapStrategyHook`**、`SpecialDealStrategyRegistry` → **`StrategyHookRegistry`**
+  （对应的 Spring bean 名 `ifmapSpecialDealStrategyRegistry` → `ifmapStrategyHookRegistry`）。
+  理由：`specialDeal`（"特殊处理"）与 P1 之后的 `pre_strategy_name` / `post_strategy_name` 是**两个维度**
+  （做什么 vs 什么时候做），旧名让人误以为它只管某一侧；`Hook` 表达"挂在某个时机上的一段处理"，
+  与其它 SPI 命名（`IfmapAction` / `IfmapRule`）同构。
+- **`GET /strategies` 的 `specialDeals` key 改成 `strategyHooks`**（内嵌 UI 同步）。
+- **`IfmapOrchestrator.Builder#specialDeals(...)` → `#strategyHooks(...)`**；
+  两个私有实现方法 `applySpecialDeal` / `applyPostDeal` → `applyPreStrategy` / `applyPostStrategy`
+  （一对功能对称的方法，不该一个叫 specialDeal 一个叫 postDeal）。
+- 宿主迁移：`implements SpecialDealStrategy` → `implements IfmapStrategyHook`，方法签名（`apply(StrategyContext)`）
+  与三 key 注册规则（bean 名 / 类简单名 / 首字母小写）**完全不变**；配置列与取值不用动。
+- 存量系统里这批实现的类名仍是 `*SpecialDealStrategyImpl`（旧中文名「特殊处理策略」），
+  迁移指南与设计文档里保留该称谓仅作对照，不再作为本仓库的 API 名。
+
 ### Changed（判定管线 —— 破坏性）
 - **判定入口换成单列 `result_judge`（必填）**：`ifmap_config` 删 `result_flag` + `success_value`，新增
   `result_judge text NOT NULL`（**无 `DEFAULT`**）与 `judge_name varchar(64) NOT NULL DEFAULT ''`。

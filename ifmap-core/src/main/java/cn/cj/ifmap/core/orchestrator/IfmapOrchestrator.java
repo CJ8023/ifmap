@@ -63,6 +63,8 @@ import java.util.Map;
  *   → 按 busi_node 取整条计划 + 启用过滤 + interface_order 升序 + 按起点截断
  *   → 主参数组包 FullParamStrategy → 请求模板渲染 → 策略钩子 IfmapStrategyHook
  *   → 出网调用 PartnerServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
+ *   → 被调方向（call_direction=INBOUND）跳过上面两步：回参就是对方原文，不出网
+ * 
  *   → 响应模板解析 → 结果判定 result_flag + success_value
  *   → 逻辑分支（logic_branch_order 升序，首个命中；兜底分支最后）→ ActionRegistry 执行动作
  *   → 执行日志（脱敏 + 截断后落库）
@@ -154,6 +156,19 @@ public final class IfmapOrchestrator {
     }
 
     /**
+     * 执行一个<b>被调</b>接口（{@code call_direction=INBOUND}）：对方报文原文由 {@code rawBody} 传入，<b>不出网</b>。
+     *
+     * <p>等价于 {@code execute(request.withRawBody(rawBody), interfaceNo, busiNode)}，单独开一个入口是为了让宿主
+     * 一眼看出「这条是对方调我」，而不是靠记住某条配置的方向列。方向本身仍以配置为准：
+     * 传了原文但配置是 OUTBOUND，照旧按出网调用执行（原文只作为 payload 的补充载体存在）。</p>
+     *
+     * @param rawBody 对方推过来的 JSON 原文；判定（{@code $.noticeStatus} 之类）与应答模板都按它的路径取值
+     */
+    public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, String busiNode, String rawBody) {
+        return execute(request.withRawBody(rawBody), interfaceNo, busiNode, null);
+    }
+
+    /**
      * 加载执行计划：该业务节点下的<b>全部</b>启用配置，按 {@code interface_order} 升序。
      *
      * <p>{@code interfaceNo} 只作为这条流水线上的<b>起点</b>：从它开始往后跑。
@@ -242,7 +257,7 @@ public final class IfmapOrchestrator {
                 .build();
         StrategyContext context = StrategyContext.builder()
                 .request(request).config(config).ruleContext(ruleContext)
-                .params(request.getPayload()).build();
+                .params(initialParams(request, config)).build();
         // 参数三层合成，优先级从低到高：组包策略产物 → 池展平键 → 池本体（pool 是保留键，不是业务字段）
         Map<String, Object> requestParams = new LinkedHashMap<String, Object>();
         requestParams.putAll(fullParams.assemble(config.getPartnerCode(), config.getBusiNode(), context));
@@ -250,15 +265,24 @@ public final class IfmapOrchestrator {
         requestParams.putAll(flattenPool(pool));
         requestParams.put(POOL_KEY, pool);
         context.putParams(requestParams);
-        // 第一次渲染：请求模板只认 $.xxx 与 $.pool.*，所以先把合成好的参数序列化成源报文
-        String requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
-        context.setRequestJson(requestJson);
-        // 前序策略返回非空时会按新参数「重新渲染」一次，所以以它返回的报文为准
-        requestJson = applyPreStrategy(context, ruleContext, requestJson);
+        // 被调方向：对方原文即本步的「请求报文」，判定与应答模板都按它的路径取值，不需要也没有可渲染的模板
+        boolean inbound = config.inbound();
+        String requestJson;
+        if (inbound) {
+            requestJson = inboundSource(request);
+            context.setRequestJson(requestJson);
+        } else {
+            // 第一次渲染：请求模板只认 $.xxx 与 $.pool.*，所以先把合成好的参数序列化成源报文
+            requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
+            context.setRequestJson(requestJson);
+            // 前序策略返回非空时会按新参数「重新渲染」一次，所以以它返回的报文为准
+            requestJson = applyPreStrategy(context, ruleContext, requestJson);
+        }
 
-        // mockResponse 非空 = 不出网（管理端 dry-run / 单测），直接把它当对方原样回参
+        // mockResponse 非空 = 不出网（管理端 dry-run / 单测），直接把它当对方原样回参；
+        // 被调方向本来就不出网，回参是「对方报文原文」，此时 mock 仍优先（dry-run 要能换掉入参）
         PartnerOutcome outcome = mockResponse != null ? PartnerOutcome.ofBody(mockResponse)
-                : exchange(context, requestJson);
+                : inbound ? PartnerOutcome.ofBody(requestJson) : exchange(context, requestJson);
         String response = outcome.getBody();
         context.setResponseJson(response);
 
@@ -270,12 +294,16 @@ public final class IfmapOrchestrator {
         if (judgement.isSuccess()) {
             pool.put(config.getInterfaceNo(), data);
         }
+        // 产物回填到 context：后序策略未配置时上面会早返回，这里不设的话动作里 getResponseData() 一直是 null，
+        // 「在动作里回填应答字段（改这个 Map 的键）」这条通道就断了（池与返回值用的是同一个对象，改了都可见）
+        context.setResponseData(data);
         // 分支动作只在成功时执行：失败时调动作既没意义，还会掩盖真实失败原因
         String matchedBranch = judgement.isSuccess() ? applyBranch(request, tenantId, config, context, response, judgement) : null;
         String errorMessage = judgement.isSuccess() ? null : failureMessage(judgement);
         long elapsed = clock.currentTimeMillis() - start;
-        // 日志放在最终结论之后：记的是真实耗时与最终判定；writeLog 内部吞异常，落库失败不影响返回值
-        writeLog(tenantId, request, config, requestJson, response, judgement, elapsed);
+        // 日志放在最终结论之后：记的是真实耗时与最终判定；writeLog 内部吞异常，落库失败不影响返回值。
+        // 被调方向下 response 就是 requestJson（回参=原文），再记一遍等于两列同值；此处改为记我方应答（动作回填后的产物）
+        writeLog(tenantId, request, config, requestJson, inbound ? toJsonQuietly(data) : response, judgement, elapsed);
         return new StepOutcome(judgement.isSuccess(), data, response, errorMessage, matchedBranch,
                 judgement.getFailType());
     }
@@ -357,6 +385,56 @@ public final class IfmapOrchestrator {
     }
 
     /** 初始池：{@code payload.pool} 为 Map 时浅拷一份（不写回、不持有宿主对象）。 */
+    /**
+     * 本步入参的来源。
+     *
+     * <p>宿主已经结构化传进来的 {@code payload} 是<b>权威</b>的（可能补过值、脱过敏），
+     * 只有「被调方向 + payload 为空」时才退化成把对方原文宽松解析成字段 —— 两者混用会让同一个接口
+     * 时而读原文时而读 payload，排障时说不清哪来的值。</p>
+     */
+    private Map<String, Object> initialParams(IfmapRequest request, IfmapConfig config) {
+        Map<String, Object> payload = request.getPayload();
+        if (!config.inbound() || (payload != null && !payload.isEmpty())) {
+            return payload;
+        }
+        Map<String, Object> fields = new LinkedHashMap<String, Object>();
+        Object parsed = parseLenient(inboundSource(request));
+        if (parsed instanceof Map) {
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) parsed).entrySet()) {
+                fields.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return fields;
+    }
+
+    /**
+     * 被调方向的「回参」= 对方报文原文。
+     *
+     * <p>没传原文时退化成 payload 的序列化形态（宿主选择了结构化传参也一样能跑）；
+     * 两者都没有就返回 null，交给判定给出 {@code NOT_JSON}，比编一份空报文好查。</p>
+     */
+    private String inboundSource(IfmapRequest request) {
+        String body = trimToNull(request.getRawBody());
+        if (body != null) {
+            return body;
+        }
+        Map<String, Object> payload = request.getPayload();
+        return payload == null || payload.isEmpty() ? null : jsonOps.toJson(payload);
+    }
+
+    /** 产物序列化（只为写日志）：失败返回 null，绝不因为「日志记不下来」影响业务返回。 */
+    private String toJsonQuietly(Map<String, Object> data) {
+        if (data == null) {
+            return null;
+        }
+        try {
+            return jsonOps.toJson(data);
+        } catch (RuntimeException e) {
+            LOG.warn("ifmap 产物序列化失败（日志记为 null）：{}", e.getMessage());
+            return null;
+        }
+    }
+
     private Map<String, Object> initialPool(IfmapRequest request) {
         Map<String, Object> pool = new LinkedHashMap<String, Object>();
         // 预置池 = payload.pool（断点续跑时宿主把上次的池回放进来）；浅拷一份，不持有宿主对象

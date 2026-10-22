@@ -16,6 +16,7 @@
 package cn.cj.ifmap.core.orchestrator;
 
 import cn.cj.ifmap.core.IfmapEngine;
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
@@ -66,6 +67,15 @@ class IfmapOrchestratorTest {
     /** 最常见的单条件形态：$.code == 0000。 */
     private static final String CODE_0000 =
             "{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}";
+    /**
+     * 被调方向的判定口径：<b>报文可受理</b>（成功/失败都算受理），业务分流交给逻辑分支。
+     *
+     * <p>不能写成「$.noticeStatus == SUCCESS」——那会把「对方通知我失败」判成引擎失败，
+     * 于是处理失败的分支永远走不到。</p>
+     */
+    private static final String NOTICE_ACCEPTED = "{\"any\":["
+            + "{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"SUCCESS\"},"
+            + "{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"FAILED\"}]}";
 
     /** 宿主规则。 */
     public static class Rules {
@@ -153,6 +163,32 @@ class IfmapOrchestratorTest {
         }
     }
 
+    /**
+     * 被调方向的分支动作：记下读到的入参，并往产物里回填一个字段。
+     *
+     * <p>回填走的是「原地改 {@code ctx.getResponseData()} 那个 Map」——被调方向没法在动作里组装应答报文，
+     * 只能补字段；池与返回值用的是同一个 Map 对象，所以改了就都可见。</p>
+     */
+    @IfmapAction("noticeHandled")
+    public static class NoticeAction implements IfmapActionHandler {
+        private final Recorder recorder;
+
+        NoticeAction(Recorder recorder) {
+            this.recorder = recorder;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void execute(StrategyContext context) {
+            Object status = context.get("noticeStatus");
+            recorder.executed.add(String.valueOf(status));
+            Object produced = context.getResponseData();
+            if (produced instanceof Map) {
+                ((Map<String, Object>) produced).put("ackNo", "ACK_" + status);
+            }
+        }
+    }
+
     /** 捕获出网入参的网关。 */
     static final class CapturingGateway implements PartnerServiceGateway {
         final List<String> requests = new ArrayList<String>();
@@ -192,6 +228,15 @@ class IfmapOrchestratorTest {
                 + ",\"fullParam\":\"$.fullParam\"}");
         config.setResponseParamTemplate("{\"applyNo\":\"$.data.applyNo\"}");
         config.setResultJudge(CODE_0000);
+        return config;
+    }
+
+    /** 被调方向（INBOUND）的配置：不配请求模板/前序策略，回参就是对方原文。 */
+    private IfmapConfig inboundConfig(String interfaceNo, long keyId) {
+        IfmapConfig config = TestConfigs.config(interfaceNo, "RCV", 1, keyId);
+        config.setCallDirection(CallDirection.INBOUND);
+        config.setResultJudge(NOTICE_ACCEPTED);
+        config.setResponseParamTemplate("{\"code\":\"0000\",\"message\":\"success\",\"applyNo\":\"$.applyNo\"}");
         return config;
     }
 
@@ -690,6 +735,124 @@ class IfmapOrchestratorTest {
 
         assertTrue(repository.getLogs().get(0).getRequestParam().endsWith("...truncated"),
                 repository.getLogs().get(0).getRequestParam());
+    }
+
+    @Test
+    @DisplayName("被调方向：不出网，判定与应答模板都读对方原文，日志记「原文 → 我方应答」")
+    void inboundSkipsGatewayAndLogsOurAck() {
+        repository.add(inboundConfig("IF_N1", 1L));
+        CapturingGateway gateway = new CapturingGateway("{\"code\":\"0000\"}");
+        String body = "{\"noticeStatus\":\"SUCCESS\",\"applyNo\":\"AP7\"}";
+
+        IfmapResult result = orchestrator(gateway, new ActionRegistry())
+                .executeInbound(IfmapRequest.empty(), "IF_N1", "RCV", body);
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertTrue(gateway.requests.isEmpty(), "被调方向不得出网");
+        assertEquals("AP7", result.getData().get("applyNo"), "应答模板按对方原文的路径取值");
+        assertEquals(body, result.getRawResponse());
+
+        ExecutionLog log = repository.getLogs().get(0);
+        assertEquals(body, log.getRequestParam(), "request_param 记对方原文");
+        assertTrue(log.getResponseParam().contains("\"code\":\"0000\""), log.getResponseParam());
+        assertFalse(log.getResponseParam().contains("noticeStatus"),
+                "response_param 不能把原文再记一遍（那样两列同值，排障时看不出我方回了什么）：" + log.getResponseParam());
+    }
+
+    @Test
+    @DisplayName("被调方向：分支命中后动作原地改产物，返回值与日志都能看到回填字段")
+    void inboundBranchFillsAckThroughResponseData() {
+        repository.add(inboundConfig("IF_N2", 2L));
+        repository.add(TestConfigs.branch(40L, "IF_N2", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new NoticeAction(recorder));
+
+        IfmapResult result = orchestrator(null, actions).executeInbound(IfmapRequest.empty(), "IF_N2", "RCV",
+                "{\"noticeStatus\":\"SUCCESS\",\"applyNo\":\"AP7\"}");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals("PAY_SUCCESS", result.getMatchedBranch());
+        assertEquals(Collections.singletonList("SUCCESS"), recorder.executed,
+                "payload 为空时入参来自对方原文，动作里 $.noticeStatus 要读得到");
+        assertEquals("ACK_SUCCESS", result.getData().get("ackNo"), "动作原地改产物必须能进返回值");
+        assertTrue(repository.getLogs().get(0).getResponseParam().contains("ACK_SUCCESS"),
+                "日志记的是动作回填后的应答：" + repository.getLogs().get(0).getResponseParam());
+    }
+
+    @Test
+    @DisplayName("被调方向：成功/失败通知都算「可受理」，各自走自己的分支（判定不能判业务成败）")
+    void inboundBothStatesAreAcceptedAndRouted() {
+        repository.add(inboundConfig("IF_N3", 3L));
+        repository.add(TestConfigs.branch(41L, "IF_N3", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        repository.add(TestConfigs.branch(42L, "IF_N3", 2, "PAY_FAILED", "FAILED", "noticeHandled"));
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new NoticeAction(recorder));
+        IfmapOrchestrator orchestrator = orchestrator(null, actions);
+
+        IfmapResult ok = orchestrator.executeInbound(IfmapRequest.empty(), "IF_N3", "RCV",
+                "{\"noticeStatus\":\"SUCCESS\",\"applyNo\":\"AP7\"}");
+        IfmapResult fail = orchestrator.executeInbound(IfmapRequest.empty(), "IF_N3", "RCV",
+                "{\"noticeStatus\":\"FAILED\",\"applyNo\":\"AP7\"}");
+
+        assertTrue(ok.isSuccess() && fail.isSuccess(), "两条都要判成受理成功");
+        assertEquals("PAY_SUCCESS", ok.getMatchedBranch());
+        assertEquals("PAY_FAILED", fail.getMatchedBranch());
+        assertEquals(Arrays.asList("SUCCESS", "FAILED"), recorder.executed);
+    }
+
+    @Test
+    @DisplayName("被调方向：状态不在白名单 → 判定失败，分支动作不执行（照旧落 FAIL 日志）")
+    void inboundUnknownStatusFailsWithoutBranch() {
+        repository.add(inboundConfig("IF_N4", 4L));
+        repository.add(TestConfigs.branch(43L, "IF_N4", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new NoticeAction(recorder));
+
+        IfmapResult result = orchestrator(null, actions).executeInbound(IfmapRequest.empty(), "IF_N4", "RCV",
+                "{\"noticeStatus\":\"WHATEVER\"}");
+
+        assertFalse(result.isSuccess());
+        assertEquals("VALUE_MISMATCH", result.getFailType());
+        assertNull(result.getMatchedBranch());
+        assertTrue(recorder.executed.isEmpty(), "判定失败不跑分支动作");
+        assertEquals("FAIL", repository.getLogs().get(0).getExecutionResult());
+    }
+
+    @Test
+    @DisplayName("被调方向：判定读原文、入参读 payload —— 两者不一致时各走各的（不能互相顶掉）")
+    void inboundPayloadWinsOverRawBodyForParamsOnly() {
+        repository.add(inboundConfig("IF_N5", 5L));
+        repository.add(TestConfigs.branch(44L, "IF_N5", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        repository.add(TestConfigs.branch(45L, "IF_N5", 2, "PAY_FAILED", "FAILED", "noticeHandled"));
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new NoticeAction(recorder));
+
+        // 原文是 FAILED（判定与分流按它走），宿主补过的 payload 是 SUCCESS（动作里读到的参数按它走）
+        IfmapResult result = orchestrator(null, actions).executeInbound(
+                IfmapRequest.builder().put("noticeStatus", "SUCCESS").build(), "IF_N5", "RCV",
+                "{\"noticeStatus\":\"FAILED\",\"applyNo\":\"AP7\"}");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals("PAY_FAILED", result.getMatchedBranch(), "判定读原文：分流按原文的 FAILED 命中");
+        assertEquals(Collections.singletonList("SUCCESS"), recorder.executed,
+                "入参读 payload：动作里 $.noticeStatus 是宿主传的结构化值，不被原文顶掉");
+    }
+
+    @Test
+    @DisplayName("被调方向：dry-run 的 mockResponse 仍然优先于对方原文（要能换掉入参）")
+    void inboundMockResponseWins() {
+        repository.add(inboundConfig("IF_N6", 6L));
+
+        IfmapResult result = orchestrator(null, new ActionRegistry()).execute(
+                IfmapRequest.empty().withRawBody("{\"noticeStatus\":\"WHATEVER\"}"), "IF_N6", "RCV",
+                "{\"noticeStatus\":\"SUCCESS\",\"applyNo\":\"AP7\"}");
+
+        assertTrue(result.isSuccess(), "dry-run 要能拿一份合法入参替换掉真实原文：" + result.getErrorMessage());
+        assertEquals("AP7", result.getData().get("applyNo"));
     }
 
     @Test

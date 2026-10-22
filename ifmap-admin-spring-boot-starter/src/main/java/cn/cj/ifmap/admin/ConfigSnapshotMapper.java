@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.admin;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.json.JsonOps;
@@ -82,6 +83,8 @@ public class ConfigSnapshotMapper {
         config.setPartnerName(asString(map.get("partnerName")));
         config.setFinancingMode(asString(map.get("financingMode")));
         config.setInterfaceOrder(asInt(map.get("interfaceOrder")));
+        // 老快照没有该键：按 OUTBOUND 还原（列默认值同口径，回滚不会把方向改坏）
+        config.setCallDirection(CallDirection.fromName(asString(map.get("callDirection"))));
         config.setRequestParamTemplate(asString(map.get("requestParamTemplate")));
         config.setResponseParamTemplate(asString(map.get("responseParamTemplate")));
         config.setResultJudge(resolveResultJudge(map));
@@ -195,6 +198,8 @@ public class ConfigSnapshotMapper {
         map.put("partnerName", config.getPartnerName());
         map.put("financingMode", config.getFinancingMode());
         map.put("interfaceOrder", config.getInterfaceOrder());
+        map.put("callDirection", (config.getCallDirection() == null
+                ? CallDirection.OUTBOUND : config.getCallDirection()).name());
         map.put("requestParamTemplate", config.getRequestParamTemplate());
         map.put("responseParamTemplate", config.getResponseParamTemplate());
         map.put("resultJudge", config.getResultJudge());

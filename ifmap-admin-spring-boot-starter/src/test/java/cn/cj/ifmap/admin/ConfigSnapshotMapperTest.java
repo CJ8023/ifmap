@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.admin;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,7 @@ class ConfigSnapshotMapperTest {
         config.setJudgeName("ruleSpec");
         config.setPreStrategyName("demoStrategy");
         config.setPostStrategyName("auditStrategy");
+        config.setCallDirection(CallDirection.INBOUND);
 
         String snapshot = mapper.toSnapshot(config);
         assertTrue(snapshot.contains("\"interfaceNo\":\"IF_A\""), snapshot);
@@ -65,7 +67,20 @@ class ConfigSnapshotMapperTest {
         assertEquals("ruleSpec", restored.getJudgeName());
         assertEquals("demoStrategy", restored.getPreStrategyName());
         assertEquals("auditStrategy", restored.getPostStrategyName());
+        assertEquals(CallDirection.INBOUND, restored.getCallDirection());
         assertEquals(1, ((Number) restored.getStatus()).intValue());
+    }
+
+    @Test
+    @DisplayName("老快照没有 callDirection 键 → 还原成 OUTBOUND（与列默认值同口径，回滚不改坏方向）")
+    void legacySnapshotWithoutDirectionFallsBackToOutbound() {
+        String legacy = "{\"keyId\":1001,\"interfaceNo\":\"IF_A\",\"interfaceCode\":\"CMB_IF_A\","
+                + "\"interfaceName\":\"接口A\",\"busiNode\":\"apply\",\"partnerCode\":\"CMB\","
+                + "\"interfaceOrder\":1,\"resultJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}";
+
+        IfmapConfig restored = mapper.fromSnapshot(legacy);
+
+        assertEquals(CallDirection.OUTBOUND, restored.getCallDirection());
     }
 
     @Test

@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.remote;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
@@ -109,6 +110,8 @@ public final class JsonConfigMapper {
         c.setPartnerName(textAny(row, "partnerName", "bankName"));
         c.setFinancingMode(text(row, "financingMode"));
         c.setInterfaceOrder(integer(row, "interfaceOrder", source, 0));
+        // 缺省 = OUTBOUND（与 DDL 默认值同口径）；写错字必须失败，否则「对方调我」会变成「我调对方」
+        c.setCallDirection(CallDirection.fromName(text(row, "callDirection")));
         c.setRequestParamTemplate(text(row, "requestParamTemplate"));
         c.setResponseParamTemplate(text(row, "responseParamTemplate"));
         // result_judge 是 NOT NULL 且无默认值 ⇒ 远端必须给（缺了就在入口失败，别等运行期静默放行）

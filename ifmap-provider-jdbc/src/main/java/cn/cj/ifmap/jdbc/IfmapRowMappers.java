@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.jdbc;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.ExecutionLog;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
@@ -39,7 +40,7 @@ public final class IfmapRowMappers {
     /** 接口配置列清单（顺序与 SQL 中一致，供 SELECT 复用）。 */
     static final String CONFIG_COLUMNS =
             "`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
-            + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
+            + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,`call_direction`,"
             + "`request_param_template`,`response_param_template`,`result_judge`,`judge_name`,"
             + "`pre_strategy_name`,`post_strategy_name`,"
             + "`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
@@ -75,6 +76,8 @@ public final class IfmapRowMappers {
                 c.setPartnerName(rs.getString("partner_name"));
                 c.setFinancingMode(rs.getString("financing_mode"));
                 c.setInterfaceOrder(rs.getInt("interface_order"));
+                // 非法方向在这里就抛（不静默按 OUTBOUND 出行网调用），与 CallDirection.fromName 的口径一致
+                c.setCallDirection(CallDirection.fromName(rs.getString("call_direction")));
                 c.setRequestParamTemplate(rs.getString("request_param_template"));
                 c.setResponseParamTemplate(rs.getString("response_param_template"));
                 c.setResultJudge(rs.getString("result_judge"));

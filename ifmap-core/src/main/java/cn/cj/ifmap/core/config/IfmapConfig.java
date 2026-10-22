@@ -65,6 +65,13 @@ public class IfmapConfig implements Serializable {
     private String financingMode;
     /** 接口执行顺序（本业务节点内的步骤序号），升序；同值按 keyId 兜底，租户+节点内唯一。 */
     private Integer interfaceOrder;
+    /**
+     * 调用方向：{@link CallDirection#OUTBOUND}（默认，我方调对方）/ {@link CallDirection#INBOUND}（对方调我方）。
+     *
+     * <p>INBOUND 只改执行路径（不出网、不跑前序策略、回参取请求原文），
+     * 判定 / 逻辑分支 / 应答模板语义复用；{@code null} 等价于 OUTBOUND。</p>
+     */
+    private CallDirection callDirection;
     /** 请求参数模板（DSL），可为 null（纯回调接口无请求体）。 */
     private String requestParamTemplate;
     /** 响应参数模板（DSL），可为 null。 */
@@ -103,6 +110,11 @@ public class IfmapConfig implements Serializable {
     /** 是否启用。 */
     public boolean enabled() {
         return status != null && status == 1;
+    }
+
+    /** 是否「对方调我方」（{@code null} 方向按 OUTBOUND 处理）。 */
+    public boolean inbound() {
+        return callDirection == CallDirection.INBOUND;
     }
 
     /** 模板是否全为空（请求与响应模板都没有内容时引擎无事可做）。 */
@@ -200,6 +212,15 @@ public class IfmapConfig implements Serializable {
 
     public void setInterfaceOrder(Integer interfaceOrder) {
         this.interfaceOrder = interfaceOrder;
+    }
+
+    public CallDirection getCallDirection() {
+        return callDirection;
+    }
+
+    /** 设置调用方向；{@code null} 等价于 {@link CallDirection#OUTBOUND}。 */
+    public void setCallDirection(CallDirection callDirection) {
+        this.callDirection = callDirection;
     }
 
     public String getRequestParamTemplate() {

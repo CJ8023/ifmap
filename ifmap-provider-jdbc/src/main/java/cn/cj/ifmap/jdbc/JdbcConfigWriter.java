@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.jdbc;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
@@ -90,17 +91,18 @@ public class JdbcConfigWriter {
         // status 与 del_status/deleted_seq 在 SQL 里写死默认值，所以 VALUES 的 ? 只对应"可变列"
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
-                + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
+                + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,`call_direction`,"
                 + "`request_param_template`,`response_param_template`,`result_judge`,`judge_name`,"
                 + "`pre_strategy_name`,`post_strategy_name`,`status`,`version`,`remark`,`del_status`,`deleted_seq`,"
                 + "`add_user_id`,`add_request_id`)"
-                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
+                + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?)";
         try {
             jdbc.update(sql, id,
                     JdbcValues.orDefault(config.getTenantId(), -1L),
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
+                    directionOf(config),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     // result_judge 是 NOT NULL 且**无默认值**：只能 require，不能 orEmpty
                     // （orEmpty 会把 null 悄悄写成 ""，正好绕开"必须有值"的口径）
@@ -119,6 +121,12 @@ public class JdbcConfigWriter {
         config.setDelStatus(0);
         config.setDeletedSeq(0L);
         return id;
+    }
+
+    /** 方向列是 {@code NOT NULL DEFAULT 'OUTBOUND'}：空值按默认写，避免往 NOT NULL 列写 NULL。 */
+    private static String directionOf(IfmapConfig config) {
+        CallDirection direction = config.getCallDirection();
+        return (direction == null ? CallDirection.OUTBOUND : direction).name();
     }
 
     /**
@@ -178,7 +186,7 @@ public class JdbcConfigWriter {
         String sql = "UPDATE `" + tables.configTable() + "` SET"
                 + " `interface_no` = ?, `interface_code` = ?, `project_code` = ?, `interface_name` = ?,"
                 + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
-                + " `interface_order` = ?,"
+                + " `interface_order` = ?, `call_direction` = ?,"
                 + " `request_param_template` = ?, `response_param_template` = ?,"
                 + " `result_judge` = ?, `judge_name` = ?,"
                 + " `pre_strategy_name` = ?, `post_strategy_name` = ?,"
@@ -192,6 +200,7 @@ public class JdbcConfigWriter {
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
                     config.getFinancingMode(), JdbcValues.orDefault(config.getInterfaceOrder(), 0),
+                    directionOf(config),
                     config.getRequestParamTemplate(), config.getResponseParamTemplate(),
                     // result_judge 是 NOT NULL 且**无默认值**：只能 require，不能 orEmpty
                     // （orEmpty 会把 null 悄悄写成 ""，正好绕开"必须有值"的口径）

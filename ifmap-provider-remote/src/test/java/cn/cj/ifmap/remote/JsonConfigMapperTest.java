@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.remote;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.exception.IfmapConfigException;
@@ -245,6 +246,21 @@ class JsonConfigMapperTest {
     void unknownKeysAreIgnored() {
         String body = minimalWith("\"brandNewColumn\":\"x\",\"another_one\":123");
         assertEquals("IF_A", only(JsonConfigMapper.toConfigs(JSON, body, null)).getInterfaceNo());
+    }
+
+    @Test
+    @DisplayName("callDirection：缺省 = OUTBOUND，大小写容忍，写错字失败")
+    void callDirectionMapping() {
+        assertEquals(CallDirection.OUTBOUND,
+                only(JsonConfigMapper.toConfigs(JSON, "[" + MINIMAL + "]", null)).getCallDirection(),
+                "远端没给该字段时按列默认值 OUTBOUND，老远端零改动");
+        assertEquals(CallDirection.INBOUND,
+                only(JsonConfigMapper.toConfigs(JSON, minimalWith("\"callDirection\":\"inbound\""), null))
+                        .getCallDirection());
+
+        IfmapConfigException error = assertThrows(IfmapConfigException.class,
+                () -> JsonConfigMapper.toConfigs(JSON, minimalWith("\"callDirection\":\"INBOUD\""), null));
+        assertTrue(error.getMessage().contains("call_direction"), error.getMessage());
     }
 
     @Test

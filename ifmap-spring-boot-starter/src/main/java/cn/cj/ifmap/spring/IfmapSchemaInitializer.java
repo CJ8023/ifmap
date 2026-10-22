@@ -73,16 +73,17 @@ public class IfmapSchemaInitializer implements InitializingBean {
     /**
      * 升级脚本（{@code ALTER TABLE}）。
      *
-     * <p>001~004 是建表，005/006 是<b>加列/删列</b>：全新建库时两者顺序执行才落到目标结构，
+     * <p>001~004 是建表，005~007 是<b>加列/删列</b>：全新建库时两者顺序执行才落到目标结构，
      * 存量库升级时也走同一份脚本（Liquibase 与 {@code ifmap.ddl.auto=true} 共用，不分叉）。</p>
      *
-     * <p>为什么 005/006 不并回 001：Liquibase 按 changeset 的 checksum 判定「是否需要重跑」，
+     * <p>为什么 005~007 不并回 001：Liquibase 按 changeset 的 checksum 判定「是否需要重跑」，
      * 改 001 会让所有已部署库（包括检查过 DDL 的库）重跑建表而失败。便宜的做法是新增 changeset，
      * 把 {@code result_flag/success_value} 的删除留在 005。</p>
      */
     private static final String[] ALTER_FILES = {
             "db/changelog/v1.0.0/005-config-result-judge.sql",
-            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql"
+            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql",
+            "db/changelog/v1.0.0/007-config-call-direction.sql"
     };
 
     /** {@code ALTER TABLE `t` ADD|DROP COLUMN `c` ...} 的识别式（只认本项目的两条形式）。 */

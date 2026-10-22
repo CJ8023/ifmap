@@ -87,6 +87,16 @@ class ResultJudgeSchemaTest {
     }
 
     @Test
+    @DisplayName("config.call_direction：varchar(16) + NOT NULL DEFAULT 'OUTBOUND'（存量行零回填，老行为不变）")
+    void callDirectionDefaultsToOutbound() {
+        Map<String, Object> column = column("config", "call_direction");
+
+        assertTrue(typeOf(column).startsWith("varchar(16)"), "期望 varchar(16)：" + typeOf(column));
+        assertEquals("NO", column.get("IS_NULLABLE"));
+        assertEquals("OUTBOUND", defaultOf(column), "默认必须是 OUTBOUND：存量行不回填也不会变成被调方向");
+    }
+
+    @Test
     @DisplayName("execution_log 新增四列：http_status 可空、其余 NOT NULL DEFAULT ''")
     void executionLogHasFourNewColumns() {
         List<String> names = columnNames("execution_log");

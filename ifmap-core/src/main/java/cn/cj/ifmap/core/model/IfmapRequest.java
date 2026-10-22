@@ -38,6 +38,7 @@ public final class IfmapRequest {
     private final Map<String, String> headers;
     private final Map<String, Object> payload;
     private final Map<String, Object> attributes;
+    private final String rawBody;
 
     private IfmapRequest(Builder builder) {
         this.tenantId = builder.tenantId;
@@ -47,6 +48,7 @@ public final class IfmapRequest {
         this.headers = Collections.unmodifiableMap(new LinkedHashMap<String, String>(builder.headers));
         this.payload = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(builder.payload));
         this.attributes = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(builder.attributes));
+        this.rawBody = builder.rawBody;
     }
 
     public static Builder builder() {
@@ -95,6 +97,17 @@ public final class IfmapRequest {
         return attributes;
     }
 
+    /**
+     * 原始报文体（对方推过来的 JSON 原文），只有被调接口（{@code call_direction=INBOUND}）会用。
+     *
+     * <p>为什么单独放一个字段而不是塞进 payload：payload 是「结构化字段集合」，{@code $.xxx} 直接读它；
+     * 而判定与应答模板要的是<b>对方原文</b>（判定的 {@code $.noticeStatus}、应答里回显的 {@code $.applyNo}
+     * 都按原文路径取）。两者不能混 —— 原文是字符串，序列化回 payload 会丢掉格式与精度。</p>
+     */
+    public String getRawBody() {
+        return rawBody;
+    }
+
     /** 读请求头，大小写不敏感（HTTP 头本身就大小写不敏感）。 */
     public String getHeader(String name) {
         if (name == null) {
@@ -127,10 +140,21 @@ public final class IfmapRequest {
         return b.build();
     }
 
+    /** 派生一份并附上原始报文体（不改动原对象）；{@code null} 保留原值。 */
+    public IfmapRequest withRawBody(String body) {
+        if (body == null) {
+            return this;
+        }
+        return builder().tenantId(tenantId).operatorId(operatorId).requestId(requestId)
+                .bizId(bizId).headers(headers).payload(payload).attributes(attributes)
+                .rawBody(body).build();
+    }
+
     @Override
     public String toString() {
         return "IfmapRequest{tenantId='" + tenantId + "', requestId='" + requestId + "', bizId='" + bizId
-                + "', payloadKeys=" + payload.keySet() + '}';
+                + "', payloadKeys=" + payload.keySet() + (rawBody == null ? "" : ", rawBody=" + rawBody.length() + "B")
+                + '}';
     }
 
     /** 构造器。 */
@@ -143,6 +167,7 @@ public final class IfmapRequest {
         private final Map<String, String> headers = new LinkedHashMap<String, String>();
         private final Map<String, Object> payload = new LinkedHashMap<String, Object>();
         private final Map<String, Object> attributes = new LinkedHashMap<String, Object>();
+        private String rawBody;
 
         public Builder tenantId(String tenantId) {
             this.tenantId = tenantId;
@@ -203,6 +228,12 @@ public final class IfmapRequest {
             if (attributes != null) {
                 this.attributes.putAll(attributes);
             }
+            return this;
+        }
+
+        /** 原始报文体（被调接口用；OUTBOUND 忽略）。 */
+        public Builder rawBody(String rawBody) {
+            this.rawBody = rawBody;
             return this;
         }
 

@@ -95,8 +95,9 @@ public final class TestDatabases {
     /**
      * 生产 DDL（Liquibase changelog 的全部脚本），顺序即执行顺序。
      *
-     * <p>001~004 是 {@code CREATE TABLE}，005/006 是 {@code ALTER TABLE}：新库顺序执行同样落到
-     * 目标结构，「存量库升级」与「全新建库」不会分叉。</p>
+     * <p>001~004 是 {@code CREATE TABLE}，005~007 是 {@code ALTER TABLE}：新库顺序执行同样落到
+     * 目标结构，「存量库升级」与「全新建库」不会分叉。新增 changeset 时<b>必须同时</b>加到
+     * {@code IfmapSchemaInitializer.ALTER_FILES}（{@code ddl.auto} 走那份）与这里（测试走这份）。</p>
      */
     public static final List<String> PRODUCTION_DDL = Collections.unmodifiableList(Arrays.asList(
             "db/changelog/v1.0.0/001-create-ifmap-config.sql",
@@ -104,7 +105,8 @@ public final class TestDatabases {
             "db/changelog/v1.0.0/003-create-execution-log.sql",
             "db/changelog/v1.0.0/004-create-config-history.sql",
             "db/changelog/v1.0.0/005-config-result-judge.sql",
-            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql"));
+            "db/changelog/v1.0.0/006-execution-log-judge-columns.sql",
+            "db/changelog/v1.0.0/007-config-call-direction.sql"));
 
     /** 执行日志归档冷表（可选运维脚本，字面量前缀需自行替换）。 */
     public static final String ARCHIVE_DDL = "db/optional/execution-log-partition/04-create-archive-table.sql";

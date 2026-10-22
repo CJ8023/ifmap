@@ -200,8 +200,8 @@ class IfmapSchemaInitializerTest {
                 new DefaultResourceLoader()).createTablesIfAbsent();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        // config 列数不变（+result_judge/judge_name，−result_flag/success_value）
-        assertEquals(28, columnsOf(jdbc, prefix + "config"));
+        // config：+result_judge/judge_name，−result_flag/success_value，再 +call_direction（007）
+        assertEquals(29, columnsOf(jdbc, prefix + "config"));
         assertEquals(17, columnsOf(jdbc, prefix + "logic_branch_config"));
         // execution_log 新增 4 列：http_status / fail_type / error_code / track_id
         assertEquals(21, columnsOf(jdbc, prefix + "execution_log"));

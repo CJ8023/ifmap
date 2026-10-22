@@ -75,7 +75,7 @@
 | D6 | `payload` 非空 → 以 `payload` 作为 `params`；`payload` 为空且 `rawBody` 非空 → 用 `jsonOps.parse(rawBody)` 填充 `params`。`rawBody` 恒只作原文（日志用） | 让分支模板与动作里的 `$.xxx` 照常可用，同时原文不被改写 |
 | D7 | 应答 = `applyPostStrategy(renderResponse(...))` 的产物（即 `IfmapResult.data`），渲染源 = 对方报文；**不引入第二套渲染源** | 沿用"响应模板根 = 回参"的既有契约；ACK 要掺我方字段（traceId/时间戳）用 `post_strategy_name` 加工产物 |
 | D8 | 判定不变：同一份 `result_judge` / `judge_name`，读"回参"（INBOUND 下即对方报文） | 复用 `JudgementPipeline`；INBOUND 语义 = "这份通知是否可处理" |
-| D9 | `writeLog` **一行不改**：INBOUND 下 `requestJson` 变量天然是原文、`response` 是 ACK；且此时 `config != null`，`interface_no` 有值 | 顺带修掉回调通道"日志必丢"的根因，不新增日志列 |
+| D9 | `writeLog` **只改调用处的一个实参**：INBOUND 时第二个报文参数传 ACK 的序列化结果。**不能**直接沿用 `response` 变量 —— INBOUND 下 `response = outcome.getBody() = 入参原文`，会让 `response_param` 与 `request_param` 重复，而 ACK 根本不进日志 | 日志语义变成「`request_param`=对方原文 / `response_param`=我方 ACK」，正是合规要的样子；同时顺带修掉回调通道"日志必丢"的根因（那时 `config=null`），不新增日志列 |
 | D10 | 允许混合计划（INBOUND 起点 + 后续 OUTBOUND），池/起点截断/`stopOnFailure` 沿用 | 被调后回查是最常见形态，现有机制零改造即可支持 |
 | D11 | 硬校验：同一 `tenant + busiNode` 内 `INBOUND` **≤ 1**，且必须 `interface_order` **最小且不并列** | "被调步骤配在第二步"是永远执行不到、但表格上看着正常的配置 → 必须 ERROR 拦在保存期 |
 | D12 | 未知取值 **fail fast**（`IfmapConfigException`）；空值按 `OUTBOUND` 兜底 | 写错成 `INBOUD` 若被静默当成出网，就会给合作机构发一个莫名其妙的请求 —— 最危险的一类静默错误 |
@@ -138,7 +138,8 @@ Map<String, Object> data = applyPostStrategy(context, renderResponse(config, res
 Judgement judgement = pipeline.judge(config, response, outcome);      // D8
 if (judgement.isSuccess()) pool.put(config.getInterfaceNo(), data);   // D10
 String matchedBranch = judgement.isSuccess() ? applyBranch(...) : null;
-writeLog(tenantId, request, config, requestJson, response, judgement, elapsed);  // D9：语义已正确
+// D9：INBOUND 下 response 变量 == 入参原文，直接传它会让日志两条报文重复 ⇒ 第二报文参数换成 ACK
+writeLog(tenantId, request, config, requestJson, inbound ? jsonOps.toJson(data) : response, judgement, elapsed);
 ```
 
 六个槽位在两种方向下的对照：
@@ -150,7 +151,7 @@ writeLog(tenantId, request, config, requestJson, response, judgement, elapsed); 
 | 前序策略 | 出网前加工 | **跳过** |
 | 出网 | `gateway.exchange` | **`ofBody(入参原文)`** |
 | 响应模板 + 后序 | 从对方响应渲染产物 | 从对方报文渲染 **ACK** |
-| 判定 / 入池 / 分支 / 日志 | 同 | **同（一字不改）** |
+| 判定 / 入池 / 分支 / 日志 | 同 | 同（`writeLog` 的「回参」实参换成 ACK，见 D9） |
 
 `inboundBody(request)` 规则：`rawBody` 非空 → 用它；否则 `jsonOps.toJson(payload)`；两者都空 → 抛 `IfmapConfigException("被调接口缺少入参报文：interfaceNo=...")`（空报文调被调接口一定是接线错误）。
 
@@ -178,6 +179,49 @@ public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, Stri
 - **ACK** = `IfmapResult.data`（Map）。宿主用自己的框架序列化回给对方；要带信封（`code`/`msg`）就写进 `response_param_template` 的常量。
 - **要掺我方动态字段**（traceId、受理时间、受理流水号）→ `post_strategy_name`（`applyPostStrategy:326` 支持返回 Map 覆盖/替换产物）+ `@IfmapAction` 生成流水号写入 `StrategyContext`。**不新增机制。**
 - **判定**：`{"op":"always"}` = "收到即可处理"；`{"all":[{"path":"$.status","op":"equal","value":"SUCCESS"}]}` = "只处理成功通知"。判定失败 → 不执行动作、不入池、日志 `FAIL` + `error_msg`（现有行为）。
+
+#### 4.4.1 应答（ACK）怎么配
+
+**出口只有一个**：`IfmapResult.data`（Map）。引擎不碰 HTTP 状态码、Content-Type、响应头、签名 —— 那些由宿主 Controller 决定；引擎只回答"回什么内容"。
+
+渲染源是**对方报文原文**（`renderResponse:422`，模板为空 → 空 Map），模板取值语法见 `docs/02`（`$.path` 整值替换 / `@append@` `@concat@` 拼接 / `@FUN(...)` 函数 / `$.seqNo` 内置 20 位流水号 / 其余一律按字面量原样输出）。
+
+| 场景 | `response_param_template` |
+| --- | --- |
+| 只回固定应答（最常见） | `{"code":"0000","msg":"success"}` |
+| 回显对方流水号 + 我给一个回执号 | `{"code":"0000","msg":"success","applyNo":"$.applyNo","ackNo":"$.seqNo"}` |
+| 字符串拼接（**必须用 `@append@`**） | `{"orderNo":"$.applyNo@append@-ACK"}` |
+| 取嵌套 / 数组 | `{"firstSku":"$.items[0].sku","allSku":"$.items[*].sku"}` |
+| 不回应答体（宿主只回 200） | **不配模板** → `data` 为空 Map |
+
+三个必须知道的坑：
+
+1. **不能写 `"prefix-$.applyNo"`**。总表（`docs/02` §1）里 `$.` 只认"整值以 `$.` 开头"，混在文本里会走第 9 条**字面量原样输出** —— 对方会收到字符串 `prefix-$.applyNo`。
+2. **判定失败时 `data` 不是空的**：`renderResponse` 与 `applyPostStrategy` 与成败无关，都会执行。宿主拿到 `success=false` + 一份"本来要回的 ACK"，自行决定回什么（见下）。
+3. **`$.seqNo` 每次渲染都不同**，不要用它当幂等键。
+
+成功率不同回不同应答体（DSL 没有 if，两条路都行）：
+
+- **A（推荐，零代码）**：宿主按 `result.isSuccess()` 分叉 —— 成功回 `result.getData()`，失败回自己的错误信封（`{"code":"9999","msg":err}`）。HTTP 状态也归宿主定。
+- **B（要"失败也带业务字段"）**：`post_strategy_name` 里读 `context.getResponseJson()`（对方报文）+ `context.getRequest()`，用 `context.setResponseData(map)` **整体替换**产物：
+
+```java
+@Component("ackWithServerTime")   // 与 ifmap_config.post_strategy_name 对齐
+public class AckWithServerTime implements IfmapStrategyHook {
+    @Override
+    public Map<String, Object> apply(StrategyContext context) {
+        if (context.getPhase() != StrategyContext.Phase.POST) {
+            return null;                       // 只挂后序；前序对被调接口不执行（D3）
+        }
+        Map<String, Object> ack = new LinkedHashMap<String, Object>(context.getResponseData());
+        ack.put("serverTime", String.valueOf(System.currentTimeMillis()));
+        context.setResponseData(ack);           // 整体替换产物：必须给 Map 才生效（:345-349）
+        return null;                            // 返回 Map 则是"合并"，两者按需选一个
+    }
+}
+```
+
+**怎么预览 ACK 而不真被调用**：管理端 dry-run（`dryRun:132`）传 `mockResponse` = 一份"伪造的对方报文"，返回的 `IfmapResult.data` 就是将要回给对方的 ACK（D5）。这也是验收 ACK 配置最省事的手段。
 
 ### 4.5 混合计划示例
 
@@ -222,7 +266,7 @@ busi_node = LOAN_NOTIFY
 | --- | --- | --- |
 | `interface_no` | 配置的接口号 | 同 |
 | `request_param` | 我方渲染出的出网报文 | **对方推来的报文原文**（脱敏 → 截断） |
-| `response_param` | 对方响应原文 | **我方 ACK** |
+| `response_param` | 对方响应原文 | **我方 ACK**（由 INBOUND 分支显式传入，见 D9） |
 | `execution_result` / `fail_type` / `error_code` / `track_id` | 判定结论 | 同（判定的是对方报文） |
 | `http_status` | 对方 HTTP 状态 | 空（`PartnerOutcome.ofBody` 不带状态码） |
 
@@ -247,7 +291,7 @@ BREAKING 口径（写进 CHANGELOG）：宿主若实现过 `IfmapCallbackHandler
 | 模块 | 文件数 | 具体点 |
 | --- | --- | --- |
 | provider-jdbc | 6 | `007-*.sql`（新）+ `db.changelog-master.yaml`（+1 include）+ `IfmapRowMappers.CONFIG_COLUMNS`（28→29 列，`toConfig` 读 `call_direction`）+ `JdbcConfigWriter.insert:91-97`（24→25 列、**21→22 个 `?`**，当前实测 24 列 / 21 占位符 / 3 个字面量 `version=0`,`del_status=0`,`deleted_seq=0`）+ `update:178-188`（SET 18→19 个 `?`）+ 真库档测试断言 |
-| core | 5 | `config/IfmapConfig`（字段 + `isInbound`）+ `config/CallDirection`（新）+ `model/IfmapRequest`（`rawBody`）+ `orchestrator/IfmapOrchestrator`（分叉 + `executeInbound` + 删 callback 相关）+ 删 3 个文件 |
+| core | 5 | `config/IfmapConfig`（字段 + `isInbound`）+ `config/CallDirection`（新）+ `model/IfmapRequest`（`rawBody`）+ `orchestrator/IfmapOrchestrator`（分叉 + `executeInbound` + `writeLog` 实参一处 + 删 callback 相关）+ 删 3 个文件 |
 | spring-boot-starter | 1 | `IfmapSchemaInitializer.ALTER_FILES:83`（+007；`columnExists` 已幂等） |
 | provider-remote | 1 | `JsonConfigMapper.toConfig`（+`callDirection`） |
 | admin | 5 | `ConfigValidator`（+`checkCallDirection`）+ `IfmapBuiltinEnums`（+1 key）+ `ConfigSnapshotMapper`（双向）+ `app.js`（字段 + 列表列）+ `IfmapMetaAdminController`（删 callbacks） |

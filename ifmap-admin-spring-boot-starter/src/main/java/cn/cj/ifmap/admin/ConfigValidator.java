@@ -62,6 +62,7 @@ public class ConfigValidator {
     private final ActionRegistry actions;
     private final JdbcConfigRepository repository;
 
+    /** 依赖一次注入：契约校验器 + JSON 实现 + 各注册表（<b>只读</b>，仅用于判断名字是否存在）。 */
     public ConfigValidator(ContractValidator contractValidator, JsonOps jsonOps,
                            StrategyHookRegistry strategyHooks, ActionRegistry actions,
                            JdbcConfigRepository repository) {
@@ -79,7 +80,9 @@ public class ConfigValidator {
     }
 
     /**
-     * 校验一条接口配置。
+     * 单条配置的校验入口，顺序固定：必填 → 模板契约 → 判定规格 → JSON 路径 → 前/后序策略名 → 唯一维度。
+     *
+     * <p>全收集（不在第一条就返回）：管理端点据此一次性把问题都提示出来，避免用户改一条试一次。</p>
      *
      * @param creating true=新增（唯一性校验会排除自身 keyId）
      */
@@ -94,6 +97,7 @@ public class ConfigValidator {
         required(result, "busiNode", config.getBusiNode());
         required(result, "partnerCode", config.getPartnerCode());
 
+        // 下面五步都只「收集问题」不抛异常，顺序即提示顺序；管理端据此一次性展示全部错误
         checkTemplateContract(config, result);
         checkJudgeSpec(config, result);
         checkJsonPaths(config, result);
@@ -112,6 +116,7 @@ public class ConfigValidator {
         if (rows.isEmpty()) {
             return result.warning("接口 " + interfaceNo + " 尚未配置逻辑分支");
         }
+        // 一趟扫完：兜底分支条数、顺序唯一、value 是否依赖 flag、动作是否已注册
         int defaultCount = 0;
         Set<Integer> orders = new LinkedHashSet<Integer>();
         for (LogicBranchConfig row : rows) {
@@ -345,6 +350,7 @@ public class ConfigValidator {
         return name;
     }
 
+    /** 扫模板里的 {@code @FUN(...)} 表达式语法问题（用 {@link TemplateScanner}，与引擎同一套规则）。 */
     private void checkExpressions(String template, String column, ValidationResult result) {
         if (isBlank(template)) {
             return;
@@ -354,6 +360,7 @@ public class ConfigValidator {
         }
     }
 
+    /** 抽出模板里出现的全部 {@code $.path}（模板非法 JSON 时静默跳过 —— 契约校验已经报过了）。 */
     private void collectPaths(String template, Set<String> paths) {
         if (isBlank(template)) {
             return;
@@ -368,6 +375,7 @@ public class ConfigValidator {
         walk(parsed, paths);
     }
 
+    /** 递归遍历模板节点；<b>key 也要看</b>，因为 {@code 字段@array@$.path} 的路径藏在键里。 */
     private void walk(Object node, Set<String> paths) {
         if (node instanceof java.util.Map) {
             for (java.util.Map.Entry<?, ?> entry : ((java.util.Map<?, ?>) node).entrySet()) {
@@ -386,6 +394,7 @@ public class ConfigValidator {
         }
     }
 
+    /** 从一段文本里抠 {@code $.path} 记号（{@code >2} 才收：{@code $.} 这种残片不是路径）。 */
     private void collectFromText(String text, Set<String> paths) {
         if (text == null || text.indexOf('$') < 0) {
             return;
@@ -416,6 +425,7 @@ public class ConfigValidator {
         }
     }
 
+    /** 同租户同接口号下的未删除配置（唯一维度校验用）。 */
     private List<IfmapConfig> liveConfigs(String tenantId, String interfaceNo) {
         return liveRows(new ConfigQuery()
                 .setTenantId(tenantId)
@@ -423,6 +433,7 @@ public class ConfigValidator {
                 .setSize(ConfigQuery.MAX_SIZE));
     }
 
+    /** 再滤一遍 {@code del_status}：管理端查询可能带上已删除行，校验只看活行。 */
     private List<IfmapConfig> liveRows(ConfigQuery query) {
         List<IfmapConfig> live = new ArrayList<IfmapConfig>();
         for (IfmapConfig row : repository.queryConfigs(query)) {
@@ -433,6 +444,7 @@ public class ConfigValidator {
         return live;
     }
 
+    /** 编辑场景要排除「自己」这条记录（keyId 为空 = 新建，不算自己）。 */
     private static boolean isSelf(IfmapConfig config, IfmapConfig row) {
         return config.getKeyId() != null && config.getKeyId().equals(row.getKeyId());
     }
@@ -454,6 +466,7 @@ public class ConfigValidator {
             return;
         }
         String tenantId = asTenantId(config.getTenantId());
+        // 维度一：interface_no 在租户内全局唯一（逻辑分支只按 interfaceNo 查，没有 busiNode 也必须自洽）
         for (IfmapConfig row : liveConfigs(tenantId, config.getInterfaceNo())) {
             if (!isSelf(config, row)) {
                 result.error("唯一维度冲突：interface_no 在租户内必须全局唯一，已存在 (tenant_id=" + tenantId
@@ -468,6 +481,8 @@ public class ConfigValidator {
                 .setTenantId(tenantId)
                 .setBusiNode(config.getBusiNode())
                 .setSize(ConfigQuery.MAX_SIZE);
+        // 维度二：interface_order 在 busi_node 内唯一。分页上限 MAX_SIZE 会截断超大结果集，
+        // 但一个业务节点的步骤数远小于 200，实际不会漏判
         for (IfmapConfig row : liveRows(query)) {
             if (isSelf(config, row) || !sameOrder(row.getInterfaceOrder(), config.getInterfaceOrder())) {
                 continue;
@@ -489,6 +504,7 @@ public class ConfigValidator {
         return left == null ? right == null : left.equals(right);
     }
 
+    /** {@code method_flag} 必须是已注册的动作；一个动作都没注册时只 WARN（启动早期形态，报了也没用）。 */
     private void checkMethodFlag(LogicBranchConfig row, ValidationResult result) {
         String methodFlag = row.getMethodFlag();
         if (isBlank(methodFlag) || actions == null) {
@@ -503,20 +519,24 @@ public class ConfigValidator {
         }
     }
 
+    /** 默认兜底分支的判据：flag 或 value 有一个为空（两者全空即「else 分支」）。 */
     private static boolean isDefaultBranch(LogicBranchConfig row) {
         return isBlank(row.getLogicBranchFlag()) || isBlank(row.getLogicBranchValue());
     }
 
+    /** 必填校验：空白串等同没填（与 {@link #isBlank} 同口径）。 */
     private static void required(ValidationResult result, String field, String value) {
         if (isBlank(value)) {
             result.error(field + " 不能为空");
         }
     }
 
+    /** 租户号转字符串查库；null 落单租户默认值 {@code -1}（与 JDBC 层同口径）。 */
     private static String asTenantId(Long tenantId) {
         return tenantId == null ? "-1" : String.valueOf(tenantId);
     }
 
+    /** 空白判定：null 与纯空白都算空。 */
     private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }

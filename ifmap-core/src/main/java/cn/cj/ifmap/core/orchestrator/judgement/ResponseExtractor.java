@@ -50,6 +50,7 @@ public final class ResponseExtractor {
         return first(jsonOps, responseJson, TRACK_ID_PATHS, 0);
     }
 
+    /** 按候选路径顺序取，取到第一个非空值即返回；超过 maxLength 截断（只用于日志/消息）。 */
     private static String first(JsonOps jsonOps, String responseJson, List<String> paths, int maxLength) {
         if (jsonOps == null || responseJson == null || responseJson.trim().isEmpty()) {
             return null;

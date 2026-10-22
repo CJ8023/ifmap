@@ -173,6 +173,7 @@ public class StringRules {
                 + value.substring(value.length() - suffix);
     }
 
+    /** 重复拼接字符（脱敏打星号用；count<=0 返回空串）。 */
     private static String repeat(char c, int count) {
         StringBuilder sb = new StringBuilder(Math.max(count, 0));
         for (int i = 0; i < count; i++) {

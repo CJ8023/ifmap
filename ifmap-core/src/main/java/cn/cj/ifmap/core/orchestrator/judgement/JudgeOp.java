@@ -87,10 +87,13 @@ public enum JudgeOp {
         }
     }
 
+    /** 标量相等：{@code ignoreCase} 时忽略大小写，否则逐字符相等。 */
     private static boolean equal(JudgeCondition condition, String actual, String expected) {
+        // 两边都是字符串比较（判定值已在解析阶段 String.valueOf 化）：数值比较不做精度转换，与存量口径一致
         return condition.isIgnoreCase() ? expected.equalsIgnoreCase(actual) : expected.equals(actual);
     }
 
+    /** in/notIn 的公共判定：候选值里任意一个命中即 true（命中语义与 eq 共用 {@link #equal}）。 */
     private static boolean contains(List<String> values, JudgeCondition condition, String actual) {
         for (String candidate : values) {
             if (equal(condition, actual, candidate)) {

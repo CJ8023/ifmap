@@ -59,6 +59,12 @@ public final class RuleRegistry {
 
     private final Map<String, List<RuleMethod>> index = new LinkedHashMap<String, List<RuleMethod>>();
     private final Set<String> overridden = new LinkedHashSet<String>();
+    /**
+     * 解析结果缓存：<b>目前没有读写入口</b>（只有声明，注册时也不会清）。
+     *
+     * <p>属于待评审的性能优化点 —— 要不要启用、key 用「规则名+实参类型」还是别的，得先有压测结论。
+     * 删之前先确认没有外部（反射/宿主代码）按字段名取用过它。</p>
+     */
     private final Map<String, RuleMethod> resolutionCache = new ConcurrentHashMap<String, RuleMethod>();
 
     /** 注册一个承载规则方法的实例。 */
@@ -107,6 +113,10 @@ public final class RuleRegistry {
         return this;
     }
 
+    /**
+     * 注册单个规则方法：先校验名字合法且非 static，再按同名情形决定「覆盖（override=true）」
+     * 还是「追加重载（同名不同签名）」。两处 override 都会直接抛：覆盖者只能有一个。
+     */
     private void register(Object bean, Method method) {
         IfmapRule ann = method.getAnnotation(IfmapRule.class);
         String name = ann.value() == null ? null : ann.value().trim();
@@ -152,12 +162,14 @@ public final class RuleRegistry {
         resolutionCache.clear();
     }
 
+    /** 单元素可变列表：同名重载共享同一个 List，所以这里不能返回不可变集合。 */
     private static List<RuleMethod> newList(RuleMethod rule) {
         List<RuleMethod> list = new ArrayList<RuleMethod>();
         list.add(rule);
         return list;
     }
 
+    /** 规则名是否已注册（模板启动校验用）。 */
     public boolean contains(String name) {
         return name != null && index.containsKey(name);
     }
@@ -202,17 +214,28 @@ public final class RuleRegistry {
         return invoke(name, context, args == null ? new Object[0] : args, 0);
     }
 
+    /**
+     * 调用分三步，<b>任何一步都不猜</b>：
+     * <ol>
+     *   <li>实参能匹配的候选只有 1 个 → 直接调；</li>
+     *   <li>多个 → 按 {@link RuleMethod#score(Object[])}（精确 2 分/强转 1 分）取最高分；</li>
+     *   <li>最高分仍并列 → 抛歧义异常并列出候选签名（宁可报错也不随机选一个）。</li>
+     * </ol>
+     * 一个候选都匹配不上时才尝试「List 逐元素映射」（见 {@link #tryMapOverList}）。
+     */
     private Object invoke(String name, RuleContext context, Object[] args, int depth) {
         List<RuleMethod> candidates = index.get(name);
         if (candidates == null || candidates.isEmpty()) {
             throw notFound(name);
         }
+        // 第一步：先数有多少候选「能接受这组实参」（可变参数/装箱/强转都算能接受）
         List<RuleMethod> matched = new ArrayList<RuleMethod>();
         for (RuleMethod m : candidates) {
             if (m.canInvoke(args)) {
                 matched.add(m);
             }
         }
+        // 一个都匹配不上，才试 List 逐元素映射；仍不行就报「无匹配」并列出已注册签名
         if (matched.isEmpty()) {
             Object mapped = tryMapOverList(name, context, args, depth);
             if (mapped != NOT_MAPPED) {
@@ -221,9 +244,11 @@ public final class RuleRegistry {
             throw new RuleInvocationException("规则 [" + name + "] 无匹配方法：实参 " + describe(args)
                     + "；已注册签名 " + signatures(candidates));
         }
+        // 只有唯一候选：直接调，不必打分
         if (matched.size() == 1) {
             return matched.get(0).invoke(context, args);
         }
+        // 多个候选：按「精确匹配 2 分 / 强转 1 分」打分，只留最高分
         int best = Integer.MIN_VALUE;
         List<RuleMethod> bests = new ArrayList<RuleMethod>();
         for (RuleMethod m : matched) {
@@ -236,6 +261,7 @@ public final class RuleRegistry {
                 bests.add(m);
             }
         }
+        // 最高分仍并列 = 真歧义：抛错而不是随便挑一个（否则同名重载会随注册顺序变行为）
         if (bests.size() == 1) {
             return bests.get(0).invoke(context, args);
         }
@@ -250,6 +276,7 @@ public final class RuleRegistry {
         if (depth >= MAX_MAP_DEPTH) {
             return NOT_MAPPED;
         }
+        // 只支持「恰好一个 List 实参」：出现两个 List 无法确定按谁逐元素，直接放弃映射
         int listIndex = -1;
         for (int i = 0; i < args.length; i++) {
             if (args[i] instanceof List) {
@@ -264,6 +291,7 @@ public final class RuleRegistry {
         }
         List<?> items = (List<?>) args[listIndex];
         List<Object> out = new ArrayList<Object>(items.size());
+        // 逐个元素替换那个 List 实参后重入 invoke；元素本身还能是 List，由 depth 上限兜住
         for (Object item : items) {
             Object[] copy = args.clone();
             copy[listIndex] = item;
@@ -272,6 +300,7 @@ public final class RuleRegistry {
         return out;
     }
 
+    /** 实参摘要（类型=值），只进异常消息，方便看是哪个参数类型不对。 */
     private static String describe(Object[] args) {
         StringBuilder sb = new StringBuilder("(");
         for (int i = 0; i < args.length; i++) {
@@ -284,6 +313,7 @@ public final class RuleRegistry {
         return sb.append(')').toString();
     }
 
+    /** 候选签名清单，只进异常消息（歧义/无匹配时告诉用户有哪些可选）。 */
     private static String signatures(List<RuleMethod> list) {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < list.size(); i++) {
@@ -295,6 +325,7 @@ public final class RuleRegistry {
         return sb.append(']').toString();
     }
 
+    /** 未注册规则：消息里直接点出模板侧最常见的原因（@FUN 名字拼错）。 */
     private static RuleNotFoundException notFound(String name) {
         return new RuleNotFoundException("规则 [" + name + "] 不存在。请确认已注册该规则，"
                 + "或检查模板中的 @FUN(" + name + ",...) 是否拼写错误。");

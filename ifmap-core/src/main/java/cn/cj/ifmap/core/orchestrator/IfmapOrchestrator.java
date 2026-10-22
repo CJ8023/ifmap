@@ -139,9 +139,13 @@ public final class IfmapOrchestrator {
      * 执行一个接口；{@code mockResponse} 非空时<b>不出网</b>，直接用它当响应（管理端 dry-run / 单测）。
      */
     public IfmapResult execute(IfmapRequest request, String interfaceNo, String busiNode, String mockResponse) {
+        // 计时从最前面开始：把配置加载也算进去，端到端耗时才完整（日志与 IfmapResult.elapsedMs 都用它）
         long start = clock.currentTimeMillis();
+        // 租户由 TenantResolver 从请求对象/请求头取，都取不到落默认 -1；后续所有查询都带它
         String tenantId = tenantResolver.resolve(request);
+        // 起点截断在这里完成：interfaceNo 是「流水线上的起点」，不是「只跑这一步」
         List<IfmapConfig> plan = loadPlan(tenantId, interfaceNo, busiNode);
+        // 空计划直接抛：调用方拿到成功+空 data 会误以为「跑完了没输出」，比报错难查得多
         if (plan.isEmpty()) {
             throw new IfmapConfigException("未找到可执行的接口配置：tenantId=" + tenantId
                     + ", interfaceNo=" + interfaceNo + ", busiNode=" + busiNode);
@@ -168,6 +172,7 @@ public final class IfmapOrchestrator {
             // 空计划交给 runPlan 那侧的「未找到可执行的接口配置」统一报错（消息里带 tenantId/busiNode 更全）
             return plan;
         }
+        // 起点 = 下标截断：命中就返回尾段，所以「断点续跑」只需要把上次最后成功的接口号再传进来
         for (int i = 0; i < plan.size(); i++) {
             if (start.equals(plan.get(i).getInterfaceNo())) {
                 return new ArrayList<IfmapConfig>(plan.subList(i, plan.size()));
@@ -188,8 +193,10 @@ public final class IfmapOrchestrator {
         Map<String, Object> pool = initialPool(request);
         boolean success = true;
         String errorMessage = null;
+        // 串行执行：一个 busi_node 就是一条流水线，前一步的产物是后一步的入参；池在循环外创建，逐步被填充
         for (IfmapConfig config : plan) {
             StepOutcome outcome = executeOne(request, tenantId, config, mockResponse, pool);
+            // 下面三个输出字段都是「覆盖」语义：对外只暴露最后一个实际执行步骤的值
             result.executedInterface(config.getInterfaceNo());
             if (outcome.matchedBranch != null) {
                 result.matchedBranch(outcome.matchedBranch);
@@ -197,6 +204,7 @@ public final class IfmapOrchestrator {
             if (outcome.rawResponse != null) {
                 result.rawResponse(outcome.rawResponse);
             }
+            // 失败即记首个失败原因；stopOnFailure=false 时继续跑余下步骤（多留日志、看到完整链路）
             if (!outcome.success) {
                 success = false;
                 errorMessage = outcome.errorMessage;
@@ -235,36 +243,51 @@ public final class IfmapOrchestrator {
         StrategyContext context = StrategyContext.builder()
                 .request(request).config(config).ruleContext(ruleContext)
                 .params(request.getPayload()).build();
+        // 参数三层合成，优先级从低到高：组包策略产物 → 池展平键 → 池本体（pool 是保留键，不是业务字段）
         Map<String, Object> requestParams = new LinkedHashMap<String, Object>();
         requestParams.putAll(fullParams.assemble(config.getPartnerCode(), config.getBusiNode(), context));
         // 池在后 ⇒ 覆盖 payload / 组包策略的同名顶层键（pool 是保留键，不是业务字段）
         requestParams.putAll(flattenPool(pool));
         requestParams.put(POOL_KEY, pool);
         context.putParams(requestParams);
+        // 第一次渲染：请求模板只认 $.xxx 与 $.pool.*，所以先把合成好的参数序列化成源报文
         String requestJson = render(config.getRequestParamTemplate(), jsonOps.toJson(context.getParams()), ruleContext);
         context.setRequestJson(requestJson);
+        // 前序策略返回非空时会按新参数「重新渲染」一次，所以以它返回的报文为准
         requestJson = applyPreStrategy(context, ruleContext, requestJson);
 
+        // mockResponse 非空 = 不出网（管理端 dry-run / 单测），直接把它当对方原样回参
         PartnerOutcome outcome = mockResponse != null ? PartnerOutcome.ofBody(mockResponse)
                 : exchange(context, requestJson);
         String response = outcome.getBody();
         context.setResponseJson(response);
 
+        // 产物 = 响应模板渲染结果，再交后序策略加工（加工只影响产物，不影响判定）
         Map<String, Object> data = applyPostStrategy(context, renderResponse(config, response, ruleContext));
         // 判定读**原始回参**：后序策略只能加工产物，改不动成败
         Judgement judgement = pipeline.judge(config, response, outcome);
+        // 只有判定成功才入池：池的键集合 == 已成功步骤集合 == 断点续跑的进度
         if (judgement.isSuccess()) {
             pool.put(config.getInterfaceNo(), data);
         }
+        // 分支动作只在成功时执行：失败时调动作既没意义，还会掩盖真实失败原因
         String matchedBranch = judgement.isSuccess() ? applyBranch(request, tenantId, config, context, response, judgement) : null;
         String errorMessage = judgement.isSuccess() ? null : failureMessage(judgement);
         long elapsed = clock.currentTimeMillis() - start;
+        // 日志放在最终结论之后：记的是真实耗时与最终判定；writeLog 内部吞异常，落库失败不影响返回值
         writeLog(tenantId, request, config, requestJson, response, judgement, elapsed);
         return new StepOutcome(judgement.isSuccess(), data, response, errorMessage, matchedBranch,
                 judgement.getFailType());
     }
 
+    /**
+     * 前序策略：把本步入参交给策略加工，返回的 Map 合并进参数后<b>重新渲染</b>请求报文。
+     *
+     * <p>返回 null/空 Map 表示「不改」，保持原文；策略没注册时按 {@code failOnMissingStrategy}
+     * 决定抛还是跳过（跳过也保留原文，等价于没配）。</p>
+     */
     private String applyPreStrategy(StrategyContext context, RuleContext ruleContext, String requestJson) {
+        // 先立相位再查策略：策略内部用同一个 context，靠 phase 判断自己处于前序还是后序
         context.setPhase(StrategyContext.Phase.PRE);
         String strategyName = trimToNull(context.getConfig().getPreStrategyName());
         if (strategyName == null) {
@@ -279,10 +302,12 @@ public final class IfmapOrchestrator {
             LOG.warn("ifmap 前序策略未注册，已跳过：pre_strategy_name={}", strategyName);
             return requestJson;
         }
+        // 返回 null/空 Map = 「不改参数」，此时**保持原文不重渲染**（避免无谓地把报文规范化一遍）
         Map<String, Object> extra = strategy.apply(context);
         if (extra == null || extra.isEmpty()) {
             return requestJson;
         }
+        // 有改动就必须重渲染：策略只能改参数，不能直接改报文（报文永远由模板决定）
         context.putParams(extra);
         String rendered = render(context.getConfig().getRequestParamTemplate(),
                 jsonOps.toJson(context.getParams()), ruleContext);
@@ -312,6 +337,7 @@ public final class IfmapOrchestrator {
             LOG.warn("ifmap 后序策略未注册，已跳过：post_strategy_name={}", strategyName);
             return data;
         }
+        // 后序阶段把「当前产物」也塞进 context，策略既能读也能整体替换（必须换成 Map 才生效）
         context.setPhase(StrategyContext.Phase.POST);
         context.setResponseData(data);
         Map<String, Object> extra = strategy.apply(context);
@@ -333,6 +359,7 @@ public final class IfmapOrchestrator {
     /** 初始池：{@code payload.pool} 为 Map 时浅拷一份（不写回、不持有宿主对象）。 */
     private Map<String, Object> initialPool(IfmapRequest request) {
         Map<String, Object> pool = new LinkedHashMap<String, Object>();
+        // 预置池 = payload.pool（断点续跑时宿主把上次的池回放进来）；浅拷一份，不持有宿主对象
         Object preset = request == null ? null : request.getPayload().get(POOL_KEY);
         if (preset instanceof Map) {
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) preset).entrySet()) {
@@ -350,6 +377,7 @@ public final class IfmapOrchestrator {
      */
     private Map<String, Object> flattenPool(Map<String, Object> pool) {
         Map<String, Object> flat = new LinkedHashMap<String, Object>();
+        // 按池的插入顺序摊平 ⇒ 同名键后者胜：预置项在前，本次成功的步骤按计划顺序在后
         for (Object step : pool.values()) {
             if (!(step instanceof Map)) {
                 continue;
@@ -374,19 +402,28 @@ public final class IfmapOrchestrator {
                     context.getConfig().getInterfaceNo());
             return PartnerOutcome.ofBody(null);
         }
+        // 网关实现只管「怎么出网」：配置、请求、报文、参数都已装进这份 call
         PartnerCall call = PartnerCall.of(context.getConfig(), context.getRequest(), requestJson, context.getParams());
         try {
             return gateway.exchangeForOutcome(call);
         } catch (IfmapRemoteException e) {
             LOG.warn("ifmap 出网失败，interfaceNo={}：{}", context.getConfig().getInterfaceNo(), e.getMessage());
+            // 传输失败收敛成 PartnerOutcome.failure（不带 httpStatus），交给判定管线归因并落库
             return PartnerOutcome.failure(e.getMessage());
         }
     }
 
+    /**
+     * 响应模板渲染：模板为空 → 空产物（等于「不提取」）；渲染结果不是 JSON 对象时同样返回空产物。
+     *
+     * <p>失败与否<b>不在这里判</b> —— 判定读原始回参（{@link JudgementPipeline}），
+     * 所以模板写错不会把一笔成功的调用判成失败。</p>
+     */
     private Map<String, Object> renderResponse(IfmapConfig config, String response, RuleContext ruleContext) {
         if (response == null || trimToNull(config.getResponseParamTemplate()) == null) {
             return Collections.emptyMap();
         }
+        // 响应模板的源报文是「对方原始回参」，不是上一步产物
         String rendered = render(config.getResponseParamTemplate(), response, ruleContext);
         Object parsed = parseLenient(rendered);
         if (parsed instanceof Map) {
@@ -414,6 +451,7 @@ public final class IfmapOrchestrator {
             LOG.debug("ifmap 接口 {} 无逻辑分支配置", config.getInterfaceNo());
             return null;
         }
+        // 兜底分支（flag 为空）先存起来、最后才用：它不能抢常规分支的命中
         LogicBranchConfig catchAll = null;
         for (LogicBranchConfig branch : branches) {
             if (branch == null) {
@@ -460,6 +498,7 @@ public final class IfmapOrchestrator {
         if (value == null || judgement.getActualValue() == null) {
             return false;
         }
+        // logic_branch_value 支持分号/逗号枚举且大小写不敏感（对齐存量 ECC 口径）
         for (String candidate : value.split("[;,]")) {
             if (candidate.trim().equalsIgnoreCase(judgement.getActualValue().trim())) {
                 return true;
@@ -472,12 +511,14 @@ public final class IfmapOrchestrator {
     public IfmapResult callback(IfmapRequest request, String interfaceNo, String rawBody) {
         long start = clock.currentTimeMillis();
         String tenantId = tenantResolver.resolve(request);
+        // 回调不走模板/判定：原样把 body 交给宿主 handler，只额外补一条执行日志
         IfmapResult result = callbacks.dispatch(interfaceNo, request, rawBody);
         writeLog(tenantId, request, null, rawBody, null, result.isSuccess(),
                 clock.currentTimeMillis() - start, result.getErrorMessage());
         return result;
     }
 
+    /** 模板为空 → 原样返回 source：把「没配模板」当成「不做变换」，而不是渲染出 "null"。 */
     private String render(String template, String source, RuleContext ruleContext) {
         if (trimToNull(template) == null) {
             return source;
@@ -485,6 +526,7 @@ public final class IfmapOrchestrator {
         return engine.render(template, source, ruleContext);
     }
 
+    /** 宽松解析：不是合法 JSON 就返回 null（调用方按「无产物」处理），只打 DEBUG 不抛。 */
     private Object parseLenient(String text) {
         if (text == null || text.trim().isEmpty()) {
             return null;
@@ -516,6 +558,12 @@ public final class IfmapOrchestrator {
                 judgement.isSuccess() ? null : failureMessage(judgement), judgement);
     }
 
+    /**
+     * 落执行日志的<b>唯一实现</b>（其余全是薄重载）。
+     *
+     * <p>整段包在 try/catch 里：日志是旁路，落库失败只 WARN —— 不能因为日志表不可用
+     * 把一笔已经成功的调用变成异常返回给调用方。</p>
+     */
     private void writeLog(String tenantId, IfmapRequest request, IfmapConfig config, String requestJson,
                           String response, boolean success, long elapsed, String errorMessage, Judgement judgement) {
         if (logSink == null) {
@@ -558,11 +606,13 @@ public final class IfmapOrchestrator {
         return reason + "：" + message;
     }
 
+    /** 入日志前的加工：<b>先脱敏再截断</b>（顺序反了会把敏感值切成半截，绕过脱敏规则）。 */
     private String protect(String text) {
         String masked = logMasker == null ? text : logMasker.mask(text);
         return Logs.truncate(masked, truncateThreshold);
     }
 
+    /** 租户号落库列是 bigint：非数字租户（如 "T001"）与空值统一记默认租户 {@code -1}。 */
     private static Long parseTenantId(String tenantId) {
         if (tenantId == null || tenantId.trim().isEmpty()) {
             return Long.valueOf(-1L);
@@ -574,6 +624,7 @@ public final class IfmapOrchestrator {
         }
     }
 
+    /** 去空白；空串归一成 null —— 配置里的空字符串一律等价于「未配置」。 */
     private static String trimToNull(String value) {
         if (value == null) {
             return null;

@@ -48,6 +48,7 @@ public final class CallbackRegistry {
         register(annotation.value(), handler);
     }
 
+    /** 按接口号注册回调；<b>已存在则直接忽略</b>（保留先注册者，不覆盖也不告警 —— 宿主重复声明很常见）。 */
     public void register(String interfaceNo, IfmapCallbackHandler handler) {
         if (interfaceNo == null || interfaceNo.isEmpty() || handler == null) {
             return;
@@ -57,6 +58,7 @@ public final class CallbackRegistry {
         }
     }
 
+    /** 该接口号是否配了回调（编排器据此决定是否走回调通道）。 */
     public boolean contains(String interfaceNo) {
         return interfaceNo != null && handlers.containsKey(interfaceNo);
     }
@@ -70,10 +72,12 @@ public final class CallbackRegistry {
         return handler.handle(request, rawBody);
     }
 
+    /** 已注册接口号快照。 */
     public Set<String> keys() {
         return Collections.unmodifiableSet(handlers.keySet());
     }
 
+    /** 已注册回调数。 */
     public int size() {
         return handlers.size();
     }

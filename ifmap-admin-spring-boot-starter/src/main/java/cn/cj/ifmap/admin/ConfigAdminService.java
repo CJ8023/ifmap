@@ -62,6 +62,7 @@ public class ConfigAdminService {
     private final ObjectProvider<ConfigRepository> engineRepositoryProvider;
     private final IfmapAdminProperties properties;
 
+    /** 依赖一次注入；其中两个引擎侧依赖包成 {@code ObjectProvider}（宿主可能只装配管理端，没有引擎）。 */
     public ConfigAdminService(JdbcConfigWriter writer, JdbcConfigRepository repository,
                               JdbcConfigHistoryRepository historyRepository,
                               ConfigSnapshotMapper snapshots, ConfigValidator validator,
@@ -120,6 +121,7 @@ public class ConfigAdminService {
 
     /** 保存前校验（不落库）：配置本身 + 该接口的分支集合。 */
     public ValidationResult validate(IfmapConfig config, boolean creating) {
+        // 配置本身 + 该接口的分支集合一起验：分支的问题（兜底重复、顺序冲突）常在保存配置时才发现
         ValidationResult result = validator.validate(config, creating);
         if (config != null && config.getInterfaceNo() != null && !config.getInterfaceNo().trim().isEmpty()) {
             String tenantId = config.getTenantId() == null ? "-1" : String.valueOf(config.getTenantId());
@@ -133,6 +135,7 @@ public class ConfigAdminService {
         if (request == null || request.getInterfaceNo() == null || request.getInterfaceNo().trim().isEmpty()) {
             throw new IfmapConfigException("dry-run 必须提供 interfaceNo");
         }
+        // 注意 requireBlank 名字与语义相反：它断言「不能为空」，缺 busiNode 就没法定位流水线
         requireBlank(request.getBusiNode(), "dry-run 必须提供 busiNode");
         IfmapOrchestrator orchestrator = orchestratorProvider.getIfAvailable();
         if (orchestrator == null) {
@@ -143,6 +146,7 @@ public class ConfigAdminService {
                 .bizId(request.getBizId())
                 .payload(request.getParams())
                 .build();
+        // 默认造一个空 JSON 对象当应答：这样响应模板/判定都能跑，且不需要宿主提供网关
         String mock = request.getMockResponse() == null || request.getMockResponse().trim().isEmpty()
                 ? "{}" : request.getMockResponse();
         return orchestrator.execute(engineRequest, request.getInterfaceNo(), request.getBusiNode(), mock);
@@ -162,6 +166,7 @@ public class ConfigAdminService {
         if (!result.isPassed()) {
             throw new IfmapValidationException(result);
         }
+        // 写完再按主键回查一次：落库默认值（version/del_status/deleted_seq）以库为准，历史快照也用回查结果
         long keyId = writer.insert(config);
         IfmapConfig saved = get(keyId);
         record(saved, IfmapConfigHistory.CREATE, reason, operatorId, requestId, null);
@@ -172,9 +177,11 @@ public class ConfigAdminService {
     }
 
     /**
-     * 修改配置。
+     * 修改配置：{@code expectedVersion} 必填（乐观锁，拒绝并发覆盖），先校验后写。
      *
-     * @return {@code true} 成功；{@code false} 版本不匹配（已被他人修改）
+     * <p>写成功后立刻记历史 + 失效引擎缓存，保证「配置改了引擎马上能看到」。</p>
+     *
+     * @return {@code true} 成功；{@code false} 版本不匹配（已被他人修改，前端提示刷新）
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean update(IfmapConfig config, Integer expectedVersion, String reason,
@@ -218,7 +225,7 @@ public class ConfigAdminService {
     }
 
     /**
-     * 启用 / 停用。
+     * 启用 / 停用：同样走乐观锁；历史里的 changeType 区分 ENABLE/DISABLE，便于审计看清动作方向。
      *
      * @return {@code true} 成功；{@code false} 版本不匹配
      */
@@ -256,6 +263,7 @@ public class ConfigAdminService {
         }
         IfmapConfigHistory target = historyRepository.findByKeyId(historyId).orElseThrow(
                 () -> new IfmapConfigException("历史记录不存在：#" + historyId));
+        // 先确认历史记录属于这条配置：否则可以把 A 的历史快照回滚进 B（跨配置串改）
         if (target.getConfigKeyId() == null || target.getConfigKeyId().longValue() != keyId) {
             throw new IfmapConfigException("历史记录 #" + historyId + " 不属于配置 #" + keyId);
         }
@@ -265,6 +273,7 @@ public class ConfigAdminService {
         if (restore.getTenantId() == null) {
             restore.setTenantId(before.getTenantId());
         }
+        // 历史快照是当时的合法状态，但唯一键可能已被别的配置占用 ⇒ 回滚前必须重跑一遍校验
         ValidationResult check = validate(restore, false);
         if (!check.isPassed()) {
             throw new IfmapValidationException(check);
@@ -275,6 +284,7 @@ public class ConfigAdminService {
         IfmapConfig after = get(keyId);
         String rollbackReason = "回滚到历史 #" + historyId
                 + (reason == null || reason.trim().isEmpty() ? "" : "：" + reason.trim());
+        // 回滚本身也记一条 UPDATE 历史（带 diff），保证「任何写操作都留痕」
         record(after, IfmapConfigHistory.UPDATE, rollbackReason, operatorId, requestId,
                 snapshots.diff(before, after));
         evict(after);
@@ -342,6 +352,7 @@ public class ConfigAdminService {
 
     // ---------------------------------------------------------------- 内部
 
+    /** 写快照历史：每次新建/更新/删除/改状态都留一条，回滚与审计都靠它。 */
     private void record(IfmapConfig config, String changeType, String reason, String operatorId,
                         String requestId, String diff) {
         IfmapConfigHistory row = new IfmapConfigHistory();
@@ -357,6 +368,7 @@ public class ConfigAdminService {
         historyRepository.insert(row);
     }
 
+    /** 改完配置立刻失效缓存（{@code tenantId+interfaceNo} 维度的逻辑分支缓存）。 */
     private void evict(IfmapConfig config) {
         evictByInterface(config.getTenantId(), config.getInterfaceNo());
     }
@@ -371,6 +383,7 @@ public class ConfigAdminService {
                 tenantId == null ? "-1" : String.valueOf(tenantId), interfaceNo);
     }
 
+    /** 要求为空，否则抛错。⚠️ 名字与实际语义相反（是「断言为空」不是「断言非空」），改名前先确认调用点。 */
     private static void requireBlank(String value, String message) {
         if (value == null || value.trim().isEmpty()) {
             throw new IfmapConfigException(message);

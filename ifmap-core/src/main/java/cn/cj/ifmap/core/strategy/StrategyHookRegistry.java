@@ -77,6 +77,7 @@ public final class StrategyHookRegistry {
         }
     }
 
+    /** 写入一个名字；同层重名且不是同一个实例时记冲突（保留先注册者，后续 WARN 不覆盖）。 */
     private void put(Map<String, IfmapStrategyHook> target, String key, IfmapStrategyHook strategy, String owner) {
         IfmapStrategyHook exist = target.get(key);
         if (exist == null) {
@@ -88,6 +89,7 @@ public final class StrategyHookRegistry {
         }
     }
 
+    /** 记一次注册歧义：同一 key 的占用者去重后保存，供 {@code /strategies} 与管理端排查。 */
     private void conflict(String key, String owner) {
         List<String> owners = conflicts.get(key);
         if (owners == null) {
@@ -105,10 +107,12 @@ public final class StrategyHookRegistry {
         if (name == null || name.isEmpty()) {
             return null;
         }
+        // 两段查找：先权威 key（bean 名，稳定），再宽松别名（类简单名/首字母小写，兼容历史配置）
         IfmapStrategyHook exact = authoritative.get(name);
         if (exact != null) {
             return exact;
         }
+        // 命中别名不算错，但要 WARN + 记账：配置写宽松名以后重构 bean 名就会静默失效
         IfmapStrategyHook loose = aliases.get(name);
         if (loose != null) {
             aliasHits.add(name);
@@ -118,6 +122,7 @@ public final class StrategyHookRegistry {
         return null;
     }
 
+    /** 该名字是否可解析（权威 key 或别名都算）。 */
     public boolean contains(String name) {
         return name != null && (authoritative.containsKey(name) || aliases.containsKey(name));
     }
@@ -130,6 +135,7 @@ public final class StrategyHookRegistry {
         return Collections.unmodifiableSet(all);
     }
 
+    /** <b>只数权威 key（bean 名）</b>，不含别名 —— 别名是同一个策略的另一种写法，算进去会虚高。 */
     public int size() {
         return authoritative.size();
     }

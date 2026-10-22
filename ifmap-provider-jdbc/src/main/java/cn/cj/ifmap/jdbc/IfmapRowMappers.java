@@ -170,6 +170,7 @@ public final class IfmapRowMappers {
         };
     }
 
+    /** {@link Timestamp} → {@link LocalDateTime}（空值透传，避免 NPE）。 */
     private static LocalDateTime toLocalDateTime(Timestamp ts) {
         return ts == null ? null : ts.toLocalDateTime();
     }

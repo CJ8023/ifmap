@@ -166,6 +166,9 @@ public class IfmapSchemaInitializer implements InitializingBean {
      * 全新建库（001 建完表直接 ALTER）、也可能是手工跑过 Liquibase 的存量库（列已齐）。
      * 用列探针判断两种情况都得到正确结果，而且不需要额外的版本表（starter 不引入 Liquibase 依赖）。</p>
      *
+     * <p>解析入口是 {@link #ALTER_COLUMN_PATTERN}：只认「一张表 + 一个列 + 一条加列语句」这种形态，
+     * 复合 ALTER 语句会被忽略（列探针拿不到列名就没法判断该不该执行）。</p>
+     *
      * @return 本次实际执行的动作数（0 = 已是目标结构）
      */
     public int applyAlterScripts() {
@@ -177,6 +180,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
                     throw new IfmapConfigException("升级脚本 " + file + " 出现未识别的语句（只支持 "
                             + "ALTER TABLE ... ADD/DROP COLUMN）：" + statement.substring(0, Math.min(120, statement.length())));
                 }
+                // 列探针决定这条 ALTER 要不要执行：ADD 时列已存在就跳过，DROP 时列不存在也跳过（= 幂等）
                 String table = matcher.group(1);
                 boolean add = "ADD".equalsIgnoreCase(matcher.group(2));
                 String column = matcher.group(3);
@@ -184,6 +188,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
                 if (add == exists) {
                     continue;
                 }
+                // 非 MySQL 系要先把 json 列换成 text，否则 H2 建不出来；末尾分号必须去掉，否则 Statement.execute 报错
                 jdbc.execute(dropTrailingSemicolon(mysqlFamily ? statement : downgradeJsonColumns(statement)));
                 applied++;
                 log.info("ifmap 升级表结构：[{}] {} 列 {}", table, add ? "新增" : "删除", column);
@@ -261,10 +266,12 @@ public class IfmapSchemaInitializer implements InitializingBean {
     /** 按分号切语句（跳过单引号内的分号：列注释里就有 {@code ;}）。 */
     static java.util.List<String> splitStatements(String sql) {
         java.util.List<String> statements = new java.util.ArrayList<String>();
+        // 引号状态机：只有引号外的分号才切语句
         StringBuilder current = new StringBuilder();
         boolean inQuote = false;
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
+            // 单引号内的分号不算分隔符（列注释里就有 "a;b"）；'' 是 SQL 的转义写法，成对跳过
             if (c == '\'') {
                 boolean escaped = i + 1 < sql.length() && sql.charAt(i + 1) == '\'';
                 if (escaped) {
@@ -284,6 +291,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
         return statements;
     }
 
+    /** 收一条语句（去空白、去尾部 {@code ;}），空语句直接丢。 */
     private static void addIfNotBlank(java.util.List<String> statements, StringBuilder current) {
         String statement = current.toString().trim();
         if (!statement.isEmpty()) {
@@ -291,6 +299,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
         }
     }
 
+    /** 去掉结尾分号：JDBC 的 {@code Statement.execute} 不接受空语句，多一个 {@code ;} 就会报错。 */
     private static String dropTrailingSemicolon(String statement) {
         String trimmed = statement.trim();
         return trimmed.endsWith(";") ? trimmed.substring(0, trimmed.length() - 1).trim() : trimmed;
@@ -371,7 +380,10 @@ public class IfmapSchemaInitializer implements InitializingBean {
         return downgradeJsonColumns(adapted);
     }
 
-    /** 非 MySQL：{@code json} 列 → {@code text}（H2 的 JSON 类型存不了 JDBC 字符串，见 {@link #JSON_COLUMN_PATTERN}）。 */
+    /**
+     * 把 DDL 里的 {@code json} 列降级成 {@code text}：H2 等库没有 JSON 类型（{@code JSON} 列存不了 JDBC 字符串），
+     * 只有 MySQL 系才保留原样。识别规则见 {@link #JSON_COLUMN_PATTERN}。
+     */
     private static String downgradeJsonColumns(String ddl) {
         Matcher matcher = JSON_COLUMN_PATTERN.matcher(ddl);
         StringBuilder sb = new StringBuilder(ddl.length());
@@ -387,6 +399,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
         return sb.toString();
     }
 
+    /** 探测数据库产品名（拿不到连接时按非 MySQL 处理，走更保守的 H2 兼容分支）。 */
     private static boolean detectMysqlFamily(DataSource dataSource) {
         try (Connection connection = dataSource.getConnection()) {
             String product = connection.getMetaData().getDatabaseProductName();

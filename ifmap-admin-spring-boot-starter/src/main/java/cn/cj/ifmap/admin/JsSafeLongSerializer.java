@@ -44,6 +44,7 @@ public final class JsSafeLongSerializer extends JsonSerializer<Long> {
 
     @Override
     public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers) throws IOException {
+        // 超阈值写字符串、其余写数字：整型契约只在「JS 存不下」这一段改变
         if (value > MAX_SAFE || value < -MAX_SAFE) {
             generator.writeString(value.toString());
         } else {

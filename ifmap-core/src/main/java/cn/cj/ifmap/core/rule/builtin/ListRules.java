@@ -62,6 +62,7 @@ public class ListRules {
         return doOp(values, op, arg);
     }
 
+    /** 列表操作实现：DISTINCT / SORT / SORT_DESC / REVERSE / LIMIT / MAX / MIN；op 为空按 DISTINCT。 */
     private Object doOp(List<?> values, String op, String arg) {
         if (values == null) {
             return null;
@@ -111,6 +112,7 @@ public class ListRules {
                 + "可用 DISTINCT / SORT / SORT_DESC / REVERSE / LIMIT / MAX / MIN");
     }
 
+    /** 解析整数参数，失败时用 {@code what} 指明是哪个参数（比裸 NumberFormatException 好定位）。 */
     private static int parseInt(String arg, String what) {
         if (Text.isBlank(arg)) {
             throw new RuleArgumentException(what + " 不能为空");

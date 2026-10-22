@@ -49,6 +49,7 @@ public final class LogicBranchStrategyRegistry {
         register(annotation.value(), strategy);
     }
 
+    /** 注册到某个逻辑分支 flag 下；<b>同名是追加而不是替换</b>（一个 flag 允许多个策略，全部会被依次调用）。 */
     public void register(String key, LogicBranchStrategy strategy) {
         if (key == null || key.isEmpty() || strategy == null) {
             return;
@@ -94,16 +95,19 @@ public final class LogicBranchStrategyRegistry {
         return false;
     }
 
+    /** 取该 flag 下的策略列表（副本，未注册返回空列表而不是 null，调用方不必判空）。 */
     public List<LogicBranchStrategy> find(String key) {
         List<LogicBranchStrategy> list = key == null ? null : strategies.get(key);
         return list == null ? Collections.<LogicBranchStrategy>emptyList()
                 : Collections.unmodifiableList(new ArrayList<LogicBranchStrategy>(list));
     }
 
+    /** 已注册 flag 快照。 */
     public Set<String> keys() {
         return Collections.unmodifiableSet(strategies.keySet());
     }
 
+    /** <b>策略实例总数</b>（不是 flag 数）—— 一个 flag 挂 3 个策略就算 3。 */
     public int size() {
         int total = 0;
         for (List<LogicBranchStrategy> list : strategies.values()) {

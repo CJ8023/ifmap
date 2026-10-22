@@ -44,7 +44,9 @@ public final class FullParamStrategyRegistry {
     private final Map<String, FullParamStrategy> strategies = new LinkedHashMap<String, FullParamStrategy>();
     private final Map<String, List<String>> conflicts = new LinkedHashMap<String, List<String>>();
 
-    /** 按类上的 {@link FullParam} 注解注册。 */
+    /**
+     * 按类上的 {@link FullParam} 注解注册；没注解的按通配（partnerCode={@code *}、busiNode={@code *}）兜底。
+     */
     public void register(FullParamStrategy strategy) {
         if (strategy == null) {
             return;
@@ -55,6 +57,7 @@ public final class FullParamStrategyRegistry {
         register(partnerCode, busiNode, strategy);
     }
 
+    /** 显式注册：同 key 已存在时<b>保留先注册者</b>并记冲突（不覆盖，避免启动顺序影响行为）。 */
     public void register(String partnerCode, String busiNode, FullParamStrategy strategy) {
         if (strategy == null) {
             return;
@@ -80,6 +83,7 @@ public final class FullParamStrategyRegistry {
 
     /** 按优先级查找；找不到返回 null（引擎按"无组包"继续，不报错）。 */
     public FullParamStrategy lookup(String partnerCode, String busiNode) {
+        // 四级回退，从最精确到最宽松：精确 → 只宽 busiNode → 只宽 partnerCode → 全通配
         String[] order = new String[] {
                 key(partnerCode, busiNode),
                 key(partnerCode, WILDCARD),
@@ -105,14 +109,17 @@ public final class FullParamStrategyRegistry {
         return result == null ? Collections.<String, Object>emptyMap() : result;
     }
 
+    /** 该 (partnerCode, busiNode) 是否有策略可命中（含通配回退）。 */
     public boolean contains(String partnerCode, String busiNode) {
         return lookup(partnerCode, busiNode) != null;
     }
 
+    /** 已注册 key 快照（{@code partnerCode|busiNode}）。 */
     public Set<String> keys() {
         return Collections.unmodifiableSet(strategies.keySet());
     }
 
+    /** 已注册 key 数（同一策略注册到多个 key 会算多次）。 */
     public int size() {
         return strategies.size();
     }
@@ -126,6 +133,7 @@ public final class FullParamStrategyRegistry {
         return normalize(partnerCode) + '|' + normalize(busiNode);
     }
 
+    /** 归一化：去空白 + 空串转通配，保证 {@code *} 与空值命中同一槽位。 */
     private static String normalize(String value) {
         if (value == null || value.trim().isEmpty()) {
             return WILDCARD;

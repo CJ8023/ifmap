@@ -134,16 +134,19 @@ public final class Judgement {
         return reason;
     }
 
+    /** 复制一份只改 httpStatus（Judgement 不可变，便于在管线各段间安全传阅）。 */
     public Judgement withHttpStatus(Integer newHttpStatus) {
         return new Judgement(success, stage, failType, actualValue, expectedValue, errorCode, newHttpStatus,
                 trackId, message, reason);
     }
 
+    /** 复制一份只改 trackId（③ 段抽到对方流水号后补进来）。 */
     public Judgement withTrackId(String newTrackId) {
         return new Judgement(success, stage, failType, actualValue, expectedValue, errorCode, httpStatus,
                 newTrackId, message, reason);
     }
 
+    /** 复制一份只改 errorCode（判定器给出的业务错误码，如 VALUE_MISMATCH 时的实际值）。 */
     public Judgement withErrorCode(String newErrorCode) {
         return new Judgement(success, stage, failType, actualValue, expectedValue, newErrorCode, httpStatus,
                 trackId, message, reason);

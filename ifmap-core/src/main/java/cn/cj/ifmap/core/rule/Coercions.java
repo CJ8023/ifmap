@@ -77,7 +77,7 @@ final class Coercions {
             return true;
         }
         if (t == String.class) {
-            // 只接受标量 -> String，避免把 List/Map 悄悄串化
+            // 只接受标量 -> String，避免把 List/Map 悄悄串化（要拼接请用 str_concat/list_join）
             return src instanceof CharSequence || src instanceof Number
                     || src instanceof Boolean || src instanceof Character;
         }
@@ -127,7 +127,7 @@ final class Coercions {
             return t == Object.class && src == null ? null : src;
         }
         if (t == String.class) {
-            // 与 TemplateEngine 同一口径：小数字面量不出科学计数法（否则 1.0E10 会进报文）
+            // 与 TemplateEngine 同一口径：小数不出科学计数法（否则 1.0E10 会进报文被对方拒收）
             return Values.stringify(src);
         }
         if (t == Integer.class) {

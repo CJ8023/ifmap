@@ -40,6 +40,7 @@ public final class PartnerCall {
         this.params = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(builder.params));
     }
 
+    /** 便捷工厂：一次装配配置/请求/报文/参数四个入参（网关实现方读它）。 */
     public static PartnerCall of(IfmapConfig config, IfmapRequest request, String requestJson, Map<String, Object> params) {
         return builder().config(config).request(request).requestJson(requestJson).params(params).build();
     }

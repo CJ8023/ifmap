@@ -108,12 +108,14 @@ public final class IfmapEngine {
      * 只会静默求和成 0，{@code @FUN(} 未闭合则会把整串原样写进报文 —— 错的东西不该能存进去。</p>
      */
     public void validateTemplate(String templateId, String templateJson) {
+        // 规则缺失与表达式语法错是两类问题，分两路收集后一次性报全（改一处不用重跑一次启动）
         Map<String, Set<String>> missing = Collections.emptyMap();
         try {
             registry.assertRulesExist(Collections.singletonMap(templateId, templateJson));
         } catch (StartupValidationException e) {
             missing = e.getMissingRules();
         }
+        // 表达式语法错不受 strict-types 控制：运行期它只会静默算成 0 或把整串原样写进报文
         List<String> problems = TemplateScanner.expressionProblems(templateJson);
         if (missing.isEmpty() && problems.isEmpty()) {
             return;
@@ -132,6 +134,7 @@ public final class IfmapEngine {
         List<String> problems = new ArrayList<String>();
         if (templates != null) {
             for (Map.Entry<String, String> entry : templates.entrySet()) {
+                // 问题前挂上模板标识，否则批量校验报错时不知道是哪一份模板
                 for (String problem : TemplateScanner.expressionProblems(entry.getValue())) {
                     problems.add(entry.getKey() + "：" + problem);
                 }
@@ -163,6 +166,7 @@ public final class IfmapEngine {
 
     /** 生成规则清单（Markdown 表格），可直接贴进文档。 */
     public String describeRules() {
+        // 排序只为输出稳定（规则名 → 签名），便于直接 diff 生成的文档
         List<RuleDescriptor> descriptors = new ArrayList<RuleDescriptor>(registry.getDescriptors());
         Collections.sort(descriptors, new Comparator<RuleDescriptor>() {
             @Override
@@ -183,6 +187,7 @@ public final class IfmapEngine {
         return sb.toString();
     }
 
+    /** Markdown 表格转义：只处理竖线（否则规则清单贴进文档会错列）。 */
     private static String escape(String text) {
         return text == null ? "" : text.replace("|", "\\|");
     }

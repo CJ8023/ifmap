@@ -47,6 +47,10 @@ public class CaffeineConfigCache implements ConfigCache {
         this.cache = builder.build();
     }
 
+    /**
+     * 命中直接返回；未命中则 loader → put。两步<b>不是原子的</b>（没用 {@code cache.get(key, fn)}），
+     * 并发 miss 会各查一次库、后写者胜 —— 这里刻意选简单实现：查的是本地表，重复一次代价可接受。
+     */
     @Override
     @SuppressWarnings("unchecked")
     public <T> T get(String key, Function<String, T> loader) {
@@ -61,6 +65,7 @@ public class CaffeineConfigCache implements ConfigCache {
         return loaded;
     }
 
+    /** 失效单个 key（null 直接忽略）。 */
     @Override
     public void invalidate(String key) {
         if (key != null) {
@@ -68,11 +73,13 @@ public class CaffeineConfigCache implements ConfigCache {
         }
     }
 
+    /** 全量清空（管理端批量改配置后调用）。 */
     @Override
     public void invalidateAll() {
         cache.invalidateAll();
     }
 
+    /** 命中率等统计快照；本实现的 cache 是<b>恒定 {@code recordStats()}</b> 的，所以永远有值。 */
     @Override
     public CacheStats stats() {
         com.github.benmanes.caffeine.cache.stats.CacheStats s = cache.stats();

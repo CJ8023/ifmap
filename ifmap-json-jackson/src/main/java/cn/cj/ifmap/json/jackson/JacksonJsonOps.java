@@ -103,6 +103,7 @@ public final class JacksonJsonOps implements JsonOps {
         return "jackson";
     }
 
+    /** 返回 <b>JDK 原生结构</b>（Map/List/String/Number/Boolean/null），不把 Jackson 的 JsonNode 泄漏出去。 */
     @Override
     public Object parse(String json) {
         if (json == null || json.trim().length() == 0) {
@@ -127,6 +128,7 @@ public final class JacksonJsonOps implements JsonOps {
         }
     }
 
+    /** null 报文按 {@code "{}"} 处理：让下游统一走「取不到 → null」，不必到处判空串。 */
     @Override
     public JsonReadContext readContext(String json) {
         return new JacksonReadContext(json == null ? "{}" : json, strictConfiguration, leafToNullConfiguration);

@@ -48,15 +48,21 @@ public final class RuleSpecJudge implements ResultJudge {
         this.jsonOps = jsonOps;
     }
 
+    /** 判定器名：配置里 {@code judge_name} 写 {@code ruleSpec} 即选中本实现。 */
     @Override
     public String name() {
         return NAME;
     }
 
+    /**
+     * 按 {@code result_judge} 规格求值。三类失败都在这里消化成 {@link Judgement}（不抛给调用方）：
+     * 规格非法 → SPEC_INVALID、响应不是 JSON → NOT_JSON、条件未命中 → FIELD_MISSING / VALUE_MISMATCH。
+     */
     @Override
     public Judgement judge(ResultJudgeContext context) {
         IfmapConfig config = context.getConfig();
         String spec = config.getResultJudge();
+        // 先用 validate 把规格整体校验一遍（null 路径、未知运算符等），parse 阶段就不再防御
         List<String> errors = ResultJudgeSpec.validate(spec, jsonOps);
         if (!errors.isEmpty()) {
             return Judgement.failure(JudgeFailType.SPEC_INVALID,
@@ -67,6 +73,7 @@ public final class RuleSpecJudge implements ResultJudge {
             return Judgement.success(null, ALWAYS_SUMMARY,
                     "always：该接口不做结果判定");
         }
+        // 空响应直接判 NOT_JSON：既不是"命中"，也不是"取不到字段"，归因要分开
         String response = context.getResponseJson();
         if (response == null || response.trim().isEmpty()) {
             return Judgement.failure(JudgeFailType.NOT_JSON,
@@ -75,6 +82,7 @@ public final class RuleSpecJudge implements ResultJudge {
         ResultJudgeSpec.Evaluation evaluation;
         try {
             evaluation = parsed.evaluate(jsonOps.readContext(response));
+        // 解析异常（非 JSON、路径语法不支持）也算 NOT_JSON：判定过程本身不该把异常抛给编排器
         } catch (RuntimeException e) {
             return Judgement.failure(JudgeFailType.NOT_JSON,
                     Judgement.Stage.BUSINESS, "响应解析失败：" + e.getMessage());
@@ -83,6 +91,7 @@ public final class RuleSpecJudge implements ResultJudge {
             return Judgement.success(evaluation.getActual(), parsed.describe(),
                     "命中判定条件");
         }
+        // 未命中分两种：路径根本不存在（FIELD_MISSING，多配错/对方改字段）vs 取到值但不符（VALUE_MISMATCH）
         if (evaluation.getMissedPath() != null) {
             return Judgement.failure(JudgeFailType.FIELD_MISSING,
                     Judgement.Stage.BUSINESS, evaluation.getActual(),

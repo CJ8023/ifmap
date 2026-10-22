@@ -45,6 +45,7 @@ public final class RuleContext {
         this.attributes = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(builder.attributes));
     }
 
+    /** 共享的空上下文（不可变）：规则拿不到上下文时用它兜底，避免调用方到处判空。 */
     public static RuleContext empty() {
         return EMPTY;
     }

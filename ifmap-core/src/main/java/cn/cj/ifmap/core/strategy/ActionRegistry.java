@@ -56,6 +56,7 @@ public final class ActionRegistry {
         register(annotation.value(), handler);
     }
 
+    /** 按 flag 注册动作；同 key 已存在时<b>保留先注册者</b>并记冲突（动作有副作用，不能靠注册顺序随机选）。 */
     public void register(String key, IfmapActionHandler handler) {
         if (key == null || key.isEmpty() || handler == null) {
             return;
@@ -78,6 +79,7 @@ public final class ActionRegistry {
         }
     }
 
+    /** 该动作 flag 是否已注册。 */
     public boolean contains(String key) {
         return key != null && actions.containsKey(key);
     }
@@ -88,6 +90,7 @@ public final class ActionRegistry {
      * @throws IfmapStrategyException key 为空或未注册且 {@code failOnMissingAction = true}
      */
     public void execute(String key, StrategyContext context) {
+        // 空 key 一律抛，不受 failOnMissingAction 影响：那是「配置写漏了」，不是「环境里没注册」
         if (key == null || key.isEmpty()) {
             throw new IfmapStrategyException("逻辑分支缺少 method_flag（动作 key），无法执行");
         }
@@ -102,10 +105,12 @@ public final class ActionRegistry {
         handler.execute(context);
     }
 
+    /** 已注册动作 flag 快照（管理端下拉框与静态校验都用它）。 */
     public Set<String> keys() {
         return Collections.unmodifiableSet(actions.keySet());
     }
 
+    /** 已注册动作数。 */
     public int size() {
         return actions.size();
     }

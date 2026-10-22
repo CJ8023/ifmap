@@ -49,6 +49,7 @@ public final class Annotations {
         return null;
     }
 
+    /** 类上没有注解时到接口上找（策略实现常把 {@code @FullParam} 之类标在接口上）。 */
     private static <A extends Annotation> A findOnInterfaces(Class<?> type, Class<A> annotationType) {
         Class<?>[] interfaces = type.getInterfaces();
         for (Class<?> itf : interfaces) {

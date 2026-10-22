@@ -53,6 +53,7 @@ public final class InterfaceOrdering {
             if (config == null) {
                 continue;
             }
+            // status/del_status 为 null 都按「启用/未删除」处理：老配置没这两列时不能因此被过滤掉
             Integer status = config.getStatus();
             if (status != null && status.intValue() != 1) {
                 continue;
@@ -70,6 +71,7 @@ public final class InterfaceOrdering {
     public static List<IfmapConfig> sort(List<IfmapConfig> configs) {
         List<IfmapConfig> result = new ArrayList<IfmapConfig>(configs == null
                 ? Collections.<IfmapConfig>emptyList() : configs);
+        // key_id 兜底保证同一 order 下顺序稳定（否则同一批配置两次加载可能换序，断点续跑就对不上）
         Collections.sort(result, new Comparator<IfmapConfig>() {
             @Override
             public int compare(IfmapConfig a, IfmapConfig b) {
@@ -85,6 +87,7 @@ public final class InterfaceOrdering {
         return result;
     }
 
+    /** {@code interface_order} 比较：<b>null 排最后</b>（未配置顺序的接口不该插到最前面执行）。 */
     private static int compareOrder(Integer a, Integer b) {
         int av = a == null ? Integer.MAX_VALUE : a.intValue();
         int bv = b == null ? Integer.MAX_VALUE : b.intValue();

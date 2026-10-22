@@ -57,6 +57,7 @@ public final class ResultJudgeRegistry {
         return this;
     }
 
+    /** 配置没写 {@code judge_name} 时使用的判定器名（默认 {@code ruleSpec}）。 */
     public String defaultName() {
         return defaultName;
     }

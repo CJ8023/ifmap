@@ -651,7 +651,6 @@ public final class TestDatabases {
      * 会话时区对齐后，服务端默认值与 JVM 墙钟一致，测试断言才能写"接近当前时间"。
      * 顺带也避开了 MySQL 5.7 服务器时区缩写 {@code CST} 的歧义报错（服务器上 {@code system_time_zone} 可能是 CST）。</p>
      */
-    /** 真库连接 URL（缺省参数按需补齐）。 */
     public static String mysqlUrl() {
         String url = jdbcUrl();
         Map<String, String> defaults = new LinkedHashMap<String, String>();

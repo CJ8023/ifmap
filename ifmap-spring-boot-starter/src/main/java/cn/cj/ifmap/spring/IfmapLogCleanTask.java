@@ -44,6 +44,7 @@ public class IfmapLogCleanTask {
     private final int maxBatches;
     private final long batchSleepMillis;
 
+    /** 保留天数/批大小/批间间隔/最大批数全部来自 {@code ifmap.log.*}，调度器只管什么时候调 {@link #cleanNow()}。 */
     public IfmapLogCleanTask(JdbcExecutionLogCleaner cleaner, int retentionDays, int batchSize,
                              int maxBatches, long batchSleepMillis) {
         if (cleaner == null) {

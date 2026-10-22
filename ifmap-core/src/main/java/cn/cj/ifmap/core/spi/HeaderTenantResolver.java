@@ -49,6 +49,7 @@ public class HeaderTenantResolver implements TenantResolver {
                 ? DEFAULT_TENANT_ID : defaultTenantId;
     }
 
+    /** 取值顺序：请求对象自带 tenantId → 指定请求头 → 默认租户（{@code -1}）。 */
     @Override
     public String resolve(IfmapRequest request) {
         if (request != null) {
@@ -72,6 +73,7 @@ public class HeaderTenantResolver implements TenantResolver {
         return defaultTenantId;
     }
 
+    /** 去空白；空串归一成 null，这样「头里传了空串」会继续往下一级回退。 */
     private static String trimToNull(String value) {
         if (value == null) {
             return null;

@@ -55,6 +55,7 @@ public final class FastjsonJsonOps implements JsonOps {
         return NAME;
     }
 
+    /** 经 {@link FastjsonValues#toJdk} 转成 JDK 原生结构，fastjson 的类型不外泄（与 Jackson 实现对齐）。 */
     @Override
     public Object parse(String json) {
         if (FastjsonValues.isBlank(json)) {
@@ -86,6 +87,7 @@ public final class FastjsonJsonOps implements JsonOps {
         }
     }
 
+    /** 读上下文（{@link FastjsonReadContext}）：多值路径与缺失叶子补齐都在它里面处理。 */
     @Override
     public JsonReadContext readContext(String json) {
         return new FastjsonReadContext(json);

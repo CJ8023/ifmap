@@ -69,6 +69,7 @@ public final class JudgementPipeline {
                 return Judgement.failure(JudgeFailType.TRANSPORT, Judgement.Stage.TRANSPORT, outcome.getMessage());
             }
             httpStatus = outcome.getStatusCode();
+            // HTTP 层失败优先于业务判定：5xx/4xx 时对方回参通常不是业务报文，再交给判定器只会得到误导性的结论
             if (httpStatus != null) {
                 JudgeFailType httpFail = JudgeFailType.forHttpStatus(httpStatus.intValue());
                 if (httpFail != null) {
@@ -79,9 +80,11 @@ public final class JudgementPipeline {
                                     ResponseExtractor.trackId(jsonOps, outcome.getBody()));
                 }
             }
+            // 判定统一读 outcome.body（宿主上报的原文），忽略入参里的 responseJson：两处若有出入以宿主上报为准
             responseJson = outcome.getBody();
         }
 
+        // 判定器按 judge_name 查注册表；名字为空/未注册都算配置错，报 SPEC_INVALID 而不是猜默认行为
         ResultJudge resultJudge = judges.lookup(trimToNull(config.getJudgeName()));
         if (resultJudge == null) {
             return Judgement.failure(JudgeFailType.SPEC_INVALID, Judgement.Stage.BUSINESS,
@@ -95,6 +98,7 @@ public final class JudgementPipeline {
                 .withHttpStatus(httpStatus);
     }
 
+    /** 去空白；空串归一成 null（{@code judge_name} 写成空串等于没配）。 */
     private static String trimToNull(String value) {
         if (value == null) {
             return null;

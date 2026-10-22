@@ -68,6 +68,7 @@ public class JdbcConfigRepository implements ConfigRepository {
         this.idGenerator = idGenerator == null ? SnowflakeIdGenerator.shared() : idGenerator;
     }
 
+    /** 引擎主路径的查询：只取<b>启用且未删除</b>的行，按 {@code interface_order, key_id} 升序。 */
     @Override
     public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
         String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
@@ -77,6 +78,7 @@ public class JdbcConfigRepository implements ConfigRepository {
         return jdbc.query(sql, IfmapRowMappers.config(), tenant(tenantId), interfaceNo, busiNode);
     }
 
+    /** 点查单条：同样只取启用行；万一有多条（历史脏数据）按 {@code key_id} 取第一条，不抛。 */
     @Override
     public Optional<IfmapConfig> findConfig(String tenantId, String interfaceNo, String busiNode, int order) {
         String sql = "SELECT " + IfmapRowMappers.CONFIG_COLUMNS + " FROM `" + tables.configTable() + "`"
@@ -87,6 +89,7 @@ public class JdbcConfigRepository implements ConfigRepository {
         return list.isEmpty() ? Optional.<IfmapConfig>empty() : Optional.of(list.get(0));
     }
 
+    /** 逻辑分支：未删除的全量返回（该表无启用状态列），按 {@code logic_branch_order, key_id} 升序。 */
     @Override
     public List<LogicBranchConfig> queryLogicBranches(String tenantId, String interfaceNo) {
         String sql = "SELECT " + IfmapRowMappers.LOGIC_BRANCH_COLUMNS + " FROM `" + tables.logicBranchTable() + "`"
@@ -95,11 +98,16 @@ public class JdbcConfigRepository implements ConfigRepository {
         return jdbc.query(sql, IfmapRowMappers.logicBranch(), tenant(tenantId), interfaceNo);
     }
 
+    /**
+     * 写执行日志：主键缺省由 {@link IdGenerator}（雪花）补；{@code fail_type}/{@code error_code}/
+     * {@code track_id} 三列是 {@code NOT NULL DEFAULT ''}，所以显式列 + 空串绑定，不能传 null。
+     */
     @Override
     public void saveExecutionLog(ExecutionLog log) {
         if (log == null) {
             throw new IfmapConfigException("执行日志不能为空");
         }
+        // 主键优先用调用方给的（重放/回填场景），没有才让 IdGenerator 生成；两者都没有就直接报错，不静默写入
         Long id = log.getKeyId();
         if (id == null) {
             id = idGenerator.nextId();
@@ -108,6 +116,7 @@ public class JdbcConfigRepository implements ConfigRepository {
             throw new IfmapConfigException("执行日志缺少主键：请提供 keyId，或为 JdbcConfigRepository 注入会生成 ID 的 IdGenerator");
         }
         log.setKeyId(id);
+        // 显式列 + 占位符：del_status 硬编码 0，所以 VALUES 里少一个 ?，合计 16 个占位符
         String sql = "INSERT INTO `" + tables.executionLogTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`biz_id`,`request_param`,`response_param`,"
                 + "`execution_time`,`execution_result`,`error_msg`,`http_status`,`fail_type`,`error_code`,"
@@ -133,6 +142,8 @@ public class JdbcConfigRepository implements ConfigRepository {
      */
     public List<IfmapConfig> queryConfigs(ConfigQuery query) {
         ConfigQuery q = query == null ? new ConfigQuery() : query;
+        // size/offset 只能拼串（MySQL 占位符不支持 LIMIT ? 的旧版本），靠 ConfigQuery 自身把 size 收敛到 [1,200]，
+        // 因此这里拼进去的一定是非负整数，不存在注入面
         StringBuilder sql = new StringBuilder("SELECT ").append(IfmapRowMappers.CONFIG_COLUMNS)
                 .append(" FROM `").append(tables.configTable()).append("` WHERE ").append(whereClause(q));
         sql.append(" ORDER BY `tenant_id` ASC, `interface_no` ASC, `interface_order` ASC, `key_id` ASC")
@@ -192,6 +203,7 @@ public class JdbcConfigRepository implements ConfigRepository {
      */
     @Override
     public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
+        // 空 busiNode 直接返回空列表：否则 SQL 里的 `busi_node` = '' 会真的去查一遍，还可能命中脏数据
         if (busiNode == null || busiNode.trim().isEmpty()) {
             return java.util.Collections.emptyList();
         }
@@ -201,7 +213,9 @@ public class JdbcConfigRepository implements ConfigRepository {
         return jdbc.query(sql, IfmapRowMappers.config(), tenant(tenantId), busiNode);
     }
 
+    /** 管理端动态条件拼接；<b>必须与 {@link #whereArgs(ConfigQuery)} 严格同序</b>（少一处就条件与值错位）。 */
     private static String whereClause(ConfigQuery q) {
+        // 子句顺序必须与 whereArgs 完全一致：条件与值是两条独立代码路径，顺序一错就是"按租户查了接口号"
         StringBuilder sb = new StringBuilder();
         if (!q.isAllTenants()) {
             sb.append("`tenant_id` = ?");
@@ -222,6 +236,7 @@ public class JdbcConfigRepository implements ConfigRepository {
             appendAnd(sb);
             sb.append("`status` = ?");
         }
+        // 软删过滤是「无占位符」的子句：whereArgs 里对应位置不能加值，否则后面全部错位
         if (!q.isIncludeDeleted()) {
             appendAnd(sb);
             sb.append("`del_status` = 0");
@@ -236,7 +251,9 @@ public class JdbcConfigRepository implements ConfigRepository {
         }
     }
 
+    /** 与 {@link #whereClause(ConfigQuery)} 一一对应的占位符实参（顺序即 {@code ?} 顺序）。 */
     private static java.util.List<Object> whereArgs(ConfigQuery q) {
+        // 与 whereClause 逐条对照阅读：每个 ? 必须有且只有一个值，且顺序相同
         java.util.List<Object> args = new java.util.ArrayList<Object>();
         if (!q.isAllTenants()) {
             args.add(tenant(q.getTenantId()));
@@ -256,6 +273,7 @@ public class JdbcConfigRepository implements ConfigRepository {
         return args;
     }
 
+    /** 查询条件是否有效：空白串按「没填」处理。 */
     private static boolean notBlank(String value) {
         return value != null && value.trim().length() > 0;
     }
@@ -276,7 +294,10 @@ public class JdbcConfigRepository implements ConfigRepository {
         return jdbc.query(sql, IfmapRowMappers.executionLog(), tenant(tenantId), bizId, limit);
     }
 
-    /** {@code null} / 空串租户 → 单租户默认值。 */
+    /**
+     * 租户号转 {@code long}：{@code null}/空串 → {@code -1}（单租户默认值）；<b>非数字直接抛</b>而不是也当 -1 ——
+     * 否则写错租户会静默读到别的租户的数据。
+     */
     private static long tenant(String tenantId) {
         if (tenantId == null || tenantId.trim().isEmpty()) {
             return TENANT_DEFAULT;
@@ -288,6 +309,7 @@ public class JdbcConfigRepository implements ConfigRepository {
         }
     }
 
+    /** {@code Long} 版：null → {@code -1}。 */
     private static long tenant(Long tenantId) {
         return tenantId == null ? TENANT_DEFAULT : tenantId;
     }

@@ -133,6 +133,10 @@ public final class RemoteConfigRepository implements ConfigRepository {
         return queryConfigs(tenantId, null, busiNode);
     }
 
+    /**
+     * 拉配置列表并<b>本地兜底过滤</b>（远端可能没筛 del_status/status），再按
+     * {@code interface_order, key_id} 排序 —— 与 JDBC 实现保持同一顺序契约。
+     */
     @Override
     public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
         Map<String, String> query = new LinkedHashMap<String, String>();
@@ -140,6 +144,7 @@ public final class RemoteConfigRepository implements ConfigRepository {
         putIfPresent(query, "busiNode", busiNode);
         String body = fetcher.get(baseUri + PATH_CONFIGS, query);
         List<IfmapConfig> configs = JsonConfigMapper.toConfigs(jsonOps, body, parseTenantId(tenantId));
+        // 远端可能没按 del_status/status 过滤（取决于服务端实现），这里逐个兜底，保证契约一致
         List<IfmapConfig> enabled = new ArrayList<IfmapConfig>(configs.size());
         for (IfmapConfig config : configs) {
             // 契约：只返回未删除且未停用的配置（远端可能没筛，这里兜底）
@@ -147,12 +152,15 @@ public final class RemoteConfigRepository implements ConfigRepository {
                 enabled.add(config);
             }
         }
+        // 排序也是契约的一部分：起点截断按数组下标，顺序不一致会让断点续跑从错误的步骤开始
         Collections.sort(enabled, CONFIG_ORDER);
         return enabled;
     }
 
+    /** 没有「按顺序点查」的远端接口，只能拉一遍列表在内存里比（{@code equals} 而非 {@code ==}，避免装箱缓存问题）。 */
     @Override
     public Optional<IfmapConfig> findConfig(String tenantId, String interfaceNo, String busiNode, int order) {
+        // 没有「按顺序点查」的远端接口：拉列表再在内存里按 order 比，比一次查一次省一次往返
         for (IfmapConfig config : queryConfigs(tenantId, interfaceNo, busiNode)) {
             // 刻意用 equals 而不是 ==：包装类型比较用 == 只在 -128~127 缓存范围内碰巧正确
             if (Integer.valueOf(order).equals(config.getInterfaceOrder())) {
@@ -162,6 +170,7 @@ public final class RemoteConfigRepository implements ConfigRepository {
         return Optional.<IfmapConfig>empty();
     }
 
+    /** 分支列表：同样本地过滤已删除行并按 order 排序，保持与 JDBC 实现等价。 */
     @Override
     public List<LogicBranchConfig> queryLogicBranches(String tenantId, String interfaceNo) {
         Map<String, String> query = new LinkedHashMap<String, String>();
@@ -178,11 +187,16 @@ public final class RemoteConfigRepository implements ConfigRepository {
         return active;
     }
 
+    /**
+     * 写日志：远端明确回 {@code false} 时<b>抛</b>（不静默丢留痕）；
+     * 但引擎侧写日志本身是 WARN 降级，所以这里抛异常不会影响业务返回。
+     */
     @Override
     public void saveExecutionLog(ExecutionLog log) {
         if (log == null) {
             throw new IfmapConfigException("执行日志不能为空");
         }
+        // 日志直接序列化整个 ExecutionLog 下发（字段名由宿主远端服务约定），不做裁剪
         String body = jsonOps.toJson(log);
         String response = fetcher.postJson(baseUri + PATH_LOG, body);
         if (isFalse(response)) {
@@ -228,6 +242,7 @@ public final class RemoteConfigRepository implements ConfigRepository {
         return response != null && "false".equalsIgnoreCase(response.trim());
     }
 
+    /** null 排最后（未配顺序的不该插到最前面），否则按自然序。 */
     private static int compareInteger(Integer left, Integer right) {
         if (left == null) {
             return right == null ? 0 : 1;
@@ -238,6 +253,7 @@ public final class RemoteConfigRepository implements ConfigRepository {
         return left.compareTo(right);
     }
 
+    /** {@code Long} 版比较器，null 处理规则同 {@link #compareInteger}。 */
     private static int compareLong(Long left, Long right) {
         if (left == null) {
             return right == null ? 0 : 1;

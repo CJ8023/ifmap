@@ -76,11 +76,13 @@ public class DefaultLogMasker implements LogMasker {
         this.excludeFields = toLowerSet(excludeFields);
     }
 
+    /** 逐「键值对」替换：<b>不重新序列化</b>（保证报文形态与原文一致，只是值变了）。 */
     @Override
     public String mask(String json) {
         if (json == null || json.isEmpty()) {
             return json;
         }
+        // 不解析 JSON 再重新序列化（会改格式/丢顺序），而是用正则就地替换键值对文本
         Matcher matcher = PAIR.matcher(json);
         StringBuffer out = new StringBuffer(json.length());
         while (matcher.find()) {
@@ -99,10 +101,12 @@ public class DefaultLogMasker implements LogMasker {
         String value = quoted ? rawValue.substring(1, rawValue.length() - 1) : rawValue;
         String lowerKey = key.toLowerCase();
 
+        // mask-fields 里显式点名的键：整个值换成 ***，不再看形态
         if (excludeFields.contains(lowerKey)) {
             return quote(key) + ":\"***\"";
         }
         String masked = null;
+        // 两级兜底：先按「键名是姓名类」打星，否则按键名未命中时按值的形态猜（身份证/手机/卡号）
         if (maskFields.contains(lowerKey) && isPlain(value)) {
             masked = maskName(value);
         } else if (isPlain(value)) {
@@ -119,6 +123,7 @@ public class DefaultLogMasker implements LogMasker {
         return value.indexOf('\\') < 0 && value.indexOf('"') < 0;
     }
 
+    /** 按值的形态猜测类型（身份证/手机号/卡号…）：只在键名没配进 mask-fields 时兜底。 */
     private static String maskByPattern(String value) {
         if (ID_CARD.matcher(value).matches()) {
             return headTail(value, 6, 4);
@@ -166,10 +171,12 @@ public class DefaultLogMasker implements LogMasker {
         return sb.toString();
     }
 
+    /** 加引号并转义，保证替换回去的仍是合法 JSON。 */
     private static String quote(String value) {
         return '"' + value + '"';
     }
 
+    /** 配置项大小写不敏感：统一转小写存集合。 */
     private static Set<String> toLowerSet(Set<String> source) {
         Set<String> result = new HashSet<String>();
         if (source != null) {

@@ -95,6 +95,7 @@ public final class JsonConfigMapper {
         return branches;
     }
 
+    /** 一行 JSON → 一条配置。必填字段缺失直接抛（带上「第几条」定位），可选字段取默认值。 */
     private static IfmapConfig toConfig(Map<String, Object> row, Long tenantId, String source) {
         IfmapConfig c = new IfmapConfig();
         c.setTenantId(tenantId);
@@ -129,6 +130,7 @@ public final class JsonConfigMapper {
         return c;
     }
 
+    /** 一行 JSON → 一条逻辑分支（{@code index} 只用于报错时指出是第几条）。 */
     private static LogicBranchConfig toBranch(Map<String, Object> row, Long tenantId, String source, int index) {
         LogicBranchConfig b = new LogicBranchConfig();
         b.setTenantId(tenantId);
@@ -166,6 +168,7 @@ public final class JsonConfigMapper {
         if (!(parsed instanceof List)) {
             throw new IfmapConfigException("远端响应体不是 JSON 数组，实际是 " + typeName(parsed) + "：" + abbreviate(json));
         }
+        // 逐条严格校验：元素不是对象就直接报错（带下标），不跳过 —— 静默丢行会让"远端少了几条配置"查不出来
         List<?> raw = (List<?>) parsed;
         List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>(raw.size());
         for (int i = 0; i < raw.size(); i++) {
@@ -198,6 +201,7 @@ public final class JsonConfigMapper {
         return normalized.toString();
     }
 
+    /** 键名归一化（大小写/下划线差异）后重建有序 Map，后续按 camelCase 取值即可。 */
     private static Map<String, Object> normalize(Map<?, ?> row) {
         Map<String, Object> normalized = new LinkedHashMap<String, Object>();
         for (Map.Entry<?, ?> entry : row.entrySet()) {
@@ -220,6 +224,7 @@ public final class JsonConfigMapper {
      * @param names 可接受的键名，按优先级排列；至少要有一个
      */
     private static String textAny(Map<String, Object> row, String... names) {
+        // 别名按优先级取第一个非 null 的（远端不同版本字段名不一样，如 interfaceNo / interface_no）
         for (String name : names) {
             Object value = row.get(normalizeKey(name));
             if (value != null) {
@@ -229,6 +234,7 @@ public final class JsonConfigMapper {
         return null;
     }
 
+    /** 标量转文本；对象/数组直接失败 —— 不能把 Java 的 {@code {a=1}} toString 当成业务值传下去。 */
     private static String textValue(Object value, String field) {
         if (value == null) {
             return null;
@@ -236,6 +242,7 @@ public final class JsonConfigMapper {
         if (value instanceof String) {
             return (String) value;
         }
+        // 数字/布尔按字面转文本：接口号、顺序号这类列在远端可能被 JSON 化成了数字
         if (value instanceof Number || value instanceof Boolean) {
             return String.valueOf(value);
         }
@@ -285,6 +292,7 @@ public final class JsonConfigMapper {
         if (value == null) {
             return null;
         }
+        // 数字走 BigDecimal 再转 long：远端若给 12.0 或 1.2E3，直接 longValue() 会静默截断
         if (value instanceof Number) {
             BigDecimal decimal;
             try {
@@ -294,6 +302,7 @@ public final class JsonConfigMapper {
             }
             return toLong(decimal, field, source);
         }
+        // 字符串形式只接受纯整数字面量：不用 Long.parseLong 是为了先挡住 "12.5"/"1e3" 这类
         if (value instanceof String) {
             String trimmed = ((String) value).trim();
             if (!INTEGER.matcher(trimmed).matches()) {
@@ -310,6 +319,7 @@ public final class JsonConfigMapper {
         return value == null ? Long.valueOf(defaultValue) : value;
     }
 
+    /** 严格长整型转换：有小数位或超范围都报错（{@code longValueExact} 不静默截断）。 */
     private static Long toLong(BigDecimal decimal, String field, String source) {
         if (decimal.stripTrailingZeros().scale() > 0) {
             throw new IfmapConfigException(source + "字段 " + field + " 不是整数：" + decimal.toPlainString());
@@ -336,14 +346,17 @@ public final class JsonConfigMapper {
         }
     }
 
+    /** 远端没给租户时落单租户默认值 {@code -1}（与 JDBC 实现同口径）。 */
     private static Long tenantOf(Long tenantId) {
         return tenantId == null ? Long.valueOf(-1L) : tenantId;
     }
 
+    /** 报错前缀：「远端响应体第 N 条…」，出问题时能直接定位到是哪个元素。 */
     private static String source(int index, String what) {
         return "远端响应体第 " + (index + 1) + " 条" + what;
     }
 
+    /** 类型名（JSON 对象/数组/具体类名），只进异常消息。 */
     private static String typeName(Object value) {
         if (value instanceof Map) {
             return "JSON 对象";
@@ -354,6 +367,7 @@ public final class JsonConfigMapper {
         return value.getClass().getSimpleName();
     }
 
+    /** 截断到 200 字符再进异常消息，避免整包报文刷满日志。 */
     private static String abbreviate(String text) {
         return text.length() <= 200 ? text : text.substring(0, 200) + "...(已截断)";
     }

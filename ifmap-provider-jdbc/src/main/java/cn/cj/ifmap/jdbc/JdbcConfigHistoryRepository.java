@@ -90,6 +90,7 @@ public class JdbcConfigHistoryRepository implements ConfigHistoryRepository {
         return id;
     }
 
+    /** 某条配置的快照历史，按 {@code add_time, key_id} 倒序；{@code limit<=0} 用默认 {@link #DEFAULT_LIMIT}。 */
     @Override
     public List<IfmapConfigHistory> list(long configKeyId, int limit) {
         int rows = limit <= 0 ? DEFAULT_LIMIT : limit;
@@ -98,6 +99,7 @@ public class JdbcConfigHistoryRepository implements ConfigHistoryRepository {
         return jdbc.query(sql, IfmapRowMappers.history(), configKeyId);
     }
 
+    /** 按历史记录自身主键取（回滚时用它找到目标快照）。 */
     @Override
     public Optional<IfmapConfigHistory> findByKeyId(long keyId) {
         String sql = "SELECT " + IfmapRowMappers.HISTORY_COLUMNS + " FROM `" + tables.configHistoryTable() + "`"

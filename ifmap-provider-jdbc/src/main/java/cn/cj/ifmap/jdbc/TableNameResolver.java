@@ -62,6 +62,7 @@ public final class TableNameResolver {
         return new TableNameResolver(DEFAULT_PREFIX);
     }
 
+    /** 前缀白名单校验（长度 / 首字符 / 字符集）：前缀会直接拼进 SQL，不校验等于开后门。 */
     private static void validate(String prefix) {
         if (prefix.length() > MAX_PREFIX_LENGTH) {
             throw new IfmapConfigException("表名前缀过长（>" + MAX_PREFIX_LENGTH + "）：" + prefix);

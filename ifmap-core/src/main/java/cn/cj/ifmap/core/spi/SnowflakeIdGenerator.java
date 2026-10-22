@@ -80,6 +80,7 @@ public class SnowflakeIdGenerator implements IdGenerator {
         return new SnowflakeIdGenerator(Math.floorMod((long) name.hashCode(), MAX_WORKER_ID + 1));
     }
 
+    /** 取值优先级：系统属性 {@code ifmap.worker-id} → 环境变量 {@code IFMAP_WORKER_ID} → 0。 */
     private static long workerIdFromSystemPropertyOrEnv() {
         String value = System.getProperty("ifmap.worker-id");
         if (value == null || value.trim().isEmpty()) {
@@ -95,6 +96,12 @@ public class SnowflakeIdGenerator implements IdGenerator {
         }
     }
 
+    /**
+     * 生成 ID；<b>synchronized</b> 保证同实例内 sequence 自增与 lastTimestamp 一致。
+     *
+     * <p>时钟回拨超过 {@link #MAX_BACKWARD_MS} 直接抛（宁可失败也不发重复/乱序 ID）；
+     * 小幅回拨则在循环里等到时间追上。</p>
+     */
     @Override
     public synchronized Long nextId() {
         long timestamp = currentTime();
@@ -102,10 +109,12 @@ public class SnowflakeIdGenerator implements IdGenerator {
         if (back > MAX_BACKWARD_MS) {
             throw new IfmapConfigException("检测到时钟回拨 " + back + "ms（上限 " + MAX_BACKWARD_MS + "ms），拒绝生成 ID");
         }
+        // 小幅回拨就自旋等时间追上：睡 MIN 级时间片，避免长时间持锁
         while (timestamp < lastTimestamp) {
             timestamp = currentTime();
         }
         if (timestamp == lastTimestamp) {
+            // 同一毫秒内序列号自增；用 & 掩码回绕，归零说明本毫秒 4096 个号用完了 → 等到下一毫秒
             sequence = (sequence + 1) & SEQUENCE_MASK;
             if (sequence == 0) {
                 timestamp = waitNextMillis(lastTimestamp);
@@ -117,6 +126,7 @@ public class SnowflakeIdGenerator implements IdGenerator {
         return ((timestamp - EPOCH) << TIMESTAMP_SHIFT) | (workerId << WORKER_ID_SHIFT) | sequence;
     }
 
+    /** 当前毫秒的序列号用尽时，自旋等到下一毫秒（每轮 sleep 1ms，避免空转烧 CPU）。 */
     private long waitNextMillis(long lastTs) {
         long ts = currentTime();
         while (ts <= lastTs) {

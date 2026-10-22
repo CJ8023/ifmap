@@ -90,12 +90,14 @@ public class IfmapLogCleanScheduler implements SmartInitializingSingleton, Dispo
         return cron;
     }
 
+    /** 容器关闭：置位 {@code closed} 并 {@code shutdownNow()}；正在跑的一轮会被中断，清理循环随即停止本轮。 */
     @Override
     public void destroy() {
         closed = true;
         executor.shutdownNow();
     }
 
+    /** 用 {@link ScheduledExecutorService} 自己算下一次触发（{@code closed} 或 cron 解析不出来就不再调度）。 */
     private void scheduleNext() {
         if (closed) {
             return;
@@ -110,6 +112,7 @@ public class IfmapLogCleanScheduler implements SmartInitializingSingleton, Dispo
         future = executor.schedule(this::runThenReschedule, delayMillis, TimeUnit.MILLISECONDS);
     }
 
+    /** 跑一轮清理，<b>无论成败都</b>排下一次（一次失败不能让定时任务永久停摆）。 */
     private void runThenReschedule() {
         try {
             task.cleanNow();

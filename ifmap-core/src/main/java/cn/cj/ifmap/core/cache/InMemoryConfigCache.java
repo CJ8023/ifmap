@@ -93,6 +93,10 @@ public final class InMemoryConfigCache implements ConfigCache {
         };
     }
 
+    /**
+     * 命中直接返回；未命中时<b>在锁外</b>调 loader（DB 查询不阻塞其他 key），
+     * 且只有 loader 返回非 null 才写缓存 —— 不缓存 null，否则一次「查不到」会被记住整个 TTL。
+     */
     @Override
     @SuppressWarnings("unchecked")
     public <T> T get(String key, Function<String, T> loader) {
@@ -126,6 +130,7 @@ public final class InMemoryConfigCache implements ConfigCache {
         return loaded;
     }
 
+    /** 失效单个 key（key 为 null 直接返回，不抛）。 */
     @Override
     public void invalidate(String key) {
         if (key == null) {
@@ -136,6 +141,7 @@ public final class InMemoryConfigCache implements ConfigCache {
         }
     }
 
+    /** 全量失效（管理端批量改配置后调用）。 */
     @Override
     public void invalidateAll() {
         synchronized (lock) {
@@ -143,6 +149,7 @@ public final class InMemoryConfigCache implements ConfigCache {
         }
     }
 
+    /** 命中/未命中/淘汰计数快照，供 {@code /actuator} 或自建监控读取。 */
     @Override
     public CacheStats stats() {
         synchronized (lock) {

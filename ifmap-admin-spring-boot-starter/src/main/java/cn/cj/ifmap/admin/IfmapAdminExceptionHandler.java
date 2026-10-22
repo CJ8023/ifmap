@@ -44,6 +44,7 @@ public class IfmapAdminExceptionHandler {
     /** 校验未通过：422 + 完整违规清单。 */
     @ExceptionHandler(IfmapValidationException.class)
     public ResponseEntity<ApiError> handleValidation(IfmapValidationException e) {
+        // 422 而不是 400：请求本身合法，是配置语义不通过；响应里带完整 errors/warnings 清单
         ValidationResult result = e.getResult();
         ApiError body = new ApiError(e.getMessage(), e.getClass().getSimpleName(),
                 result == null ? null : result.getErrors(),
@@ -54,6 +55,7 @@ public class IfmapAdminExceptionHandler {
     /** 配置/参数错误：400。 */
     @ExceptionHandler({IfmapConfigException.class, IfmapStrategyException.class, IllegalArgumentException.class})
     public ResponseEntity<ApiError> handleBadRequest(RuntimeException e) {
+        // 这三类都是「调用方给的输入不对」：不打 ERROR 栈（会淹没真实故障），直接 400 + 原始消息
         return ResponseEntity.badRequest().body(new ApiError(e.getMessage(), e.getClass().getSimpleName()));
     }
 
@@ -85,6 +87,7 @@ public class IfmapAdminExceptionHandler {
     /** 兜底：500，同时打日志（管理端不应该出现未知异常）。 */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleOther(Exception e) {
+        // 兜底分支必须打 ERROR：走到这里说明前面没归类，栈是唯一线索
         log.error("ifmap 管理端未预期异常", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ApiError("管理端内部错误：" + e.getMessage(), e.getClass().getSimpleName()));

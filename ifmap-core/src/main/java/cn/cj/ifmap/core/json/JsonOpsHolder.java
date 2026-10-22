@@ -74,6 +74,10 @@ public final class JsonOpsHolder {
         instance = null;
     }
 
+    /**
+     * ServiceLoader 发现实现：<b>0 个返回 null（由调用方报错）、多于 1 个直接抛</b> ——
+     * 两个 JsonOps 同时在场时刻意不猜，要求显式 {@code JsonOpsHolder.set(...)}。
+     */
     private static JsonOps loadFromSpi() {
         ServiceLoader<JsonOps> loader = ServiceLoader.load(JsonOps.class, JsonOpsHolder.class.getClassLoader());
         List<JsonOps> found = new ArrayList<JsonOps>();

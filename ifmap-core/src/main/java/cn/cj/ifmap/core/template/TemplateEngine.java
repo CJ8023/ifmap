@@ -128,6 +128,7 @@ public final class TemplateEngine {
         return build(template, source, ctx, "$");
     }
 
+    /** 递归骨架：Map → 对象、List → 数组、String → 表达式求值、其他（数字/布尔/null）→ 原样。 */
     @SuppressWarnings("unchecked")
     private Object build(Object node, JsonReadContext source, RuleContext ctx, String path) {
         if (node instanceof Map) {
@@ -142,6 +143,10 @@ public final class TemplateEngine {
         return node;
     }
 
+    /**
+     * 构建一个对象节点。key 上的 {@code @array@} 后缀优先处理（列转行/行转列），
+     * 其余按「值是 Map / List / 表达式字符串 / 字面量 / null」五路分派，取不到值统一走 {@link NullPolicy}。
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> buildObject(Map<String, Object> template, JsonReadContext source,
                                            RuleContext ctx, String path) {
@@ -150,6 +155,7 @@ public final class TemplateEngine {
             String key = entry.getKey();
             Object value = entry.getValue();
             String fieldPath = path + "." + key;
+            // @array@ 形态（字段@array@$.path）优先处理：路径藏在 key 里，语义是「按源数组逐元素生成子模板」
             int arraysIdx = key.indexOf(TemplateConstants.KEY_ARRAYS);
             if (arraysIdx >= 0) {
                 String resultKey = key.substring(0, arraysIdx);
@@ -163,6 +169,7 @@ public final class TemplateEngine {
                 putWithArraySuffix(key, sub, res, fieldPath);
             } else if (value instanceof String) {
                 String valueKey = (String) value;
+                // 是表达式就求值；取不到值统一交给 NullPolicy（默认省略字段）
                 if (isKey(valueKey)) {
                     Object resolved = resolve(valueKey, source, ctx, fieldPath);
                     if (resolved == null) {
@@ -183,12 +190,14 @@ public final class TemplateEngine {
         return res;
     }
 
+    /** 构建一个数组节点：元素是 Map 就逐元素构建，是表达式就求值，取不到值时按 {@link NullPolicy} 决定丢不丢元素。 */
     @SuppressWarnings("unchecked")
     private List<Object> buildList(List<Object> template, JsonReadContext source, RuleContext ctx, String path) {
         List<Object> res = new ArrayList<Object>(template.size());
         int i = 0;
         for (Object item : template) {
             String itemPath = path + "[" + i + "]";
+            // 数组元素三态：Map 当子模板、字符串按表达式求值、其他（数字/布尔/null）原样
             if (item instanceof Map) {
                 res.add(buildObject((Map<String, Object>) item, source, ctx, itemPath));
             } else if (item instanceof String) {
@@ -237,6 +246,7 @@ public final class TemplateEngine {
         List<Object> out = new ArrayList<Object>();
         if (value instanceof Map) {
             Map<String, Object> map = (Map<String, Object>) value;
+            // 列转行：行数取最长的那个数组字段；非数组的字段作为常量复制到每一行
             int length = 1;
             for (Object item : map.values()) {
                 if (item instanceof List && ((List<?>) item).size() > length) {
@@ -256,6 +266,7 @@ public final class TemplateEngine {
                         row.put(entry.getKey(), item);
                     }
                 }
+                // 整行一个值都没取到（数组偏短/全 null）就不产生这一行，避免输出一堆空对象
                 if (!row.isEmpty()) {
                     out.add(row);
                 }
@@ -279,6 +290,7 @@ public final class TemplateEngine {
             log.warn("模板字段 [{}] 的 @array@ 数据源 [{}] 不存在，输出空数组", fieldPath, sourcePath);
             return out;
         }
+        // 源不是数组也按单元素处理：@array@ 只要求「能变成列表」，不强制源一定是数组
         List<Object> items = Text.asList(raw);
         int i = 0;
         for (Object item : items) {
@@ -296,6 +308,10 @@ public final class TemplateEngine {
         return out;
     }
 
+    /**
+     * 取不到值时的三种处置：{@code EMPTY_STRING} 写空串 / {@code FAIL} 直接抛（带上字段路径与表达式）/
+     * {@code SKIP_FIELD}（默认）省略字段并 WARN。
+     */
     private void applyNullPolicy(String key, String valueKey, Map<String, Object> res, String fieldPath) {
         switch (nullPolicy) {
             case EMPTY_STRING:
@@ -323,6 +339,7 @@ public final class TemplateEngine {
         if (isFun(valueKey)) {
             return invokeFun(valueKey, source, ctx, fieldPath);
         }
+        // 三类写法依次判定：@FUN(...) 调用 → 中缀表达式（& | , + …）→ 纯 $.path
         if (DslExpressions.hasInfix(valueKey, TemplateConstants.SEPARATOR_AND)) {
             List<Object> merged = new ArrayList<Object>();
             for (String part : DslExpressions.infixOperands(valueKey, TemplateConstants.SEPARATOR_AND)) {
@@ -377,6 +394,7 @@ public final class TemplateEngine {
         return valueKey;
     }
 
+    /** 中缀 {@code a,b} 的求值：每段独立求值，值是 List 就展开一层，最后用 joiner 拼接。 */
     private Object joinResolved(String valueKey, String separator, JsonReadContext source,
                                 RuleContext ctx, String fieldPath, String joiner) {
         List<Object> values = new ArrayList<Object>();
@@ -410,6 +428,7 @@ public final class TemplateEngine {
         for (int i = 0; i < args.size(); i++) {
             String expr = args.get(i);
             Object value = expr.length() == 0 ? "" : resolve(expr, source, ctx, fieldPath);
+            // 不允许 null 实参的规则：任一参数取不到值就整条表达式取不到（不再往下调，避免把 "" 塞进数字规则）
             if (value == null && !allowNullArgs) {
                 log.warn("模板字段 [{}] 调用规则 [{}] 时第 {} 个参数 [{}] 取值为空，按 {} 处理",
                         fieldPath, ruleName, i + 1, expr, nullPolicy);
@@ -434,6 +453,7 @@ public final class TemplateEngine {
      * 归一成空串会让 SKIP_FIELD 失效。</p>
      */
     private Object normalize(Object value) {
+        // 容器保持 JSON 层类型（数组还是数组），只规整其叶子
         if (value instanceof Map || value instanceof List || value instanceof Object[]) {
             return Values.plainify(value);
         }

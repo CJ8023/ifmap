@@ -54,6 +54,7 @@ public final class ContractReport {
         return violations;
     }
 
+    /** 违规条数（0 表示契约校验通过）。 */
     public int size() {
         return violations.size();
     }
@@ -103,6 +104,7 @@ public final class ContractReport {
         return sb.toString();
     }
 
+    /** null → "-"：报告里的空单元格要显式写出，否则看起来像漏了一列。 */
     private static String nullToDash(String value) {
         return value == null ? "-" : value.replace("|", "\\|");
     }

@@ -77,6 +77,7 @@ public class JdbcConfigWriter {
         if (config == null) {
             throw new IfmapConfigException("配置不能为空");
         }
+        // 主键：调用方给了就用（导入/回放场景要保住原 ID），否则生成雪花
         Long id = config.getKeyId() != null ? config.getKeyId() : idGenerator.nextId();
         if (id == null) {
             throw new IfmapConfigException("新增配置缺少主键：请提供 keyId，或注入会生成 ID 的 IdGenerator");
@@ -86,6 +87,7 @@ public class JdbcConfigWriter {
         JdbcValues.require(config.getInterfaceName(), "interfaceName");
         JdbcValues.require(config.getBusiNode(), "busiNode");
         JdbcValues.require(config.getPartnerCode(), "partnerCode");
+        // status 与 del_status/deleted_seq 在 SQL 里写死默认值，所以 VALUES 的 ? 只对应"可变列"
         String sql = "INSERT INTO `" + tables.configTable() + "`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`interface_code`,`project_code`,`interface_name`,"
                 + "`busi_node`,`partner_code`,`partner_name`,`financing_mode`,`interface_order`,"
@@ -107,9 +109,11 @@ public class JdbcConfigWriter {
                     JdbcValues.orEmpty(config.getPreStrategyName()), JdbcValues.orEmpty(config.getPostStrategyName()),
                     JdbcValues.orDefault(config.getStatus(), 1), JdbcValues.orEmpty(config.getRemark()),
                     JdbcValues.orEmpty(config.getAddUserId()), JdbcValues.orEmpty(config.getAddRequestId()));
+        // 唯一键冲突在这里就地翻译成带接口号/业务节点的 IfmapConfigException，不让 SQL 细节冒到管理端
         } catch (DuplicateKeyException e) {
             throw duplicate(config, e);
         }
+        // 回写生成值：调用方拿到的对象要能直接用于后续 update/日志，不必再查一次
         config.setKeyId(id);
         config.setVersion(0);
         config.setDelStatus(0);
@@ -170,6 +174,7 @@ public class JdbcConfigWriter {
         JdbcValues.require(config.getInterfaceName(), "interfaceName");
         JdbcValues.require(config.getBusiNode(), "busiNode");
         JdbcValues.require(config.getPartnerCode(), "partnerCode");
+        // version 用 `version` + 1 自增而不是写死新值：并发下保证只有一个 UPDATE 能命中 WHERE version = ?
         String sql = "UPDATE `" + tables.configTable() + "` SET"
                 + " `interface_no` = ?, `interface_code` = ?, `project_code` = ?, `interface_name` = ?,"
                 + " `busi_node` = ?, `partner_code` = ?, `partner_name` = ?, `financing_mode` = ?,"
@@ -182,6 +187,7 @@ public class JdbcConfigWriter {
                 + " `modify_request_id` = ?"
                 + " WHERE `key_id` = ? AND `version` = ? AND `del_status` = 0";
         try {
+            // rows != 1 有两种原因（版本过期 / 已软删），调用方据此回 409 或 400，别在这里区分
             int rows = jdbc.update(sql,
                     config.getInterfaceNo(), config.getInterfaceCode(), config.getProjectCode(),
                     config.getInterfaceName(), config.getBusiNode(), config.getPartnerCode(), config.getPartnerName(),
@@ -207,6 +213,7 @@ public class JdbcConfigWriter {
      * @return {@code true} 删除成功；{@code false} 表示目标不存在或已删除（幂等调用不会报错）
      */
     public boolean softDelete(long keyId, String operatorId, String requestId) {
+        // deleted_seq = key_id 而不是时间戳：同一行被删又重建时唯一键仍能区分，且天然唯一
         String sql = "UPDATE `" + tables.configTable() + "`"
                 + " SET `del_status` = 1, `deleted_seq` = `key_id`, `version` = `version` + 1,"
                 + " `modify_user_id` = ?, `modify_time` = CURRENT_TIMESTAMP(3), `modify_request_id` = ?"
@@ -269,6 +276,7 @@ public class JdbcConfigWriter {
         return jdbc.update(sql, keyId) == 1;
     }
 
+    /** 把数据库唯一键冲突翻成人能看懂的四元组，管理端 422 直接回这句话。 */
     private static IfmapConfigException duplicateBranch(LogicBranchConfig branch, DuplicateKeyException cause) {
         return new IfmapConfigException("逻辑分支唯一键冲突：(tenant_id=" + branch.getTenantId()
                 + ", interface_no=" + branch.getInterfaceNo() + ", method_flag=" + branch.getMethodFlag()
@@ -283,6 +291,7 @@ public class JdbcConfigWriter {
         return list.isEmpty() ? Optional.<IfmapConfig>empty() : Optional.of(list.get(0));
     }
 
+    /** 同 {@link #duplicateBranch}：点出冲突的 (tenant_id, interface_no, busi_node, interface_order)。 */
     private static IfmapConfigException duplicate(IfmapConfig config, DuplicateKeyException cause) {
         return new IfmapConfigException("配置唯一键冲突：同一 (tenant_id=" + config.getTenantId()
                 + ", interface_no=" + config.getInterfaceNo() + ", busi_node=" + config.getBusiNode()

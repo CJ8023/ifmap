@@ -149,6 +149,7 @@ public class JdbcExecutionLogArchiver {
         }
         String hot = tables.executionLogTable();
         String cold = tables.executionLogArchiveTable();
+        // 先核对冷表列是否齐全：列不一致等到 INSERT 才炸，届时热表数据已经删了一半
         verifySchema(hot, cold);
 
         long archived = 0L;
@@ -159,9 +160,11 @@ public class JdbcExecutionLogArchiver {
             if (keyIds.isEmpty()) {
                 break;
             }
+            // 先插冷表、再删热表，且冷表已有同主键就跳过：任务重复跑（或两台机器同时跑）也不会丢数据
             List<Long> toInsert = excludeAlreadyArchived(cold, keyIds);
             long alreadyArchived = keyIds.size() - toInsert.size();
             long inserted = toInsert.isEmpty() ? 0L : insertBatch(hot, cold, toInsert);
+            // 删的是**本批选出的全部主键**（含已归档的那部分），不是只删新插入的：那些行已经安全在冷表里
             int deleted = deleteByKeyIds(hot, keyIds);
             archived += inserted;
             removed += deleted;
@@ -173,9 +176,11 @@ public class JdbcExecutionLogArchiver {
             }
             LOG.info("ifmap 执行日志归档：第 {} 批热表删除 {} 行、冷表新增 {} 行（冷于 {}，热表 {} → 冷表 {}）",
                     batches, deleted, inserted, cutoff, hot, cold);
+            // 取不满一批说明已经到尾巴了，不用再查一次
             if (keyIds.size() < batchSize) {
                 break;
             }
+            // 批间停顿给主从复制/其他业务让路；被中断就当本轮结束，剩下的下次继续
             if (!pause(batchSleepMillis)) {
                 LOG.warn("ifmap 执行日志归档被中断，本次已归档 {} 行，剩余数据留待下次执行", removed);
                 break;
@@ -191,6 +196,7 @@ public class JdbcExecutionLogArchiver {
         return new LogArchiveResult(archived, removed, batches);
     }
 
+    /** 从热表取一批过期主键（升序、限批大小），后续「插冷表 → 删热表」都按这批主键走。 */
     private List<Long> selectExpired(String hot, Timestamp cutoff, int batchSize) {
         String sql = "SELECT `key_id` FROM `" + hot + "` WHERE `add_time` < ?"
                 + " ORDER BY `add_time` LIMIT " + batchSize;
@@ -210,6 +216,7 @@ public class JdbcExecutionLogArchiver {
         return result;
     }
 
+    /** 冷表写入用 {@code INSERT ... SELECT}（不经应用内存），列顺序由 {@link #quotedColumns()} 保证两边一致。 */
     private long insertBatch(String hot, String cold, List<Long> keyIds) {
         StringBuilder sql = new StringBuilder("INSERT INTO `").append(cold).append("` (")
                 .append(quotedColumns()).append(") SELECT ").append(quotedColumns())
@@ -219,6 +226,7 @@ public class JdbcExecutionLogArchiver {
         return inserted == null ? 0L : inserted.longValue();
     }
 
+    /** 冷表确认写成功后才删热表同批主键（顺序反了会丢日志）。 */
     private int deleteByKeyIds(String hot, List<Long> keyIds) {
         String sql = "DELETE FROM `" + hot + "` WHERE `key_id` IN (" + placeholders(keyIds.size()) + ")";
         return jdbc.update(sql, keyIds.toArray());
@@ -271,6 +279,7 @@ public class JdbcExecutionLogArchiver {
         }
     }
 
+    /** 差集文本（{@code [a, b]}），只用于把「列不匹配」写进异常消息。 */
     private static String difference(Set<String> left, Set<String> right) {
         List<String> diff = new ArrayList<String>();
         for (String column : left) {
@@ -281,6 +290,7 @@ public class JdbcExecutionLogArchiver {
         return diff.toString();
     }
 
+    /** 归档列清单 → {@code `a`,`b`,…}；热表 SELECT 与冷表 INSERT 共用同一份，避免两边列序漂移。 */
     private static String quotedColumns() {
         StringBuilder sb = new StringBuilder();
         for (String column : ARCHIVED_COLUMNS) {
@@ -292,6 +302,7 @@ public class JdbcExecutionLogArchiver {
         return sb.toString();
     }
 
+    /** 生成 {@code ?, ?, ?}（与列数/主键数对齐）。 */
     private static String placeholders(int count) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < count; i++) {
@@ -314,6 +325,7 @@ public class JdbcExecutionLogArchiver {
         }
     }
 
+    /** 归档阈值必须 > 0：0 会把整张热表搬空，直接拒绝。 */
     private static void requireOlderThan(int olderThanDays) {
         if (olderThanDays <= 0) {
             throw new IfmapConfigException("归档天数阈值必须大于 0（当前 " + olderThanDays

@@ -64,11 +64,14 @@ public final class CachingConfigRepository implements ConfigRepository {
                 + (interfaceNo == null ? "" : interfaceNo.trim());
     }
 
+    /** 唯一走缓存的方法；loader 里包一层不可变副本，防止调用方改到缓存里的对象。 */
     @Override
+    // 只有分支表走缓存：配置表/日志表变动频繁且必须实时可见，分支只在管理端维护时才变
     public List<LogicBranchConfig> queryLogicBranches(final String tenantId, final String interfaceNo) {
         return cache.get(cacheKey(tenantId, interfaceNo), new java.util.function.Function<String, List<LogicBranchConfig>>() {
             @Override
             public List<LogicBranchConfig> apply(String key) {
+                // 拷一份再包成不可变：否则调用方（或引擎）改到 list 里的元素就改到缓存里的对象了
                 List<LogicBranchConfig> loaded = delegate.queryLogicBranches(tenantId, interfaceNo);
                 return Collections.unmodifiableList(new ArrayList<LogicBranchConfig>(loaded));
             }
@@ -80,21 +83,25 @@ public final class CachingConfigRepository implements ConfigRepository {
         cache.invalidate(cacheKey(tenantId, interfaceNo));
     }
 
+    /** 配置计划<b>不缓存</b>（改动要立刻生效）；以下四个方法都是纯透传，别在这里加逻辑。 */
     @Override
     public List<IfmapConfig> queryConfigsByBusiNode(String tenantId, String busiNode) {
         return delegate.queryConfigsByBusiNode(tenantId, busiNode);
     }
 
+    /** 透传（不缓存）：见 {@link #queryConfigsByBusiNode} 的说明。 */
     @Override
     public List<IfmapConfig> queryConfigs(String tenantId, String interfaceNo, String busiNode) {
         return delegate.queryConfigs(tenantId, interfaceNo, busiNode);
     }
 
+    /** 透传（不缓存）：单条点查命中率低，缓存收益抵不过失效风险。 */
     @Override
     public Optional<IfmapConfig> findConfig(String tenantId, String interfaceNo, String busiNode, int order) {
         return delegate.findConfig(tenantId, interfaceNo, busiNode, order);
     }
 
+    /** 透传：执行日志只写不读，无需缓存。 */
     @Override
     public void saveExecutionLog(ExecutionLog log) {
         delegate.saveExecutionLog(log);

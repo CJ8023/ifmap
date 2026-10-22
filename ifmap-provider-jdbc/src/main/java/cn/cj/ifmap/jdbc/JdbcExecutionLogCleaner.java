@@ -111,6 +111,7 @@ public class JdbcExecutionLogCleaner {
         if (maxBatches <= 0) {
             throw new IfmapConfigException("单次最大批数必须大于 0（当前 " + maxBatches + "）");
         }
+        // 分批删（按主键、每批限行数 + 批间停顿）：一条 DELETE 扫几百万行会长时间持锁，业务被拖死
         String table = tables.executionLogTable();
         long total = 0L;
         int batches = 0;
@@ -124,9 +125,11 @@ public class JdbcExecutionLogCleaner {
             batches++;
             LOG.info("ifmap 执行日志清理：第 {} 批删除 {} 行（保留 {} 天，早于 {}，表 {}）",
                     batches, deleted, retentionDays, cutoff, table);
+            // 取不满一批 = 已删干净
             if (keyIds.size() < batchSize) {
                 break;
             }
+            // 批间停顿；被中断就收工（已删的算数，剩下的下次继续）
             if (!pause(batchSleepMillis)) {
                 LOG.warn("ifmap 执行日志清理被中断，本次已删除 {} 行，剩余数据留待下次清理", total);
                 break;
@@ -141,12 +144,14 @@ public class JdbcExecutionLogCleaner {
         return total;
     }
 
+    /** 先取一批过期主键（按 add_time 升序），再按主键删 —— 避免长事务大范围 DELETE 锁表。 */
     private List<Long> selectExpired(String table, Timestamp cutoff, int batchSize) {
         String sql = "SELECT `key_id` FROM `" + table + "` WHERE `add_time` < ?"
                 + " ORDER BY `add_time` LIMIT " + batchSize;
         return jdbc.queryForList(sql, Long.class, cutoff);
     }
 
+    /** 按主键批量删（{@code IN (?,?,…)}）：一批一次往返，且不会误删新写入的行。 */
     private int deleteByKeyIds(String table, List<Long> keyIds) {
         StringBuilder sql = new StringBuilder("DELETE FROM `").append(table).append("` WHERE `key_id` IN (");
         for (int i = 0; i < keyIds.size(); i++) {
@@ -170,6 +175,7 @@ public class JdbcExecutionLogCleaner {
         }
     }
 
+    /** 保留天数必须 > 0：0 或负数会把整张日志表清空，直接拒绝（停用请关 {@code ifmap.log.clean-enabled}）。 */
     private static void requireRetention(int retentionDays) {
         if (retentionDays <= 0) {
             throw new IfmapConfigException("保留天数必须大于 0（当前 " + retentionDays

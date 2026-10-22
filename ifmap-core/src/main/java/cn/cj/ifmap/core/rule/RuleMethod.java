@@ -58,6 +58,7 @@ final class RuleMethod {
         return descriptor;
     }
 
+    /** 形参个数是否匹配：变长参数只要「不少于固定部分」，且只数数据参数（RuleContext 不算）。 */
     boolean acceptsArity(int argCount) {
         return varargs ? argCount >= minArity : argCount == dataParamCount;
     }
@@ -75,6 +76,7 @@ final class RuleMethod {
         if (!acceptsArity(args.length)) {
             return false;
         }
+        // 逐个实参看能否落到对应形参上（null 只有非基本类型才接受）
         for (int i = 0; i < args.length; i++) {
             if (!Coercions.canCoerce(args[i], dataParamType(i))) {
                 return false;
@@ -85,6 +87,7 @@ final class RuleMethod {
 
     /** 匹配得分：精确匹配 2 分，强转匹配 1 分。分高者优先。 */
     int score(Object[] args) {
+        // 逐个实参累加：类型完全一致 2 分、需要强转 1 分。总分决定同名重载选谁，所以空实参得分恒为 0
         int score = 0;
         for (int i = 0; i < args.length; i++) {
             score += Coercions.isExact(args[i], dataParamType(i)) ? 2 : 1;
@@ -124,6 +127,7 @@ final class RuleMethod {
         if (hasContext) {
             actual[0] = context == null ? RuleContext.empty() : context;
         }
+        // 变长参数要先建数组再塞尾部：反射调用必须传真正的数组对象，直接摊平实参会被当成"个数不匹配"
         if (varargs) {
             int fixedCount = dataParamCount - 1;
             for (int i = 0; i < fixedCount; i++) {
@@ -143,6 +147,7 @@ final class RuleMethod {
         }
         try {
             return method.invoke(bean, actual);
+        // 规则内部抛的 IfmapException 原样透出（保留 errorCode 等语义），其余包成 RuleInvocationException
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             if (cause instanceof IfmapException) {

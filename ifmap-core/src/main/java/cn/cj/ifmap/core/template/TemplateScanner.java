@@ -71,6 +71,7 @@ public final class TemplateScanner {
         if (templateJson == null || templateJson.length() == 0) {
             return problems;
         }
+        // 只扫 JSON 字符串字面量（key 与 value 都在里面），再交给 DSL 感知的切分找问题；seen 保证去重保序
         Set<String> seen = new LinkedHashSet<String>();
         Matcher m = STRING_LITERAL.matcher(templateJson);
         while (m.find()) {

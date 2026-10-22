@@ -88,6 +88,7 @@ public final class IfmapEnumCatalog {
      * 「启用」的文案、合作机构的码值，宿主机最清楚，不该被框架的默认值挡住。</p>
      */
     public Map<String, List<EnumOption>> options() {
+        // 先框架字典再宿主字典：putAll 是覆盖语义，宿主的同名 key 直接顶掉内置（不是拼接）
         Map<String, List<EnumOption>> merged = new LinkedHashMap<String, List<EnumOption>>(builtin);
         merged.putAll(sanitize(provider == null ? null : provider.options()));
         return Collections.unmodifiableMap(merged);

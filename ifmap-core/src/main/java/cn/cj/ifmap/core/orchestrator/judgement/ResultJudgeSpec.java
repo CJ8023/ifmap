@@ -87,6 +87,10 @@ public final class ResultJudgeSpec {
         return new ResultJudgeSpec(parseNode(castMap(jsonOps.parse(spec)), 1, null, jsonOps, true), spec);
     }
 
+    /**
+     * 递归解析一层规格：先判 always，再看 all/any 分组（深度上限 {@link #MAX_DEPTH}），
+     * 其余当作单个条件。{@code collecting=true} 时把错误全收集起来（校验用），否则快速失败（解析用）。
+     */
     private static Node parseNode(Map<String, Object> node, int depth, List<String> errors, JsonOps jsonOps,
                                   boolean top) {
         Object opValue = node.get("op");
@@ -110,6 +114,7 @@ public final class ResultJudgeSpec {
             add(errors, "result_judge 嵌套超过 " + MAX_DEPTH + " 层", errors != null);
             return null;
         }
+        // all/any 只能出现一个：两者混写没有明确定义的优先级，宁可报错也不替你猜
         if (hasAll && hasAny) {
             add(errors, "all 与 any 不能同时出现", errors != null);
             return null;
@@ -132,6 +137,7 @@ public final class ResultJudgeSpec {
                 add(errors, key + " 不能为空数组（要表达恒真请写 {\"op\":\"always\"}）", errors != null);
                 return null;
             }
+            // 组内逐条递归解析；同名的组不能再嵌同名组（多余层级没有语义）
             List<Node> children = new ArrayList<Node>();
             for (int i = 0; i < items.size(); i++) {
                 Object item = items.get(i);
@@ -160,6 +166,7 @@ public final class ResultJudgeSpec {
         return parseCondition(node, errors, jsonOps);
     }
 
+    /** 解析单个条件：path 必填、op 必须可识别；报错时点名写错的那个词（管理端 422 只回第一条错误）。 */
     private static Node parseCondition(Map<String, Object> node, List<String> errors, JsonOps jsonOps) {
         Object pathValue = node.get("path");
         if (!(pathValue instanceof String) || ((String) pathValue).trim().isEmpty()) {
@@ -177,6 +184,7 @@ public final class ResultJudgeSpec {
         }
         boolean ignoreCase = asBoolean(node.get("ignoreCase"), path, errors);
         Object rawValue = node.get("value");
+        // value 的形态由 op 决定：in/notIn 要非空标量数组，其余要么要求非空 value、要么不接受 value
         List<String> values = null;
         String value = null;
         if (op.requiresValueList()) {
@@ -210,6 +218,7 @@ public final class ResultJudgeSpec {
                 return null;
             }
         }
+        // 路径合法性交给当前 JsonOps 判断（Jackson/Fastjson 支持的 JsonPath 语法并不完全一致）
         if (jsonOps != null && !jsonOps.isValidPath(path)) {
             add(errors, path + " 不是合法 JsonPath", errors != null);
             return null;
@@ -236,6 +245,7 @@ public final class ResultJudgeSpec {
     /** 求值；{@code ctx} 由调用方在 try/catch 里建立（非 JSON 响应按 NOT_JSON 归类，不在这里抛）。 */
     public Evaluation evaluate(JsonReadContext ctx) {
         Evaluation evaluation = new Evaluation();
+        // 求值本身不抛异常：非 JSON 响应由调用方（RuleSpecJudge）先挡掉，这里只处理结构
         boolean matched = root.matches(ctx, evaluation);
         evaluation.setMatched(matched);
         if (!matched && evaluation.getReason() == null) {
@@ -284,8 +294,10 @@ public final class ResultJudgeSpec {
          * <p><b>命中也要记</b>：判定成功时的 {@code actual_value} 是分支匹配
          * （{@code logic_branch_value}）和日志的唯一依据，成功却不记就等于丢了这个值。</p>
          */
+        // 只记第一条失败信息（后面全失败也没意义）、第一条命中值（成功时它就是 actual_value）
         private void record(JudgeCondition condition, boolean present, String actualValue, boolean hit) {
             if (!hit) {
+                // 取不到值（present=false）才算 FIELD_MISSING；取到值但不符是 VALUE_MISMATCH
                 if (this.missedPath == null && !present) {
                     this.missedPath = condition.getPath();
                 }
@@ -394,6 +406,7 @@ public final class ResultJudgeSpec {
         return result;
     }
 
+    /** 布尔型字段（如 ignoreCase）：接受布尔或 "true"/"false" 字符串，其它类型记一条错误。 */
     private static boolean asBoolean(Object value, String path, List<String> errors) {
         if (value == null) {
             return false;
@@ -408,6 +421,7 @@ public final class ResultJudgeSpec {
         return false;
     }
 
+    /** 只在收集模式（且 errors 非 null）下追加错误；解析模式靠异常快速失败。 */
     private static void add(List<String> errors, String message, boolean collecting) {
         if (collecting && errors != null) {
             errors.add(message);

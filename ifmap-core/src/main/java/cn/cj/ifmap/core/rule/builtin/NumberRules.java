@@ -132,6 +132,7 @@ public class NumberRules {
                 + "可用 PLAIN / STRIP_ZERO / THOUSAND / CENT_TO_YUAN / YUAN_TO_CENT");
     }
 
+    /** rounding 参数 → {@link RoundingMode}；为空默认 HALF_UP，写错则抛规则参数异常。 */
     private static RoundingMode parseRounding(String rounding) {
         if (Text.isBlank(rounding)) {
             return RoundingMode.HALF_UP;
@@ -144,6 +145,7 @@ public class NumberRules {
         }
     }
 
+    /** 去尾零并以 plain 形式输出（{@code 10.00 → 10}，且永不出科学计数法）。 */
     private static String stripZeros(BigDecimal decimal) {
         BigDecimal stripped = decimal.stripTrailingZeros();
         if (stripped.scale() < 0) {

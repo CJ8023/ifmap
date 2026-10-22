@@ -15,6 +15,7 @@
  */
 package cn.cj.ifmap.admin;
 
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.ConfigQuery;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
@@ -47,6 +48,9 @@ import java.util.Set;
  *   <li><b>结构约束</b>：{@code (tenant_id, interface_no)} 与 {@code (tenant_id, busi_node, interface_order)}
  *       两组唯一键都不能重复；分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、
  *       {@code method_flag} 必须是已注册动作。</li>
+ *   <li><b>调用方向</b>：被调方向（{@code call_direction=INBOUND}）的执行路径与出网不同 ——
+ *       不渲染请求模板、不跑前序策略、回参是对方原文，所以「配了但永不生效」和「跑完没输出」
+ *       这两类必须在这里拦下（见 {@link #checkCallDirection}）。</li>
  * </ol>
  *
  * @author caijun
@@ -97,9 +101,10 @@ public class ConfigValidator {
         required(result, "busiNode", config.getBusiNode());
         required(result, "partnerCode", config.getPartnerCode());
 
-        // 下面五步都只「收集问题」不抛异常，顺序即提示顺序；管理端据此一次性展示全部错误
+        // 下面六步都只「收集问题」不抛异常，顺序即提示顺序；管理端据此一次性展示全部错误
         checkTemplateContract(config, result);
         checkJudgeSpec(config, result);
+        checkCallDirection(config, result);
         checkJsonPaths(config, result);
         checkStrategyName(config, result);
         checkUniqueKey(config, result);
@@ -209,6 +214,88 @@ public class ConfigValidator {
         }
         if (ResultJudgeSpec.parse(config.getResultJudge(), jsonOps).isAlways()) {
             result.warning("result_judge = always：该接口不做结果判定（任何响应都按成功处理，只受通道/HTTP 状态约束）");
+        }
+    }
+
+    /**
+     * 调用方向校验：只拦<b>静默陷阱</b>，不替用户做业务判断。
+     *
+     * <p>被调方向（INBOUND）的执行路径与出网不同：不出网、不渲染请求模板、不跑前序策略、回参是对方原文。
+     * 于是有两类必须拦：</p>
+     * <ol>
+     *   <li><b>配了但永不生效</b>（error）：{@code request_param_template} / {@code pre_strategy_name}
+     *       在 INBOUND 下根本不执行。留着不拦，使用者会以为「入参被模板和前序策略加工过」，
+     *       实际发出去的报文与此无关 —— 这类误解只有在对方说「你传的字段不对」时才会暴露。</li>
+     *   <li><b>跑完没输出</b>（error）：{@code response_param_template} 为空 ⇒ 本步产物是空 Map，
+     *       宿主拿不到要回给对方的报文，等于引擎白跑一趟。</li>
+     * </ol>
+     *
+     * <p>出网方向不加任何新规则（原行为不动）：唯一被额外提示的是 {@code always}，
+     * 那条由 {@link #checkJudgeSpec} 统一给 warning，与方向无关。</p>
+     */
+    private void checkCallDirection(IfmapConfig config, ValidationResult result) {
+        if (config.getCallDirection() != CallDirection.INBOUND) {
+            return;
+        }
+        if (isBlank(config.getResponseParamTemplate())) {
+            result.error("被调方向（INBOUND）必须配 response_param_template："
+                    + "它是回给对方的报文，为空则本步产物为空，宿主拿不到应答内容");
+        }
+        if (!isBlank(config.getRequestParamTemplate())) {
+            result.error("被调方向（INBOUND）不渲染 request_param_template（回参就是对方原文），请清空："
+                    + "留着会让人以为入参被模板加工过");
+        }
+        if (!isBlank(config.getPreStrategyName())) {
+            result.error("被调方向（INBOUND）不执行 pre_strategy_name（没有请求报文可改），请清空："
+                    + "前序策略此刻配了也不会运行");
+        }
+        if (judgeIsAlways(config)) {
+            result.warning("被调方向（INBOUND）配了 result_judge = always：任何报文都算受理，"
+                    + "对方推错内容也不会有任何拦截");
+        }
+        if (!isBlank(config.getInterfaceNo()) && !isBlank(config.getBusiNode())
+                && repository.queryLogicBranches(asTenantId(config.getTenantId()), config.getInterfaceNo(), false)
+                        .isEmpty()) {
+            result.warning("被调方向（INBOUND）通常需要逻辑分支：受理之后靠 logic_branch 按入参状态分流"
+                    + "（当前接口尚未配置任何分支）");
+        }
+        checkInboundIsFirstStep(config, result);
+    }
+
+    /**
+     * 被调步骤不是本节点第一步 → warning。
+     *
+     * <p>不是 error：混合链路（先出网通知下游、再被对方回调，或反过来）是允许的。但排在出网步骤之后时，
+     * 前面的出网调用<b>已经发生副作用</b>（对方已收到报文），而后面的对方报文与它们毫无关系 ——
+     * 这层提醒是为了让「顺序放错」不至于只能靠事后对账发现。</p>
+     */
+    private void checkInboundIsFirstStep(IfmapConfig config, ValidationResult result) {
+        if (isBlank(config.getBusiNode()) || config.getInterfaceOrder() == null) {
+            return;
+        }
+        List<IfmapConfig> node = liveRows(new ConfigQuery()
+                .setTenantId(asTenantId(config.getTenantId()))
+                .setBusiNode(config.getBusiNode())
+                .setSize(ConfigQuery.MAX_SIZE));
+        for (IfmapConfig row : node) {
+            if (config.getKeyId() != null && config.getKeyId().equals(row.getKeyId())) {
+                continue;
+            }
+            if (row.getInterfaceOrder() != null
+                    && row.getInterfaceOrder() < config.getInterfaceOrder() && !row.inbound()) {
+                result.warning("被调步骤（INBOUND）排在出网步骤 " + row.getInterfaceNo() + " 之后："
+                        + "前面的出网调用已经发生副作用，而本条拿到的入参与它们无关；顺序放错请先确认链路");
+                return;
+            }
+        }
+    }
+
+    /** {@code result_judge} 是否为 {@code always}；规格非法返回 false（错误已由 {@link #checkJudgeSpec} 报过）。 */
+    private boolean judgeIsAlways(IfmapConfig config) {
+        try {
+            return ResultJudgeSpec.parse(config.getResultJudge(), jsonOps).isAlways();
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

@@ -37,7 +37,8 @@ import java.util.TreeSet;
  * <p>所以这里给出「框架知道答案」的两组：</p>
  * <ul>
  *   <li>{@code strategyName} ← 已注册的前/后序策略名（{@link #of(Collection)} 的入参）；</li>
- *   <li>{@code status} ← 启用 / 停用（{@code ifmap_config.status} 只有这两个值）。</li>
+ *   <li>{@code status} ← 启用 / 停用（{@code ifmap_config.status} 只有这两个值）；</li>
+ *   <li>{@code callDirection} ← 我方调对方 / 对方调我方（{@code ifmap_config.call_direction} 的两值）。</li>
  * </ul>
  *
  * <p>业务码值（合作机构、融资模式……）仍然只能由宿主机通过 {@code IfmapEnumProvider} 给，
@@ -52,6 +53,9 @@ public final class IfmapBuiltinEnums {
 
     /** 配置状态字典 key。 */
     public static final String STATUS_KEY = "status";
+
+    /** 调用方向字典 key（页面字段 {@code callDirection}）。 */
+    public static final String CALL_DIRECTION_KEY = "callDirection";
 
     private IfmapBuiltinEnums() {
     }
@@ -82,6 +86,10 @@ public final class IfmapBuiltinEnums {
         }
         options.put(STATUS_KEY, Collections.unmodifiableList(Arrays.asList(
                 EnumOption.of("1", "启用"), EnumOption.of("0", "停用"))));
+        // 值必须与 CallDirection 的枚举名一致（列里存的就是枚举名），标签解释「谁调谁」，别让人靠猜
+        options.put(CALL_DIRECTION_KEY, Collections.unmodifiableList(Arrays.asList(
+                EnumOption.of("OUTBOUND", "我方调对方（出网）"),
+                EnumOption.of("INBOUND", "对方调我方（被调）"))));
         return Collections.unmodifiableMap(options);
     }
 }

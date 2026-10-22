@@ -16,6 +16,7 @@
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.core.IfmapEngine;
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
@@ -261,6 +262,54 @@ class ConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("被调方向：留着请求模板/前序策略（配了永不生效）或缺应答模板（跑完没输出）→ error")
+    void inboundContradictionsAreRejected() {
+        IfmapConfig noAck = inbound("IF_R1");
+        noAck.setResponseParamTemplate("");
+        assertTrue(noAckErrors(noAck).contains("response_param_template"), noAckErrors(noAck));
+
+        IfmapConfig withRequestTemplate = inbound("IF_R2");
+        withRequestTemplate.setRequestParamTemplate("{\"bizNo\":\"$.bizNo\"}");
+        assertTrue(noAckErrors(withRequestTemplate).contains("request_param_template"),
+                noAckErrors(withRequestTemplate));
+
+        IfmapConfig withPreStrategy = inbound("IF_R3");
+        withPreStrategy.setPreStrategyName("demoStrategy");
+        assertTrue(noAckErrors(withPreStrategy).contains("pre_strategy_name"), noAckErrors(withPreStrategy));
+    }
+
+    @Test
+    @DisplayName("被调方向的最小可用配置 → 零 error（应答模板 + 状态白名单，不配请求模板/前序策略）")
+    void minimalInboundPasses() {
+        ValidationResult result = validator.validate(inbound("IF_R4"), true);
+
+        assertTrue(result.isPassed(), String.valueOf(result.getErrors()));
+        assertEquals(0, result.getErrors().size());
+    }
+
+    @Test
+    @DisplayName("被调方向的提醒：always 判定 / 尚无分支 / 排在出网步骤之后 → 都只是 warning，不拦保存")
+    void inboundWarnings() {
+        IfmapConfig alwaysJudge = inbound("IF_R5");
+        alwaysJudge.setResultJudge("{\"op\":\"always\"}");
+        ValidationResult result = validator.validate(alwaysJudge, true);
+        assertTrue(result.isPassed(), String.valueOf(result.getErrors()));
+        assertTrue(result.getWarnings().toString().contains("任何报文都算受理"),
+                result.getWarnings().toString());
+        assertTrue(result.getWarnings().toString().contains("逻辑分支"),
+                "新接口还没配分支要提醒：" + result.getWarnings());
+
+        // 前一步是出网调用 ⇒ 前面的副作用已经发生，而本条入参与它无关
+        assertTrue(writer.insert(AdminTestSupport.config("IF_R6_STEP1", "rcv", 1)) > 0);
+        IfmapConfig afterOutbound = inbound("IF_R6");
+        afterOutbound.setInterfaceOrder(2);
+        ValidationResult mixed = validator.validate(afterOutbound, true);
+        assertTrue(mixed.isPassed(), String.valueOf(mixed.getErrors()));
+        assertTrue(mixed.getWarnings().toString().contains("排在出网步骤"),
+                "混合链路顺序放错只能靠这条提醒发现：" + mixed.getWarnings());
+    }
+
+    @Test
     @DisplayName("分支集合：默认兜底 ≤1、order 不重复、value 不能脱离 flag、method_flag 必须已注册")
     void branchSetIsChecked() {
         assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "默认1", "", "", 1)) > 0);
@@ -384,6 +433,24 @@ class ConfigValidatorTest {
         blank.setResponseParamTemplate(null);
         assertTrue(validator.validate(blank, true).isPassed(),
                 validator.validate(blank, true).getErrors().toString());
+    }
+
+    /** 被调方向的最小配置：不出网 ⇒ 无请求模板/前序策略，只有回给对方的应答模板 + 状态白名单判定。 */
+    private static IfmapConfig inbound(String interfaceNo) {
+        IfmapConfig config = AdminTestSupport.config(interfaceNo, "rcv", 1);
+        config.setCallDirection(CallDirection.INBOUND);
+        config.setRequestParamTemplate("");
+        config.setPreStrategyName("");
+        config.setResponseParamTemplate("{\"code\":\"0000\",\"message\":\"success\"}");
+        // 判定口径是「报文可受理」：SUCCESS / FAILED 都收，业务成败交给逻辑分支
+        config.setResultJudge("{\"any\":["
+                + "{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"SUCCESS\"},"
+                + "{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"FAILED\"}]}");
+        return config;
+    }
+
+    private String noAckErrors(IfmapConfig config) {
+        return validator.validate(config, true).getErrors().toString();
     }
 
     /** 造一条「请求模板里引用 $.pool.<ref>.applyNo」的配置。 */

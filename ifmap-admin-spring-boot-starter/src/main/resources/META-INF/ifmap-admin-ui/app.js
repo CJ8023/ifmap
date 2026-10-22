@@ -469,6 +469,7 @@
     { name: 'partnerName', label: '合作机构名称' },
     { name: 'financingMode', label: '融资模式', dict: 'financingMode' },
     { name: 'interfaceOrder', label: '执行顺序', type: 'number' },
+    { name: 'callDirection', label: '调用方向', dict: 'callDirection' },
     { name: 'judgeName', label: '判定器', hint: '空 = ruleSpec' },
     { name: 'resultJudge', label: '结果判定 result_judge', type: 'judge' },
     { name: 'preStrategyName', label: '前序策略', dict: 'strategyName' },
@@ -490,7 +491,8 @@
     { name: 'remark', label: '备注' }
   ];
 
-  var NEW_CONFIG_DEFAULTS = { interfaceOrder: 1, status: 1 };
+  // callDirection 默认 OUTBOUND：与列默认值同口径，新建配置不用先选方向
+  var NEW_CONFIG_DEFAULTS = { interfaceOrder: 1, status: 1, callDirection: 'OUTBOUND' };
 
   // ---------------------------------------------------------------- 配置列表
 
@@ -527,6 +529,7 @@
         '<td>' + esc(config.busiNode) + '</td>' +
         '<td>' + esc(config.partnerCode) + '</td>' +
         '<td>' + esc(config.interfaceOrder) + '</td>' +
+        '<td>' + directionLabel(config.callDirection) + '</td>' +
         '<td>' + esc(config.preStrategyName) + '</td>' +
         '<td>' + esc(config.postStrategyName) + '</td>' +
         '<td>' + statusLabel(config.status) + '</td>' +
@@ -535,8 +538,16 @@
         '">删除</button></td></tr>';
     });
     setHtml('config-list', table(
-      ['keyId', '租户', '接口编号', '业务节点', '合作机构', '顺序', '前序策略', '后序策略', '状态', '版本', ''],
+      ['keyId', '租户', '接口编号', '业务节点', '合作机构', '顺序', '方向', '前序策略', '后序策略', '状态', '版本', ''],
       rows));
+  }
+
+  /** 方向标签：OUTBOUND/INBOUND 是库里的值，列表按「谁调谁」显示（空值按默认 OUTBOUND）。 */
+  function directionLabel(value) {
+    if (value === 'INBOUND') {
+      return '被调';
+    }
+    return '出网';
   }
 
   function renderPager() {

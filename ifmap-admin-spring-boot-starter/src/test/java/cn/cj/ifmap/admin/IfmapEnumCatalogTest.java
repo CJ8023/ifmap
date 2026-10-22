@@ -130,6 +130,17 @@ class IfmapEnumCatalogTest {
     }
 
     @Test
+    @DisplayName("调用方向字典：值与枚举名一致（列里存枚举名），标签说明「谁调谁」")
+    void callDirectionEnums() {
+        Map<String, List<EnumOption>> options = IfmapBuiltinEnums.of(null);
+
+        assertEquals(Arrays.asList("OUTBOUND", "INBOUND"), values(options.get("callDirection")),
+                "值必须是 CallDirection 的枚举名，否则存进库读出来会被 fromName 判成非法");
+        assertEquals("我方调对方（出网）", options.get("callDirection").get(0).getLabel());
+        assertEquals("对方调我方（被调）", options.get("callDirection").get(1).getLabel());
+    }
+
+    @Test
     @DisplayName("宿主机同名 key 覆盖框架字典（标的是宿主的），没给的 key 仍用内置")
     void hostOverridesBuiltin() {
         IfmapEnumCatalog catalog = IfmapEnumCatalog.of(
@@ -149,7 +160,9 @@ class IfmapEnumCatalogTest {
         IfmapEnumCatalog catalog = IfmapEnumCatalog.of(null, IfmapBuiltinEnums.of(null));
 
         assertFalse(catalog.options().isEmpty());
-        assertEquals(Collections.singletonList("status"), new ArrayList<String>(catalog.options().keySet()));
+        // 顺序即内置字典的插入顺序：status 之后是 callDirection（前端按 key 取值，顺序不影响渲染）
+        assertEquals(Arrays.asList("status", "callDirection"),
+                new ArrayList<String>(catalog.options().keySet()));
         // 两边都空才回到单例
         assertSame(IfmapEnumCatalog.empty(), IfmapEnumCatalog.of(null, Collections.<String, List<EnumOption>>emptyMap()));
     }

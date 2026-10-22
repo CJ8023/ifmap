@@ -176,7 +176,7 @@ public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, Stri
 
 ### 4.4 应答与判定
 
-- **ACK** = `IfmapResult.data`（Map）。宿主用自己的框架序列化回给对方；要带信封（`code`/`msg`）就写进 `response_param_template` 的常量。
+- **成功路径的 ACK** = `IfmapResult.data`（Map）。宿主用自己的框架序列化回给对方；要带信封（`code`/`msg`）就写进 `response_param_template` 的常量。**失败路径目前没有出口**，见 §4.4.2。
 - **要掺我方动态字段**（traceId、受理时间、受理流水号）→ `post_strategy_name`（`applyPostStrategy:326` 支持返回 Map 覆盖/替换产物）+ `@IfmapAction` 生成流水号写入 `StrategyContext`。**不新增机制。**
 - **判定**：`{"op":"always"}` = "收到即可处理"；`{"all":[{"path":"$.status","op":"equal","value":"SUCCESS"}]}` = "只处理成功通知"。判定失败 → 不执行动作、不入池、日志 `FAIL` + `error_msg`（现有行为）。
 
@@ -192,12 +192,12 @@ public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, Stri
 | 回显对方流水号 + 我给一个回执号 | `{"code":"0000","msg":"success","applyNo":"$.applyNo","ackNo":"$.seqNo"}` |
 | 字符串拼接（**必须用 `@append@`**） | `{"orderNo":"$.applyNo@append@-ACK"}` |
 | 取嵌套 / 数组 | `{"firstSku":"$.items[0].sku","allSku":"$.items[*].sku"}` |
-| 不回应答体（宿主只回 200） | **不配模板** → `data` 为空 Map |
+| 不回应答体（宿主只回 200） | **不配模板** → 该步产物是空 Map（`data` 里只剩 `pool` 键） |
 
 三个必须知道的坑：
 
 1. **不能写 `"prefix-$.applyNo"`**。总表（`docs/02` §1）里 `$.` 只认"整值以 `$.` 开头"，混在文本里会走第 9 条**字面量原样输出** —— 对方会收到字符串 `prefix-$.applyNo`。
-2. **判定失败时 `data` 不是空的**：`renderResponse` 与 `applyPostStrategy` 与成败无关，都会执行。宿主拿到 `success=false` + 一份"本来要回的 ACK"，自行决定回什么（见下）。
+2. **判定失败时 `data` 里没有这一步的产物**：`renderResponse` / `applyPostStrategy` 确实照常执行（与成败无关），但产物只在判定成功时才 `pool.put`（`:270-272`），而 `IfmapResult.data` 是 `flattenPool(pool)` 摊出来的（`:218-219`、`:378-390`）⇒ 失败步的应答**进不了 `data`**。宿主只剩 `errorMessage` / `failType` / `rawResponse`。见 §4.4.2。
 3. **`$.seqNo` 每次渲染都不同**，不要用它当幂等键。
 
 成功率不同回不同应答体（DSL 没有 if，两条路都行）：
@@ -222,6 +222,39 @@ public class AckWithServerTime implements IfmapStrategyHook {
 ```
 
 **怎么预览 ACK 而不真被调用**：管理端 dry-run（`dryRun:132`）传 `mockResponse` = 一份"伪造的对方报文"，返回的 `IfmapResult.data` 就是将要回给对方的 ACK（D5）。这也是验收 ACK 配置最省事的手段。
+
+#### 4.4.2 失败应答（当前无出口 —— 待拍板的缺口）
+
+被调接口的失败路径同样**必须**回一个应答体（「我收到了，但这笔我不收」，附我方错误码），HTTP 状态通常仍是 200。但现状是引擎在失败路径上什么都不给宿主：
+
+```
+executeOne:266   data = applyPostStrategy(renderResponse(...))      // 渲染了，但……
+executeOne:268   judgement = pipeline.judge(...)                    // 判定失败
+executeOne:270   if (judgement.isSuccess()) pool.put(...)           // ← 不执行
+runPlan:218-219  data = flattenPool(pool); data.put(POOL_KEY, pool) // ← 失败步产物不在池里
+```
+
+⇒ `IfmapResult` 上只有 `success=false` / `errorMessage`（「未命中判定规格 + 对方原话」）/ `failType` / `rawResponse`（对方报文原文）。**没有「我方应答体」**。
+
+> 这个不对称是既有的：出网场景无感（失败步的产物对上游没用），但被调场景是硬缺口 —— 宿主只能自己拼 `{"code":"9999","msg":result.getErrorMessage()}`，错误码/文案全在代码里 ⇒ 每新增一个被调接口都要改一次宿主，把「新增接口不改代码」的收益吃掉一半。
+
+三个选项：
+
+| # | 方案 | 成本 | 代价 |
+| --- | --- | --- | --- |
+| **A** | 宿主按 `success` 分叉，错误信封写在宿主 Controller | 0（不新增任何东西） | 错误码/文案不可配置、管理端看不见、不可审计回滚；每个被调接口重复一次 |
+| **B**（推荐） | 新增 `error_response_template` 列（`text NULL`），判定失败时用它渲染，产物作为失败路径的应答出口 | 1 列 + 1 处渲染 + UI/校验/文档 | DDL/仓储/快照都要跟着加（与 `call_direction` 同一批，增量很小） |
+| **C** | 把 `pipeline.judge` 提到 `applyPostStrategy` 之前，让 `StrategyContext` 读到 `Judgement`，由后序策略接管错误应答 | 0 列，SPI 加性变更 | 错误应答变回 Java 里的 `if`（双份真相）；且顺序调整影响出网侧，必须重新论证等价性 |
+
+**B 的落地要点**（若拍板 B）：
+
+- DDL 与 `call_direction` 合并进同一份 `007-config-inbound.sql`（两条 changeset）；列 `text NULL`（空 = 失败时不渲染，行为同现状）。
+- 渲染源 = 对方报文原文 **+ 注入判定信息**（渲染发生在判定之后）：
+  `{"code":"9999","msg":"$.judge.message","failType":"$.judge.failType"}`。
+- 只对 INBOUND 生效；OUTBOUND 配了 → 校验给 WARN（出网失败步的应答体对上游无意义）。
+- 失败时 `data` 的语义变成「错误应答」（不再摊平池），成功时不变 ⇒ 宿主始终只用一句 `return result.getData()`。
+- 执行日志 `response_param` 记这份错误应答（与 D9 一致），运维在库里就能看到「当时到底回了对方什么」。
+
 
 ### 4.5 混合计划示例
 
@@ -342,6 +375,7 @@ BREAKING 口径（写进 CHANGELOG）：宿主若实现过 `IfmapCallbackHandler
 2. **D6 数据来源**：`payload` 优先、`rawBody` 只作原文（日志），确认不会出现"模板取不到字段"的预期外情况。
 3. **D10 混合计划**：INBOUND 判定失败时是否应该中断后续 OUTBOUND（当前按 `stopOnFailure` 语义中断）——确认。
 4. **D13 同批删除**：删回调通道与 INBOUND 支持同一个迭代落地（避免"半残 callback + 半残 INBOUND"共存）——确认。
+5. **失败应答走 A 还是 B**（§4.4.2）：A = 宿主分叉（0 成本、错误码进代码）；B = 新增 `error_response_template` 列（配置化、管理端可见）。推荐 B —— 否则「新增被调接口不改代码」的收益会被错误应答吃掉一半。
 
 ## 10. 分阶段实施
 

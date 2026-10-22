@@ -178,7 +178,7 @@ public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, Stri
 
 - **成功路径的 ACK** = `IfmapResult.data`（Map）。宿主用自己的框架序列化回给对方；要带信封（`code`/`msg`）就写进 `response_param_template` 的常量。**失败路径目前没有出口**，见 §4.4.2。
 - **要掺我方动态字段**（traceId、受理时间、受理流水号）→ `post_strategy_name`（`applyPostStrategy:326` 支持返回 Map 覆盖/替换产物）+ `@IfmapAction` 生成流水号写入 `StrategyContext`。**不新增机制。**
-- **判定**：`{"op":"always"}` = "收到即可处理"；`{"all":[{"path":"$.status","op":"equal","value":"SUCCESS"}]}` = "只处理成功通知"。判定失败 → 不执行动作、不入池、日志 `FAIL` + `error_msg`（现有行为）。
+- **判定**：`{"op":"always"}` = 「收到即可处理」；`{"all":[{"path":"$.code","op":"eq","value":"0000"}]}` = 「只处理合法通知」。算子是**闭合集合** `always/eq/ne/in/notIn/exists/notBlank/regex`（`JudgeOp`，大小写不敏感、忽略下划线）—— 写成 `equal` 会被判非法规格；顶层只能是 `{"op":"always"}` 或 `{"all":[...]}` / `{"any":[...]}`（两者不可同时出现）。判定失败 → 不执行动作、不入池、日志 `FAIL` + `error_msg`（现有行为），应答见 §4.4.2。
 
 #### 4.4.1 应答（ACK）怎么配
 

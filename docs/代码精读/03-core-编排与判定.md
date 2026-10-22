@@ -35,133 +35,140 @@
 
 ---
 
-## 2. `orchestrator/IfmapOrchestrator.java`（767 行）
+## 2. `orchestrator/IfmapOrchestrator.java`（867 行）
 
-整篇最重要的类。分四段读：入口与计划（131–214）、单步执行（216–331）、
-基础设施方法（333–583）、两个内部类（586–766）。
+整篇最重要的类。分四段读：入口与计划（130–234）、单步执行（236–306）、
+策略与基础设施（308–692）、两个内部类（694–866）。
 
-### 2.1 入口与执行计划（131–214）
+### 2.1 入口与执行计划（130–234）
 
 | 行 | 方法 | 说明 |
 |---|---|---|
-| 134 | `execute(request, interfaceNo, busiNode)` | 3 参重载 → 转调 4 参（`mockResponse=null`） |
-| 141 | `execute(request, interfaceNo, busiNode, mockResponse)` | ① 记 `start`；② `tenantResolver.resolve`；③ `loadPlan`；④ **计划为空立刻抛**（消息带三要素）；⑤ `runPlan` |
-| 163 | `loadPlan` | `repository.queryConfigsByBusiNode` → `InterfaceOrdering.enabled` → `InterfaceOrdering.sort`；`interfaceNo` 只当**起点**：命中则 `subList(i, size)` 截断，**未命中抛异常**（`176`）；空/空串 → 整个节点 |
-| 185 | `runPlan` | **本方法持有跨步骤共享池**（`188`）；逐步 `executeOne`；每步把 `interfaceNo`/`matchedBranch`/`rawResponse` 汇总进 `result`；失败时记 `failType` 并按 `stopOnFailure`（默认 `true`）决定是否中断；末尾 `flattenPool(pool)` + `data.put(POOL_KEY, pool)`（`209–211`，既保扁平语义又提供可往返结构） |
+| 133 | `execute(request, interfaceNo, busiNode)` | 3 参重载 → 转调 4 参（`mockResponse=null`） |
+| 140 | `execute(request, interfaceNo, busiNode, mockResponse)` | ① 记 `start`；② `tenantResolver.resolve`；③ `loadPlan`；④ **计划为空立刻抛**（`148–151`，消息带三要素）；⑤ `runPlan` |
+| 164 | `executeInbound(request, interfaceNo, busiNode, rawBody)` | 被调方向便捷入口 = `execute(request.withRawBody(rawBody), ...)`；**方向仍以配置为准**（传了原文但配置是 OUTBOUND，照旧出网） |
+| 179 | `loadPlan` | `repository.queryConfigsByBusiNode` → `InterfaceOrdering.enabled` → `InterfaceOrdering.sort`；`interfaceNo` 只当**起点**：命中则 `subList(i, size)` 截断，**未命中抛异常**（`193–194`）；空/空串 → 整个节点 |
+| 202 | `runPlan` | **本方法持有跨步骤共享池**（`205`）；逐步 `executeOne`；每步把 `interfaceNo`/`matchedBranch`/`rawResponse` 汇总进 `result`（`212–218`）；失败时记 `failType` 并按 `stopOnFailure`（默认 `true`）决定是否中断（`220–227`）；末尾 `flattenPool(pool)` + `data.put(POOL_KEY, pool)`（`230–231`，既保扁平语义又提供可往返结构） |
 
-**为什么「起点」就能表达断点续跑**（`155–158` 的 javadoc）：一个 `busi_node` 就是一条流水线，
+**为什么「起点」就能表达断点续跑**（`168–178` 的 javadoc）：一个 `busi_node` 就是一条流水线，
 起点位置就是进度 —— 把上次最后成功的接口号当起点传进来即可，**不需要额外字段或状态表**。
 
-### 2.2 单步执行（216–331）
+### 2.2 单步执行（236–306）
 
 `executeOne` 有**两个**版本：
 
 | 行 | 签名 | 说明 |
 |---|---|---|
-| 222 | `public executeOne(req, tenant, config, mock)` | 独立调用，**自建池**（`initialPool`），只服务本条 |
-| 227 | `private executeOne(..., pool)` | 计划内调用，**外部传池** |
+| 242 | `public executeOne(req, tenant, config, mock)` | 独立调用，**自建池**（`initialPool`），只服务本条 |
+| 247 | `private executeOne(..., pool)` | 计划内调用，**外部传池** |
 
-单步的 11 步（按行号顺序就是执行顺序）：
+单步的 12 步（按行号顺序就是执行顺序）：
 
 | 行 | 动作 | 要点 |
 |---|---|---|
-| 230 | 建 `RuleContext` | `tenantId` / `interfaceNo` / `request.attributes` |
-| 235 | 建 `StrategyContext` | 带 `request` / `config` / `ruleContext` / `params=payload` |
-| 238–239 | 组包 | `fullParams.assemble(partnerCode, busiNode, context)` 起底 |
-| 241 | **池覆盖** | `requestParams.putAll(flattenPool(pool))` —— 池在后，**覆盖** payload 与组包策略的同名顶层键 |
-| 242 | 保留键 | `requestParams.put(POOL_KEY, pool)`，模板可用 `$.pool.*` |
-| 244 | 渲染请求 | 模板为空 → 原样透传（`render` 方法 481 行） |
-| 246 | **前序策略** | `applyPreStrategy`，可改 `requestJson` |
-| 248–249 | 出网 | `mockResponse != null` 时**不出网**，直接当响应体 |
-| 253 | 产物 | `applyPostStrategy(context, renderResponse(...))` |
-| 255 | **判定** | `pipeline.judge(config, response, outcome)` —— **读原始回参 `response`**，不是产物 |
-| 256–258 | 入池 | 判定成功才 `pool.put(interfaceNo, data)` |
-| 259 | 分支 | 成功才 `applyBranch` |
-| 260 | 失败原因 | `failureMessage(judgement)` |
-| 262 | 落库 | `writeLog(...)` |
+| 250 | 建 `RuleContext` | `tenantId` / `interfaceNo` / `request.attributes` |
+| 255 | 建 `StrategyContext` | 带 `request` / `config` / `ruleContext` / `params=initialParams(request, config)` |
+| 258 | 参数三层合成 | `fullParams.assemble(partnerCode, busiNode, context)` 起底 |
+| 262 | **池覆盖** | `requestParams.putAll(flattenPool(pool))` —— 池在后，**覆盖** payload 与组包策略的同名顶层键 |
+| 263 | 保留键 | `requestParams.put(POOL_KEY, pool)`，模板可用 `$.pool.*` |
+| 266 | **方向分流** | `boolean inbound = config.inbound()`：一次分支决定后面「渲染 / 出网」两件事 |
+| 268–270 | 被调：原文即请求 | `requestJson = inboundSource(request)`，**不渲染请求模板、不跑前序策略** |
+| 272–276 | 出网：渲染请求 | 模板为空 → 原样透传（`render`，`586`）；再交 `applyPreStrategy` 可改 `requestJson` |
+| 281–282 | 出网 / 回参 | `mockResponse != null` 时**不出网**且**两方向都优先**；否则 `inbound ? ofBody(requestJson) : exchange(...)` |
+| 287 | 产物 | `applyPostStrategy(context, renderResponse(...))` |
+| 289 | **判定** | `pipeline.judge(config, response, outcome)` —— **读原始回参 `response`**，不是产物 |
+| 291–293 | 入池 | 判定成功才 `pool.put(interfaceNo, data)` |
+| 296 | 产物回填 | `context.setResponseData(data)` **无条件**设（`applyPostStrategy` 早返回时不设 ⇒ 动作里拿不到产物） |
+| 298 | 分支 | 成功才 `applyBranch`（**失败不跑动作**） |
+| 299 | 失败原因 | `failureMessage(judgement)` |
+| 303 | 落库 | `writeLog(..., inbound ? toJsonQuietly(data) : response, ...)` —— 被调方向记的是**我方应答** |
 
-### 2.3 前序策略（267–291）
+### 2.3 前序策略（308–341）
 
 | 行 | 说明 |
 |---|---|
-| 268 | `setPhase(PRE)` —— 策略里可据此分支 |
-| 269–272 | `pre_strategy_name` 为空 → 直接返回原 `requestJson` |
-| 273–281 | 查不到策略：`failOnMissingStrategy`（默认 `true`）抛 `IfmapStrategyException`，否则 WARN + 原样 |
-| 282–285 | 返回 `null`/空 Map → 原样（**"没额外参数"不是错误**） |
-| 286–290 | 有额外参数 → `context.putParams(extra)` → **用同一个请求模板重渲染一遍** → 更新 `requestJson` |
+| 316 | `setPhase(PRE)` —— 策略里可据此分支 |
+| 317–320 | `pre_strategy_name` 为空 → 直接返回原 `requestJson` |
+| 321–329 | 查不到策略：`failOnMissingStrategy`（默认 `true`）抛 `IfmapStrategyException`，否则 WARN + 原样 |
+| 330–334 | 返回 `null`/空 Map → 原样（**"没额外参数"不是错误**） |
+| 335–340 | 有额外参数 → `context.putParams(extra)` → **用同一个请求模板重渲染一遍** → 更新 `requestJson` |
 
 **重渲染，而不是"往 JSON 里打补丁"**：模板里可能用 `@FUN(...)` 依赖新参数，
 打补丁会让模板逻辑失效。
 
-### 2.4 后序策略（293–331）
+### 2.4 后序策略（343–382）
 
 | 行 | 说明 |
 |---|---|
-| 302–305 | `post_strategy_name` 为空 → 返回原产物 |
-| 306–314 | 查不到：同上（`failOnMissingStrategy` 控制） |
-| 315–317 | `setPhase(POST)` + `setResponseData(data)` |
-| 318–326 | 合并：策略通过 `setResponseData` **整体替换**（必须是 `Map` 才生效，否则忽略）→ 以替换后的为底 |
-| 327–329 | 策略返回值 `extra` 覆盖同键（**返回键优先**） |
+| 352–355 | `post_strategy_name` 为空 → 返回原产物（**早返回，不设 `responseData`**，所以 `executeOne:296` 要补设） |
+| 356–364 | 查不到：同上（`failOnMissingStrategy` 控制） |
+| 366–367 | `setPhase(POST)` + `setResponseData(data)` |
+| 368–377 | 合并：策略通过 `setResponseData` **整体替换**（必须是 `Map` 才生效，否则忽略）→ 以替换后的为底 |
+| 378–380 | 策略返回值 `extra` 覆盖同键（**返回键优先**） |
 
-**判定读原始回参**（255 行注释）：后序策略只能加工产物，改不动成败。
+**判定读原始回参**（288 行注释）：后序策略只能加工产物，改不动成败。
 
-### 2.5 池（333–362）
-
-| 行 | 方法 | 说明 |
-|---|---|---|
-| 334 | `initialPool(request)` | `payload.pool` 是 `Map` 时**浅拷**一份（`String.valueOf` 键）—— 不写回、不持有宿主对象 |
-| 351 | `flattenPool(pool)` | 按池的插入顺序 reduce，**同名键后者胜**：预置项（断点续跑回放）在前、本次成功步骤按计划顺序在后。要精确取某步字段用 `$.pool.{interface_no}.xxx` |
-
-### 2.6 出网与产物（364–400）
+### 2.5 入参与池（384–472）
 
 | 行 | 方法 | 说明 |
 |---|---|---|
-| 371 | `exchange` | `gateway == null` → WARN + `PartnerOutcome.ofBody(null)`（只做本地渲染 / dry-run） |
-| 377 | | 组 `PartnerCall.of(config, request, requestJson, params)` |
-| 379–383 | | `gateway.exchangeForOutcome(call)`；**`IfmapRemoteException` 收敛成判定失败**（返回 `PartnerOutcome.failure`），其他 `RuntimeException` 照原样传播 |
-| 386 | `renderResponse` | 响应体为 null 或模板为空 → `emptyMap()`；否则渲染 → `parseLenient` → 只接受 `Map` 根，其他返回 `emptyMap()` |
-| 488 | `parseLenient` | 解析失败 DEBUG 后返回 null（**响应不是 JSON 不算崩溃**，交给判定层归因 `NOT_JSON`） |
+| 391 | `initialParams(request, config)` | 出网方向 / payload 非空 → 直接用 `payload`；**只有「被调方向 + payload 为空」**才宽松解析对方原文（同一接口不会时而读原文时而读 payload） |
+| 412 | `inboundSource(request)` | 被调方向的「回参」= `rawBody`；没传则退化成 `payload` 的序列化形态；都没有 → null（交给判定给 `NOT_JSON`） |
+| 422 | `toJsonQuietly(data)` | 只为写日志；序列化失败 WARN + null，**绝不影响业务返回** |
+| 435 | `initialPool(request)` | `payload.pool` 是 `Map` 时**浅拷**一份（`String.valueOf` 键）—— 不写回、不持有宿主对象 |
+| 453 | `flattenPool(pool)` | 按池的插入顺序 reduce，**同名键后者胜**：预置项（断点续跑回放）在前、本次成功步骤按计划顺序在后。要精确取某步字段用 `$.pool.{interface_no}.xxx` |
+
+### 2.6 出网与产物（474–520）
+
+| 行 | 方法 | 说明 |
+|---|---|---|
+| 474 | `exchange` | `gateway == null` → WARN + `PartnerOutcome.ofBody(null)`（只做本地渲染 / dry-run） |
+| 481 | | 组 `PartnerCall.of(config, request, requestJson, params)` |
+| 482–488 | | `gateway.exchangeForOutcome(call)`；**`IfmapRemoteException` 收敛成判定失败**（返回 `PartnerOutcome.failure`），其他 `RuntimeException` 照原样传播 |
+| 497 | `renderResponse` | 响应体为 null 或模板为空 → `emptyMap()`；否则渲染 → `parseLenient` → 只接受 `Map` 根，其他返回 `emptyMap()` |
+| 594 | `parseLenient` | 解析失败 DEBUG 后返回 null（**响应不是 JSON 不算崩溃**，交给判定层归因 `NOT_JSON`） |
 
 `IfmapRemoteException` 与非 `IfmapRemoteException` 的区别是**刻意的**：
 传输失败要能落库归因、要遵守 `stopOnFailure`；配置/编程错误不该被判定层吞掉。
 
-### 2.7 逻辑分支（402–469）
+### 2.7 逻辑分支（522–583）
 
 | 行 | 方法 | 说明 |
 |---|---|---|
-| 410 | `applyBranch` | 取 `queryLogicBranches(tenantId, interfaceNo)`；空 → DEBUG 返回 null |
-| 417–428 | **两趟扫描** | 第一趟顺手记住**第一条** `logic_branch_flag` 为空的兜底分支（`catchAll`），并跳过它 |
-| 429–432 | 常规命中 | `matches` → `executeBranch` → 立即返回 |
-| 434–438 | 兜底 | 常规全不中才走 `catchAll`（**即使它排在前面也不会抢常规分支的命中**） |
-| 439–441 | 都没有 | WARN（带分支条数与 `actualValue`）返回 null |
-| 445 | `executeBranch` | `setMatchedBranch(flag)`；动作键 = `methodFlag`，为空时**退回用 `logic_branch_flag` 当动作名**（`449`）；返回 `flag` |
-| 454 | `matches` | ① `logicBranches.matches(flag, context)` 策略命中；② 否则 `logic_branch_value` 按 `[;,]` 切分后 `equalsIgnoreCase` 逐个比（`463`）；`value` 或 `actualValue` 为空 → false |
+| 522 | `applyBranch` | 取 `queryLogicBranches(tenantId, interfaceNo)`；空 → DEBUG 返回 null |
+| 529–541 | **两趟扫描** | 第一趟顺手记住**第一条** `logic_branch_flag` 为空的兜底分支（`catchAll`），并跳过它 |
+| 542–545 | 常规命中 | `matches` → `executeBranch` → 立即返回 |
+| 547–551 | 兜底 | 常规全不中才走 `catchAll`（**即使它排在前面也不会抢常规分支的命中**） |
+| 552–554 | 都没有 | WARN（带分支条数与 `actualValue`）返回 null |
+| 558 | `executeBranch` | `setMatchedBranch(flag)`；动作键 = `methodFlag`，为空时**退回用 `logic_branch_flag` 当动作名**（`561–562`）；返回 `flag` |
+| 567 | `matches` | ① `logicBranches.matches(flag, context)` 策略命中（`569`）；② 否则 `logic_branch_value` 按 `[;,]` 切分后 `equalsIgnoreCase` 逐个比（`576–581`）；`value` 或 `actualValue` 为空 → false（`572–575`） |
 
-### 2.8 回调、渲染、日志（471–583）
+### 2.8 渲染与日志（586–692）
+
+> 回调通道（`callback(...)` + `CallbackRegistry`）已下线，被调场景改由 `executeInbound` + `call_direction=INBOUND` 承载。
 
 | 行 | 方法 | 说明 |
 |---|---|---|
-| 472 | `callback(request, interfaceNo, rawBody)` | 银行回调入口（替换存量 17 个回调方法）：`callbacks.dispatch` 后落日志（无判定结论，`config=null`） |
-| 481 | `render` | **模板为空 → 原样返回 source**（这是"直通"语义，不是渲染空） |
-| 501 / 513 / 519 | `writeLog` 三个重载 | 回调版（bool）/ 判定版（`Judgement`）/ 全参版 |
-| 521–523 | `logSink == null` | 直接返回（不装配就不落库） |
-| 525–542 | 组装 | `tenantId` 用 `parseTenantId`（**非法 → `-1`**）；请求/响应都过 `protect`（脱敏 + 截断）；有判定结论才写 `failType`/`errorCode`/`trackId`/`httpStatus` |
-| 543–545 | catch | 写日志失败只 WARN —— **落库不能影响业务** |
-| 549 | `failureMessage` | 「判定口径」+「对方原文」两段拼接（`reason：message`） |
-| 561 | `protect` | `logMasker.mask` → `Logs.truncate(masked, threshold)` |
-| 566 | `parseTenantId` | 空/非数字 → `-1` |
-| 577 | `trimToNull` | 内部工具 |
+| 586 | `render` | **模板为空 → 原样返回 source**（这是"直通"语义，不是渲染空） |
+| 613 / 625 | `writeLog` 两个重载 | 判定版（`Judgement`，外层转调）/ **全参唯一实现**（`626` 起） |
+| 627–629 | `logSink == null` | 直接返回（不装配就不落库） |
+| 631–648 | 组装 | `tenantId` 用 `parseTenantId`（**非法 → `-1`**）；请求/响应都过 `protect`（脱敏 + 截断）；有判定结论才写 `failType`/`errorCode`/`trackId`/`httpStatus` |
+| 649–651 | catch | 写日志失败只 WARN —— **落库不能影响业务** |
+| 655 | `failureMessage` | 「判定口径」+「对方原文」两段拼接（`reason：message`） |
+| 668 | `protect` | `logMasker.mask` → `Logs.truncate(masked, threshold)` |
+| 674 | `parseTenantId` | 空/非数字 → `-1` |
+| 686 | `trimToNull` | 内部工具 |
 
-`error_msg` 两段式的理由（506–511 注释）：只写判定口径，运维还得翻响应报文；
+`error_msg` 两段式的理由（`606–611` 注释）：只写判定口径，运维还得翻响应报文；
 只写对方原话，又不知道是判定规格问题还是通道问题。
 
-### 2.9 两个内部类（586–766）
+### 2.9 两个内部类（694–866）
 
 | 行 | 类 | 说明 |
 |---|---|---|
-| 586 | `StepOutcome` | 单步结果：`success`/`data`/`rawResponse`/`errorMessage`/`matchedBranch`/`failType`；`data` 是 `unmodifiableMap(new LinkedHashMap(...))`（**拷一份再包**，只包不拷调用方仍能改到内容） |
-| 634 | `Builder` | 15 个可选依赖 + `stopOnFailure=true` / `failOnMissingStrategy=true` / `truncateThreshold` |
-| 739 | `build()` | 只强制 `engine`/`repository`/`tenantResolver`；**其余注册表缺省自行 new 空实例**（所以纯 Java 只给三个必需依赖就能跑） |
+| 695 | `StepOutcome` | 单步结果：`success`/`data`/`rawResponse`/`errorMessage`/`matchedBranch`/`failType`；`data` 是 `unmodifiableMap(new LinkedHashMap(...))`（**拷一份再包**，只包不拷调用方仍能改到内容） |
+| 743 | `Builder` | 13 个可选依赖 + `stopOnFailure=true` / `failOnMissingStrategy=true` / `truncateThreshold`（`758–760`） |
+| 842 | `build()` | 只强制 `engine`/`repository`/`tenantResolver`；**其余注册表缺省自行 new 空实例**（所以纯 Java 只给三个必需依赖就能跑） |
 
 ---
 

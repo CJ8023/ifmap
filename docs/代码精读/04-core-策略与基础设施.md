@@ -1,10 +1,10 @@
 # 04 · core：策略与基础设施
 
-覆盖 `strategy`（13 文件）与 `spi`（17 文件）。
+覆盖 `strategy`（12 文件）与 `spi`（15 文件）。
 
 两个包的分工很清楚：
 
-- `strategy` = **宿主可以换掉的行为**（组包、分支判定、动作、回调、前后序钩子），由 `@interface` + 注册表 + 上下文三件套构成；
+- `strategy` = **宿主可以换掉的行为**（组包、分支判定、动作、前后序钩子），由 `@interface` + 注册表 + 上下文三件套构成；
 - `spi` = **宿主必须提供或可以实现的能力**（网关、日志落地、租户解析、ID 生成、时钟、日志脱敏、判定器），由纯接口 + 两个自带实现构成。
 
 > 历史包袱说明：存量类名 `*SpecialDealStrategy` 已整体改名为 `IfmapStrategyHook` / `StrategyHookRegistry`
@@ -17,12 +17,11 @@
 
 | 扩展点 | 注解/接口 | 注册表 | 作用时机 |
 |---|---|---|---|
-| 组包 | `@FullParam` + `FullParamStrategy` | `FullParamStrategyRegistry` | 渲染请求模板**之前**（`IfmapOrchestrator:239`） |
-| 前序策略钩子 | `IfmapStrategyHook`（`phase=PRE`） | `StrategyHookRegistry` | 渲染后、出网**之前**（`:246`） |
-| 后序策略钩子 | `IfmapStrategyHook`（`phase=POST`） | 同上 | 产物之后、判定**之前**（`:253`） |
-| 分支判定 | `@LogicBranch` + `LogicBranchStrategy` | `LogicBranchStrategyRegistry` | 判定成功后匹配逻辑分支（`:456`） |
-| 分支动作 | `@IfmapAction` + `IfmapActionHandler` | `ActionRegistry` | 分支命中后执行（`:449`） |
-| 回调 | `IfmapCallbackHandler` | `CallbackRegistry` | 宿主主动调 `callback()`（`:475`） |
+| 组包 | `@FullParam` + `FullParamStrategy` | `FullParamStrategyRegistry` | 渲染请求模板**之前**（`IfmapOrchestrator:260`） |
+| 前序策略钩子 | `IfmapStrategyHook`（`phase=PRE`） | `StrategyHookRegistry` | 渲染后、出网**之前**（`:276`，被调方向不执行） |
+| 后序策略钩子 | `IfmapStrategyHook`（`phase=POST`） | 同上 | 产物之后、判定**之前**（`:287`） |
+| 分支判定 | `@LogicBranch` + `LogicBranchStrategy` | `LogicBranchStrategyRegistry` | 判定成功后匹配逻辑分支（`:542`） |
+| 分支动作 | `@IfmapAction` + `IfmapActionHandler` | `ActionRegistry` | 分支命中后执行（`:562`） |
 
 ---
 
@@ -143,11 +142,10 @@
 | `strategy/FullParam.java` | 42 | `@FullParam(partnerCode="*", busiNode="*")`（两个属性默认 `"*"`） |
 | `strategy/LogicBranch.java` | 36 | `@LogicBranch("flag")`（`value` 必填） |
 | `strategy/IfmapAction.java` | 39 | `@IfmapAction("actionKey")`（`value` 必填） |
-| `strategy/CallbackRegistry.java` | 80 | `register(handler)`（注解版）/`register(interfaceNo, handler)`/`dispatch(interfaceNo, request, rawBody)`；**未注册直接抛 `IfmapStrategyException`**（:67-69，不静默） |
 
 ---
 
-## 8. `spi` 包的 17 个文件
+## 8. `spi` 包的 15 个文件
 
 ### 8.1 分类
 
@@ -165,7 +163,6 @@
 | ID 生成实现 | `SnowflakeIdGenerator` | 140 | 自带 |
 | 时钟 | `ClockProvider` / `SystemClockProvider` | 27 / 32 | 自带（测试可注入） |
 | 节假日 | `HolidayCalendar` | 31 | 否（缺省周一~周五） |
-| 回调 | `IfmapCallback` + `IfmapCallbackHandler` | 41 / 32 | 否 |
 | 判定器 | `ResultJudge` + `ResultJudgeContext` | 38 / 61 | 自带（`ruleSpec`） |
 
 ### 8.2 `PartnerOutcome`（97 行）
@@ -231,8 +228,6 @@
 | `ExecutionLogSink` | 35 | `void write(ExecutionLog)`（:34） |
 | `PartnerServiceGateway` | 47 | `String exchange(PartnerCall)`（:36，老接口）+ **`default exchangeForOutcome(PartnerCall)`**（:44，新接口；默认实现把 `exchange` 的返回值包成 `ofBody`，所以老实现不用改） |
 | `RepositoryExecutionLogSink` | 41 | 构造收 `ConfigRepository`（:30），`write` 直接转 `saveExecutionLog`（:38） |
-| `IfmapCallback` | 41 | `@interface`，`String value()`（:40） |
-| `IfmapCallbackHandler` | 32 | `IfmapResult handle(IfmapRequest, String rawBody)`（:31） |
 | `ResultJudge` | 38 | `name()`（:34）+ `judge(ResultJudgeContext)`（:37） |
 | `ResultJudgeContext` | 61 | 构造 `(config, responseJson, jsonOps)`（:32）+ 四个 getter（`getTenantId` 在 :58） |
 
@@ -259,7 +254,7 @@
 
 | 设计文档条款 | 落地位置 |
 |---|---|
-| 前后序策略拆两个字段 | `IfmapConfig.preStrategyName` / `postStrategyName`（`02` 篇 DDL 28 列） |
+| 前后序策略拆两个字段 | `IfmapConfig.preStrategyName` / `postStrategyName`（`02` 篇 DDL 29 列） |
 | `StrategyContext.Phase` | `StrategyContext:37` |
 | 池保留键 `pool` | `IfmapOrchestrator` 的 `POOL_KEY`（`StrategyContext` 不持有池，池在编排器） |
 | 跨步骤共享池 | `runPlan:188` + `executeOne:227` 外部传池 |

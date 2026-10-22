@@ -131,9 +131,8 @@ DemoRunner             : 渲染结果：{"orgNo":"000012","applyNo":"AP202501010
 | `ifmapFullParamStrategyRegistry` | `FullParamStrategyRegistry` | 组包策略注册表（key = `partner|busi`） |
 | `ifmapLogicBranchStrategyRegistry` | `LogicBranchStrategyRegistry` | 分支条件策略注册表（key = 分支 flag） |
 | `ifmapActionRegistry` | `ActionRegistry` | 分支动作注册表（key = `method_flag`） |
-| `ifmapCallbackRegistry` | `CallbackRegistry` | 回调处理器注册表（key = 接口号） |
 | `ifmapContractValidator` | `ContractValidator` | 部署前契约自检（模板 JSON + `@FUN` 规则名/参数） |
-| `ifmapStrategyRegistrar` | `BeanPostProcessor` | 扫描宿主机 bean，自动注册 5 类策略（缺注解即启动失败） |
+| `ifmapStrategyRegistrar` | `BeanPostProcessor` | 扫描宿主机 bean，自动注册 4 类策略（缺注解即启动失败） |
 | `ifmapExecutionLogSink` | `ExecutionLogSink` | 执行日志落库（`ifmap.log.enabled=true` 时装配） |
 | `ifmapOrchestrator` | `IfmapOrchestrator` | 编排器。**需要 `ConfigRepository`**，无 `DataSource` 时不装配 |
 
@@ -302,14 +301,14 @@ public IfmapResult call(IfmapRequest request) {
 
 | 要点 | 说明 |
 | --- | --- |
-| 自动收集 | 5 类策略 bean（`IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler` / `IfmapCallbackHandler`）由 `ifmapStrategyRegistrar` 启动期注册 |
-| 启动期快速失败 | 实现了策略接口但**缺注解**（`@FullParam` / `@LogicBranch` / `@IfmapAction` / `@IfmapCallback`）→ 启动即报错并指出 bean 名 + 类名 |
+| 自动收集 | 4 类策略 bean（`IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler`）由 `ifmapStrategyRegistrar` 启动期注册 |
+| 启动期快速失败 | 实现了策略接口但**缺注解**（`@FullParam` / `@LogicBranch` / `@IfmapAction`）→ 启动即报错并指出 bean 名 + 类名 |
 | 代理安全 | 注解查找会沿父类链与接口链进行，AOP 代理过的 bean 同样识别 |
 | 编排器不装配？ | 编排器依赖 `ConfigRepository`，而仓储依赖 `DataSource`。**没有 `DataSource` 时编排器不装配**，但注册表/解析器/脱敏器照常 |
 | 失败行为可调 | `ifmap.orchestrator.*` 三个开关控制「失败即停」与「缺失策略/动作是否快速失败」 |
 | 日志与脱敏 | `ifmap.log.*` 控制落库、截断阈值、脱敏字段（详见 [`docs/06`](06-执行编排与策略扩展.md) §6） |
 
-编排链路（业务节点内的有序步骤 + 起点截断 + 跨步骤共享池 + 前 / 后序策略 + 判定 + 分支 + 回调）、`IfmapRequest`/`IfmapResult` 用法、
+编排链路（业务节点内的有序步骤 + 起点截断 + 跨步骤共享池 + 前 / 后序策略 + 判定 + 分支）、`IfmapRequest`/`IfmapResult` 用法、
 dry-run 试跑、契约自检见 [`docs/06-执行编排与策略扩展.md`](06-执行编排与策略扩展.md)。
 
 ### 3.5 配置库与日志库分离（不做多数据源框架）
@@ -518,7 +517,7 @@ starter 与手工装配**可以混用**：宿主想要哪个 bean 就自己声�
 | 启动报 `ifmap 表前缀非法` | `ifmap.table-prefix` 含非法字符 / 超长 / 数字开头 |
 | 表建了但查不到配置 | 检查 `del_status=0` 与 `status=1`（仓储只返回这两类），见 `docs/04` §3 |
 | 自定义规则不生效 | 规则类的 bean 没被 Spring 管到；日志会打印 `ifmap 已注册宿主机规则 bean：[...]，类 [...]`，看不到即未扫到 |
-| 启动报策略 bean 缺注解 | 实现了 `IfmapStrategyHook`/`FullParamStrategy`/`LogicBranchStrategy`/`IfmapActionHandler`/`IfmapCallbackHandler` 就必须带对应注解（`IfmapStrategyHook` 例外，它按 bean 名注册），报错信息里有 bean 名与类名 |
+| 启动报策略 bean 缺注解 | 实现了 `IfmapStrategyHook`/`FullParamStrategy`/`LogicBranchStrategy`/`IfmapActionHandler` 就必须带对应注解（`IfmapStrategyHook` 例外，它按 bean 名注册），报错信息里有 bean 名与类名 |
 | 启动期契约自检有违规 | 用 `ContractValidator.validate(configs).toMarkdown()` 打印明细；常见原因是模板不是合法 JSON、`@FUN` 规则名拼错（如 `farmatDate`） |
 | `IfmapOrchestrator` 注入不到 | 编排器需要 `ConfigRepository`（即需要 `DataSource`）。无数据源时它不装配；也可自行 `IfmapOrchestrator.builder()` 声明 bean |
 | 想看装配了什么 | `--debug` 启动，或看 `IfmapRuleRegistrar` / `IfmapStrategyRegistrar` / `IfmapSchemaInitializer` 的 INFO 日志 |

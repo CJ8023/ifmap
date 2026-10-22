@@ -7,11 +7,11 @@
 
 ---
 
-## 1. 装配全景（`IfmapAutoConfiguration`，359 行）
+## 1. 装配全景（`IfmapAutoConfiguration`，350 行）
 
 类条件（78–79）：`@ConditionalOnClass(IfmapEngine.class)` + `ifmap.enabled`（`matchIfMissing = true`）。
 
-### 1.1 基础 bean（83–195）
+### 1.1 基础 bean（83–188）
 
 | 行 | bean | 依赖 | 说明 |
 |---|---|---|---|
@@ -29,20 +29,19 @@
 | 166 | `FullParamStrategyRegistry` | — | — |
 | 172 | `LogicBranchStrategyRegistry` | — | — |
 | 178 | `ActionRegistry` | props | 把 `failOnMissingAction` 传进去 |
-| 186 | `CallbackRegistry` | — | — |
-| 193 | `ContractValidator` | `IfmapEngine` | 部署前契约自检（**不在启动时扫库**，由管理端调用） |
+| 186 | `ContractValidator` | `IfmapEngine` | 部署前契约自检（**不在启动时扫库**，由管理端调用） |
 
-### 1.2 `OrchestrationConfiguration`（198–248）
+### 1.2 `OrchestrationConfiguration`（191–241）
 
 条件：`@ConditionalOnBean(ConfigRepository)` —— **没有仓库就不装配编排器**（纯模板渲染场景不引入它）。
 
 | 行 | bean | 说明 |
 |---|---|---|
-| 205 | `ExecutionLogSink` | `RepositoryExecutionLogSink`；另有 `ifmap.log.enabled` 开关 |
-| 211 | `IfmapOrchestrator` | 15 个依赖全走构造参数；`gateway` / `logSink` 用 `ObjectProvider`（**可选**）；三个开关从 `ifmap.orchestrator.*` 取 |
-| 245 | `toThreshold(long)` | `<= 0` → `Integer.MAX_VALUE`（= 不截断）；超 int 上限时截断 |
+| 198 | `ExecutionLogSink` | `RepositoryExecutionLogSink`；另有 `ifmap.log.enabled` 开关 |
+| 204 | `IfmapOrchestrator` | 13 个依赖全走构造参数；`gateway` / `logSink` 用 `ObjectProvider`（**可选**）；三个开关从 `ifmap.orchestrator.*` 取 |
+| 238 | `toThreshold(long)` | `<= 0` → `Integer.MAX_VALUE`（= 不截断）；超 int 上限时截断 |
 
-### 1.3 `CacheConfiguration`（252–269）
+### 1.3 `CacheConfiguration`（243–265）
 
 条件：`ifmap.cache.enabled`（`matchIfMissing = true`）。
 
@@ -54,13 +53,13 @@
 两个都是 `@ConditionalOnMissingBean(ConfigCache.class)` —— Caffeine 存在时前者先建，后者因 MissingBean 不成立而跳过。
 这是**刻意的降级设计**，不是"同一件事两套做法"。
 
-### 1.4 `DdlConfiguration`（272–284）
+### 1.4 `DdlConfiguration`（267–278）
 
 条件：有 `DataSource` + `JdbcTemplate` + `ifmap.ddl.auto=true`（`matchIfMissing = true`）→ `IfmapSchemaInitializer`。
 
 > 用户把 `ifmap.ddl.auto` 设为 `false` 时，本配置整块不生效（生产由 DBA 执行 SQL）。
 
-### 1.5 `LogCleanConfiguration`（287–297）与 `LogCleanSchedulingConfiguration`（309–330）
+### 1.5 `LogCleanConfiguration`（281–303）与 `LogCleanSchedulingConfiguration`（306–325）
 
 拆成两块是刻意的：
 
@@ -76,12 +75,12 @@
 
 > 这条与 `docs/08` 的验收口径「非 Web 应用可退出 / `java -jar` exit=0」是同一条约束的两种表达，**别改回去**。
 
-### 1.6 `RepositoryConfiguration`（333–357）
+### 1.6 `RepositoryConfiguration`（327–350）
 
 | 行 | bean | 说明 |
 |---|---|---|
-| 339 | `ConfigRepository` | `JdbcConfigRepository`；若存在 `ConfigCache` 则包一层 `CachingConfigRepository`；**`:345` 先 `schemaInitializers.getIfAvailable()` 强制建表 bean 先完成**（否则仓储可能在表还不存在时被业务提前使用） |
-| 353 | `JdbcConfigWriter` | 写路径单独成 bean |
+| 331 | `ConfigRepository` | `JdbcConfigRepository`；若存在 `ConfigCache` 则包一层 `CachingConfigRepository`；**`:339` 先 `schemaInitializers.getIfAvailable()` 强制建表 bean 先完成**（否则仓储可能在表还不存在时被业务提前使用） |
+| 345 | `JdbcConfigWriter` | 写路径单独成 bean |
 
 ---
 
@@ -208,16 +207,15 @@
 | 84 | `hasRuleMethod(type)` | 反射扫描（带缓存） |
 | 101 | `registeredBeanNames()` | — |
 
-### 3.5 `IfmapStrategyRegistrar`（119 行）
+### 3.5 `IfmapStrategyRegistrar`（111 行）
 
-同上，但注册**四类**策略：`IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler`，
-外加 `IfmapCallbackHandler`（按注解 key 进 `CallbackRegistry`）。
+同上，但注册**四类**策略：`IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy` / `IfmapActionHandler`。
 
 | 行 | 成员 | 说明 |
 |---|---|---|
-| 73 | `postProcessAfterInitialization` | 主逻辑 |
-| 106 | `isInfrastructure(bean)` | **注册表自身与编排器不是策略**，跳过以免自注册（`IfmapOrchestrator` 恰好实现了若干接口时会踩到） |
-| 116 | `registeredBeanNames()` | — |
+| 70 | `postProcessAfterInitialization` | 主逻辑 |
+| 99 | `isInfrastructure(bean)` | **注册表自身与编排器不是策略**，跳过以免自注册（`IfmapOrchestrator` 恰好实现了若干接口时会踩到） |
+| 108 | `registeredBeanNames()` | — |
 
 ### 3.6 `CaffeineConfigCache`（86 行）
 

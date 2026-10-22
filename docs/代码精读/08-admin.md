@@ -19,7 +19,7 @@
 
 ## 1. 自动配置
 
-### 1.1 `IfmapAdminAutoConfiguration`（225 行）
+### 1.1 `IfmapAdminAutoConfiguration`（223 行）
 
 **五个条件同时满足才生效**（72–75）：`DispatcherServlet` + `JdbcTemplate` + `IfmapOrchestrator` 都在 classpath、
 是 **Servlet Web 应用**、`ifmap.admin.enabled=true`（**默认 false**）、有 `DataSource`。
@@ -117,34 +117,42 @@
 **`evictByInterface`（365）**：只对 `CachingConfigRepository` 生效（`instanceof`），把 `(tenantId, interfaceNo)` 的缓存项删掉。
 理由见 :364 注释 —— **改完立刻失效，否则 TTL 内引擎仍按旧配置跑**。
 
-### 2.2 `ConfigValidator`（523 行）· 管理端最重的一块
+### 2.2 `ConfigValidator`（630 行）· 管理端最重的一块
 
 `POOL_ROOT = "$.pool."`（57）。校验分七段，**顺序决定报错优先级**：
 
 | 行 | 段 | 检查什么 |
 |---|---|---|
-| 86 | `validate(config, creating)` | 入口：必填字段 → 模板 JSON → 表达式 → 路径 → 池引用 → 判定规格 → 策略名 → 唯一键 |
-| 106 | `validateBranches(tenantId, interfaceNo)` | 该接口下所有分支逐个校验 + 互斥检查 |
-| 137 | `validateBranch(branch, creating)` | 单分支：必填 + `methodFlag` 是否存在 |
-| 175 | `checkTemplateContract` | 复用 `ContractValidator`（与引擎启动期自检**同一口径**） |
-| 193 | `checkJudgeSpec` | 复用 `ResultJudgeSpec.validate`（**三处口径同源**） |
-| 211 | `checkTemplateJson(template, column, result)` | 模板必须是合法 JSON |
-| 223 | `checkJsonPaths` | 模板里出现的每个 `$.xxx`，在**同类配置的请求模板**里要能找到来源 |
-| 273 | `checkPoolRefs(config, requestPaths, result)` | **池引用静态校验**：`$.pool.X` 的 X 必须由**前序**步骤产出 |
-| 348 | `checkExpressions(template, column, result)` | 复用 `TemplateScanner.expressionProblems`（`@FUN(` 未注册、语法错） |
-| 357 / 371 / 389 | `collectPaths` / `walk` / `collectFromText` | 从模板里抽 `$.` 路径（含文本里的） |
-| 400 / 406 | `checkStrategyName` / `checkStrategy` | `pre_strategy_name` / `post_strategy_name` 必须在 `StrategyHookRegistry` 里 |
-| 419 | `liveConfigs(tenantId, interfaceNo)` | 取该接口现存配置（判唯一键 / 判池引用都要看"别人") |
-| 426 | `liveRows(query)` | 同上，走 `ConfigQuery` |
-| 436 | `isSelf` | 编辑自己时排除自己（否则"和自己冲突"） |
-| 452 | `checkUniqueKey(config, result)` | **同租户 + 同节点 + 同 `interface_order` 不能重复**（对应 `uk_config_order`） |
-| 488 | `sameOrder` | null 安全比较 |
-| 492 | `checkMethodFlag(row, result)` | 分支动作必须已注册（`ActionRegistry`） |
-| 506 | `isDefaultBranch(row)` | `logic_branch_flag` 空 = 兜底分支 |
-| 510 / 516 / 520 | `required` / `asTenantId` / `isBlank` | 小工具 |
+| 93 | `validate(config, creating)` | 入口：必填字段 → 模板契约 → 判定规格 → **调用方向** → 路径 → 策略名 → 唯一键（`:102` 注释里的「下面六步」） |
+| 115 | `validateBranches(tenantId, interfaceNo)` | 该接口下所有分支逐个校验 + 互斥检查 |
+| 147 | `validateBranch(branch, creating)` | 单分支：必填 + `methodFlag` 是否存在 |
+| 185 | `checkTemplateContract` | 复用 `ContractValidator`（与引擎启动期自检**同一口径**） |
+| 203 | `checkJudgeSpec` | 复用 `ResultJudgeSpec.validate`（**三处口径同源**） |
+| 236 | `checkCallDirection` | **被调方向专属**：3 个 error（应答模板空 / 请求模板非空 / 前序策略非空）+ 3 个 warning（判定是 `always` / 尚无逻辑分支 / 排在出网步骤之后）。`OUTBOUND` 完全不受影响 |
+| 272 | `checkInboundIsFirstStep` | 同 `busiNode` 内存在 `interfaceOrder` 更小的**非 inbound** 行 → warning |
+| 294 | `judgeIsAlways` | 解析失败返回 false（不重复报错，语法错由 `checkJudgeSpec` 管） |
+| 303 | `checkTemplateJson(template, column, result)` | 模板必须是合法 JSON |
+| 315 | `checkJsonPaths` | 模板里出现的每个 `$.xxx`，在**同类配置的请求模板**里要能找到来源 |
+| 365 | `checkPoolRefs(config, requestPaths, result)` | **池引用静态校验**：`$.pool.X` 的 X 必须由**前序**步骤产出 |
+| 419 | `poolRefName` | 从 `$.pool.xxx.yyy` 取出 `xxx` |
+| 441 | `checkExpressions(template, column, result)` | 复用 `TemplateScanner.expressionProblems`（`@FUN(` 未注册、语法错） |
+| 451 / 466 / 485 | `collectPaths` / `walk` / `collectFromText` | 从模板里抽 `$.` 路径（含文本里的） |
+| 496 / 502 | `checkStrategyName` / `checkStrategy` | `pre_strategy_name` / `post_strategy_name` 必须在 `StrategyHookRegistry` 里 |
+| 516 | `liveConfigs(tenantId, interfaceNo)` | 取该接口现存配置（判唯一键 / 判池引用都要看"别人") |
+| 524 | `liveRows(query)` | 同上，走 `ConfigQuery` |
+| 535 | `isSelf` | 编辑自己时排除自己（否则"和自己冲突"） |
+| 551 | `checkUniqueKey(config, result)` | **同租户 + 同节点 + 同 `interface_order` 不能重复**（对应 `uk_config_order`） |
+| 590 | `sameOrder` | null 安全比较 |
+| 595 | `checkMethodFlag(row, result)` | 分支动作必须已注册（`ActionRegistry`） |
+| 610 | `isDefaultBranch(row)` | `logic_branch_flag` 空 = 兜底分支 |
+| 615 / 622 / 627 | `required` / `asTenantId` / `isBlank` | 小工具 |
 
-> `checkPoolRefs`（273）是 **P4 新增**的：`$.pool.X` 在运行时才能确认有没有值，但**静态就能确认"有没有前序步骤会产出 X"**。
-> 这条校验把"配完跑一遍才发现池键拼错"提前到保存时。`poolRefName:327` 负责从 `$.pool.xxx.yyy` 里取出 `xxx`。
+> `checkCallDirection`（236）是**被调接口**新增的：所有规则都只在 `INBOUND` 下触发，存量 `OUTBOUND` 配置的行为零变化。
+> 为什么不是"4 个 error"：`request_param_template` 非空在 INBOUND 下确实永不生效，属于 error；但 `result_judge=always`
+> 与"无逻辑分支"只是**容易配错**，不是"必然不工作"，所以给 warning —— 硬凑 error 会让用户改配置改不动。
+
+> `checkPoolRefs`（365）是**池引用**校验：`$.pool.X` 在运行时才能确认有没有值，但**静态就能确认"有没有前序步骤会产出 X"**。
+> 这条校验把"配完跑一遍才发现池键拼错"提前到保存时。`poolRefName:419` 负责从 `$.pool.xxx.yyy` 里取出 `xxx`。
 
 ### 2.3 `ConfigAuditor`（129 行）
 
@@ -163,7 +171,7 @@
 | 59 | `fromSnapshot(snapshot)` | 快照 → 配置（回滚用）；**兼容老格式**（`splitLegacyValues:137`） |
 | 137 | `splitLegacyValues(expected)` | 老 `success_value` 是分隔串，拆成列表 |
 | 165 | `diff(before, after)` | 字段级差异 → JSON（只记变化的字段） |
-| 185 | `toMap(config)` | 配置 → `Map`（28 个字段，diff 的基础） |
+| 188 | `toMap(config)` | 配置 → `Map`（29 个字段，diff 的基础） |
 | 210 | `parseJsonOrNull(json)` | 容错解析 |
 | 221 / 225 / 229 / 243 | `equals` / `asString` / `asLong` / `asInt` | null 安全的类型归一化 |
 
@@ -204,13 +212,15 @@
 | `spi/EnumOption` | 73 | `value` / `label` + `equals`/`hashCode`（去重靠它） |
 | `spi/IfmapEnumProvider` | 56 | 宿主字典 SPI：`Map<String, List<EnumOption>> options()` |
 
-### 3.1 `IfmapBuiltinEnums`（87 行）· 框架自带的字典
+### 3.1 `IfmapBuiltinEnums`（95 行）· 框架自带的字典
 
 | 行 | 成员 | 说明 |
 |---|---|---|
-| 51 / 54 | `STRATEGY_NAME_KEY = "strategyName"` / `STATUS_KEY = "status"` | 页面 `dict` 用的键名 |
-| 65 | `of(strategyNames)` | 组装：策略名取自 `StrategyHookRegistry.keys()`（**不硬编码**）；`status` 固定 `1 启用 / 0 停用` |
-| 68 | `TreeSet` | **去重 + 排序**：下拉顺序不该随 bean 注册顺序抖动（同一份配置两次打开页面对不上） |
+| 52 / 55 / 58 | `STRATEGY_NAME_KEY = "strategyName"` / `STATUS_KEY = "status"` / `CALL_DIRECTION_KEY = "callDirection"` | 页面 `dict` 用的键名 |
+| 85 | `strategies` | 策略名取自 `StrategyHookRegistry.keys()`（**不硬编码**），为空时**不放这个键** |
+| 87 | `status` | 固定 `1 启用 / 0 停用` |
+| 90 | `callDirection` | `OUTBOUND`＝「我方调对方（出网）」/ `INBOUND`＝「对方调我方（被调）」—— **值必须与枚举名一致**，否则存库再 `fromName` 会判非法 |
+| 93 | `TreeSet` | **去重 + 排序**：下拉顺序不该随 bean 注册顺序抖动（同一份配置两次打开页面对不上） |
 
 ### 3.2 `IfmapEnumCatalog`（122 行）· 合并策略
 
@@ -263,7 +273,7 @@
 |---|---|---|
 | 78 | `GET /rules` | `List<RuleDescriptor>`（规则名 / 签名 / 说明 / 示例） |
 | 84 | `GET /actions` | `Set<String>`（动作 key） |
-| 90 | `GET /strategies` | `{strategyHooks, fullParams, logicBranches, actions, callbacks}`（**key 名与前端 `dictOptions` 约定一致**） |
+| 90 | `GET /strategies` | `{strategyHooks, fullParams, logicBranches, actions}`（**key 名与前端 `dictOptions` 约定一致**） |
 | 107 | `GET /enums` | 宿主字典；未注册时返回 `{}` 而**不是 404**（页面只需一条普通分支） |
 | 113 | `GET /audit` | `AuditReport`；`markdown=true` 时返回 `{markdown: "..."}` |
 
@@ -341,15 +351,16 @@
 | `spec.dict` 且 `dictOptions()` **非空** | `<select>`，并给"字典未覆盖的当前值"补一个 `(字典未覆盖)` 选项（`extra`，:401）——否则编辑老数据时下拉会落到第一项，保存即静默改值 |
 | `spec.dict` 但 `dictOptions()` **为空** | **退化成普通 `<input>`**（:411-415；注释写死了理由：只剩一个「(空)」选项等于把字段锁死） |
 
-**`CONFIG_FIELDS`（461–480，19 项）**：`tenantId` / `interfaceNo` / `interfaceCode` / `interfaceName` / `projectCode` /
-`busiNode` / `partnerCode`(dict) / `partnerName` / `financingMode`(dict) / `interfaceOrder` / `judgeName` /
+**`CONFIG_FIELDS`（461–481，19 项）**：`tenantId` / `interfaceNo` / `interfaceCode` / `interfaceName` / `projectCode` /
+`busiNode` / `partnerCode`(dict) / `partnerName` / `financingMode`(dict) / `interfaceOrder` / **`callDirection`**(dict) / `judgeName` /
 `resultJudge`(judge) / `preStrategyName`(dict:strategyName) / `postStrategyName`(dict:strategyName) / `status`(dict) /
-`remark` / `requestParamTemplate` / `responseParamTemplate`。
+`remark` / `requestParamTemplate` / `responseParamTemplate`；新建默认值 `NEW_CONFIG_DEFAULTS`（`:495`）里 `callDirection: 'OUTBOUND'`。
+列表多一列「方向」（`directionLabel`，`:546`：`INBOUND` → 被调，其余 → 出网）。
 
-**`BRANCH_FIELDS`（482–491，8 项）**：`tenantId` / `interfaceNo` / `methodFlag`(dict:`#actions`) / `logicBranchName` /
+**`BRANCH_FIELDS`（483–492，8 项）**：`tenantId` / `interfaceNo` / `methodFlag`(dict:`#actions`) / `logicBranchName` /
 `logicBranchFlag` / `logicBranchValue` / `logicBranchOrder` / `remark`。
 
-**`JUDGE_*` 常量（198–207）**：`JUDGE_OPS`（`eq/ne/in/notIn/exists/notBlank/regex`，与后端 `JudgeOp` 同序）、
+**`JUDGE_*` 常量（203–211）**：`JUDGE_OPS`（`eq/ne/in/notIn/exists/notBlank/regex`，与后端 `JudgeOp` 同序）、
 `JUDGE_LIST_OPS`（`in`/`notIn` 的 value 是数组）、`JUDGE_NO_VALUE_OPS`（`exists`/`notBlank`）、
 `JUDGE_ALWAYS = '{"op":"always"}'`。
 
@@ -408,11 +419,11 @@
 | 文件 | 行 | 覆盖 |
 |---|---|---|
 | `ConfigAdminServiceTest` | 411 | 增删改查 / 乐观锁 / 回滚 / 缓存失效 / dry-run 参数校验 |
-| `ConfigValidatorTest` | 412 | 七段校验的每条规则（含池引用静态校验、唯一键、分支互斥） |
+| `ConfigValidatorTest` | 479 | 七段校验的每条规则（含池引用静态校验、唯一键、分支互斥、被调方向 3 error + 3 warning） |
 | `IfmapAdminWebEndpointTest` | 341 | 全部端点的状态码与返回体（含 400/422 分支） |
 | `IfmapAdminUiScriptTest` | 254 | 静态契约测试：`app.js` 里必须存在的函数/常量、按钮清单、**不允许出现的写法** |
 | `IfmapAdminAutoConfigurationTest` | 169 | 五个条件的行为 + `@ConditionalOnMissingBean` 可覆盖 |
-| `IfmapEnumCatalogTest` | 164 | 内置字典 + 宿主覆盖 + 空字典 |
+| `IfmapEnumCatalogTest` | 177 | 内置字典（`status` + `callDirection`）+ 宿主覆盖 + 空字典 |
 | `ConfigSnapshotMapperTest` | 144 | 快照往返 / 老格式兼容 / diff |
 | `AdminTestSupport` | 145 | 测试基座 |
 | `IfmapAdminUiEndpointTest` | 140 | `/ui` 302 与静态资源可取 |
@@ -436,10 +447,10 @@
 | `fieldHtml` 的「字典未覆盖」补选项 | `:401` | 不补的话，编辑老配置时下拉框会显示第一项，保存即**静默改值** |
 | `fieldHtml` 空字典退化成 input | `:411-415` | 只剩「(空)」的 select = 字段被锁死，用户连手输都做不到 |
 | `judgeSpecParts` 的 raw 模式 | `:221` | 静默丢条件 = 判定变宽，最难查 |
-| `CONFIG_FIELDS` / `BRANCH_FIELDS` 数组 | `:461/:482` | 字段清单的**唯一来源**；`renderEditor`、`readFields`、`currentConfigPayload` 共用 |
+| `CONFIG_FIELDS` / `BRANCH_FIELDS` 数组 | `:461/:483` | 字段清单的**唯一来源**；`renderEditor`、`readFields`、`currentConfigPayload` 共用 |
 | `IfmapAdminWebConfigurer.configurePathMatch` | `:46` | 让 Controller 只写相对路径；改前缀不用改 4 个 Controller |
 | `JsSafeLongSerializer` 只对大整数生效 | `:53` | 全量字符串化会让 `status`/`order` 变成字符串，宿主 JSON 消费方会坏 |
-| `ConfigValidator.checkPoolRefs` | `:273` | 把"池键拼错"从运行期提前到保存期 |
-| `ConfigValidator.liveConfigs` | `:419` | 唯一键与池引用的校验都必须看"这个节点下别人怎么配的" |
+| `ConfigValidator.checkPoolRefs` | `:365` | 把"池键拼错"从运行期提前到保存期 |
+| `ConfigValidator.liveConfigs` | `:516` | 唯一键与池引用的校验都必须看"这个节点下别人怎么配的" |
 | `ConfigAuditor` 的 `truncated` 标记 | `:64` | 截断必须让调用方知道，否则"巡检通过"是假绿 |
-| `requireBlank` 这个名字 | `:374` | 命名确实误导（实际是必填校验），但**改名前先确认没被外部引用**；当前只在 dry-run 用一次 |
+| `requireBlank` 这个名字 | `ConfigAdminService:387` | 命名确实误导（实际是必填校验），但**改名前先确认没被外部引用**；当前只在 dry-run 用一次 |

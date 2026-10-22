@@ -92,7 +92,7 @@ ifmap:
 |---|---|---|
 | GET | `/rules` | 已注册规则清单（`@FUN` 可用项，含签名与示例） |
 | GET | `/actions` | 已注册动作（`method_flag` 取值） |
-| GET | `/strategies` | 已注册策略：`strategyHooks` / `fullParams` / `logicBranches` / `actions` / `callbacks` |
+| GET | `/strategies` | 已注册策略：`strategyHooks` / `fullParams` / `logicBranches` / `actions` |
 | GET | `/audit?tenantId=&busiNode=&markdown=` | 全量巡检，`markdown=true` 返回可贴工单的报告 |
 | GET | `/enums` | 字典：**框架自带**（`strategyName` ← 已注册的前/后序策略、`status`）**＋** 宿主机字典（可选 SPI，同名 key 覆盖，见 §11.3） |
 

@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+### Added（被调接口：对方调我方 / `call_direction=INBOUND`）
+- **新列 `ifmap_config.call_direction`**（`007-config-call-direction.sql`，`varchar(16) NOT NULL DEFAULT 'OUTBOUND'`）：
+  `OUTBOUND`＝我方调对方（默认，存量行为**零变化**）/ `INBOUND`＝对方调我方。空值等价 `OUTBOUND`（存量兼容），
+  非法值在加载配置时抛 `IfmapConfigException`（fail fast，不静默退化）。**不改 `001`**（checksum）。
+  新增 changeset 时**必须同时**加到 `IfmapSchemaInitializer.ALTER_FILES` 与 `TestDatabases.PRODUCTION_DDL` 两处。
+- **`CallDirection` 枚举**（core，`fromName`）+ `IfmapConfig.callDirection` / `inbound()`；
+  `IfmapRowMappers` / `JdbcConfigWriter`（25 列 / 22 个 `?`）/ `JsonConfigMapper` / `ConfigSnapshotMapper` 全部对齐。
+- **`IfmapRequest.rawBody`**（+ `getRawBody()` / `withRawBody()` / `Builder.rawBody`）：对方报文原文的载体，
+  判定与应答模板都按它的路径取值；`toString` 只打 `rawBody=NNB`，**不打内容**。
+- **`IfmapOrchestrator.executeInbound(request, interfaceNo, busiNode, rawBody)`**：被调方向的便捷入口，
+  等价于 `execute(request.withRawBody(rawBody), ...)`；**方向仍以配置为准**（配置是 `OUTBOUND` 时照样出网）。
+- **`executeOne` 单点分支**：`INBOUND` 跳过请求模板渲染与前序策略，`outcome = PartnerOutcome.ofBody(原文)`（不出网）；
+  `mockResponse` 在**两个方向都优先**（dry-run 可用样例报文替换入参）。判定 / 逻辑分支 / 池 / 应答模板 / 日志全部复用。
+  - 入参 `params`：`payload` 非空优先，否则宽松解析原文（**判定读原文、参数读 payload**，两者不互相顶掉）。
+  - 执行日志的「响应」列在 `INBOUND` 下记**我方应答**（`response == requestJson`，两列同值没意义）。
+  - 判定之后新增 `context.setResponseData(data)`（无条件）：否则 `post_strategy_name` 未配置时动作里
+    `getResponseData()` 恒为 `null`，「在动作里回填应答字段」这条通道就是断的。
+- **管理端**：`ConfigValidator.checkCallDirection` —— 仅对 `INBOUND` 生效的 **3 个 error**
+  （`response_param_template` 为空 / `request_param_template` 非空 / `pre_strategy_name` 非空）
+  + **3 个 warning**（`result_judge` 是 `always` / 尚无逻辑分支 / 排在出网步骤之后）；
+  `/enums` 新增 `callDirection` 字典（值 = 枚举名）；页面新增「调用方向」字段与列表「方向」列。
+- **`docs/12-被调接口配置指南.md`**：执行路径差异、判定 vs 业务结论、应答组装、完整示例、十一条坑、排障表。
+
+### Removed（回调通道 —— 破坏性）
+- **删除 `CallbackRegistry` / `IfmapCallback` / `IfmapCallbackHandler` / `IfmapOrchestrator.callback(...)`**
+  （连带只被它使用的 8 参 `writeLog` 重载；`IfmapAutoConfiguration` 不再有 `ifmapCallbackRegistry` bean，
+  `GET /strategies` 不再返回 `callbacks`）。
+  删除理由：该通道**从未进入主链路** —— 不经模板、不经判定、不落 `fail_type`/`error_code`，
+  回调日志的"结论"永远缺失；而且它把「接哪个接口、怎么判、怎么分流」写死在宿主代码里，与配置驱动的定位相反。
+  已被调场景改由 `call_direction=INBOUND` + `result_judge` + `logic_branch` + `@IfmapAction` 表达，
+  宿主**只需要写动作**。宿主迁移：把每个 `IfmapCallbackHandler` 拆成「一条 `INBOUND` 配置 + 对应动作」，
+  见 [`docs/12-被调接口配置指南.md`](docs/12-被调接口配置指南.md) §11。
+- `IfmapStrategyRegistrar` 的启动期快速失败覆盖范围 5 类 → **4 类**（`IfmapStrategyHook` / `FullParamStrategy` /
+  `LogicBranchStrategy` / `IfmapActionHandler`）；SPI 总数 17 → **15**。
+
 ### Changed（策略钩子 SPI 改名 —— 破坏性）
 - `SpecialDealStrategy` → **`IfmapStrategyHook`**、`SpecialDealStrategyRegistry` → **`StrategyHookRegistry`**
   （对应的 Spring bean 名 `ifmapSpecialDealStrategyRegistry` → `ifmapStrategyHookRegistry`）。

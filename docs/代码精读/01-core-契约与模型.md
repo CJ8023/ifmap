@@ -18,7 +18,7 @@ RuntimeException
      │   ├─ RuleNotFoundException                     26-33   模板引用了不存在的规则名
      │   └─ StartupValidationException                33-67   启动期契约自检失败（带 missingRules + problems）
      ├─ IfmapRemoteException                          26-37   出网失败（可重试语义）
-     ├─ IfmapStrategyException                        25-37   策略 / 动作 / 回调使用错误
+     ├─ IfmapStrategyException                        25-37   策略 / 动作使用错误
      ├─ RuleArgumentException                         23-35   规则实参类型不符（strictTypes 抛这个）
      └─ RuleInvocationException                       23-35   规则方法内部抛错（包装 InvocationTargetException）
 ```
@@ -94,18 +94,20 @@ javadoc 27–42 行写的是**实数契约**，由 `ifmap-json-tck` 固定，四
 
 ## 3. `model`（4 个文件）
 
-### 3.1 `model/IfmapRequest.java`（213 行）
+### 3.1 `model/IfmapRequest.java`（244 行）
 
 | 行 | 成员 | 说明 |
 |---|---|---|
-| 34–40 | 字段 | `tenantId` / `operatorId` / `requestId` / `bizId` + `headers`(String) / `payload`(Object) / `attributes`(Object) |
+| 35–42 | 字段 | `tenantId` / `operatorId` / `requestId` / `bizId` + `headers`(String) / `payload`(Object) / `attributes`(Object) + **`rawBody`**（被调方向的对方报文原文） |
 | 42 | 私有构造 | 三个 Map 都做 `Collections.unmodifiableMap(new LinkedHashMap<>(...))` |
 | 52 / 57 / 62 | `builder()` / `of(payload)` / `empty()` | 三个入口：完整构造、只带 payload、全空 |
 | 66–79 | `getTenantId` / `getOperatorId` / `getRequestId` / `getBizId` | 租户、操作人、请求号（落日志列）、业务号 |
 | 83–95 | `getHeaders` / `getPayload` / `getAttributes` | 都是不可变视图 |
 | 99–112 | `getHeader(name)` | **两段找**：先 `Map.get`，找不到再遍历 `equalsIgnoreCase`（HTTP 头大小写不敏感） |
+| 107 | `getRawBody()` | 对方报文原文；判定与应答模板都按它的路径取值 |
 | 115 | `getAttribute(key)` | 扩展属性 |
 | 120–127 | `withAttribute(k, v)` | 派生新实例（不修改原对象） |
+| 144–151 | `withRawBody(body)` | `executeInbound` 用它把原文塞进来（同样是派生新实例） |
 
 **为什么 payload 与 attributes 分开**：`payload` 是业务报文（模板 `$.xxx` 的根），
 `attributes` 是引擎/宿主用的旁路信息，两者混在一起会让模板取到不该看到的字段。
@@ -174,9 +176,9 @@ javadoc 27–42 行写的是**实数契约**，由 `ifmap-json-tck` 固定，四
 | 38 | `list(configKeyId, limit)` | **按时间倒序**（最新在前）；`limit <= 0` 视为默认 50 |
 | 41 | `findByKeyId(keyId)` | 回滚用 |
 
-### 4.3 `config/IfmapConfig.java`（340 行）
+### 4.3 `config/IfmapConfig.java`（361 行）
 
-主配置行（28 列），引擎运行期**只读**。
+主配置行（29 列），引擎运行期**只读**。
 
 | 行 | 分组 | 说明 |
 |---|---|---|
@@ -186,14 +188,15 @@ javadoc 27–42 行写的是**实数契约**，由 `ifmap-json-tck` 固定，四
 | 65 | `financingMode` | 融资模式（`varchar`，存量库可能没有此列 —— 迁移时是 ADD 不是 MODIFY） |
 | 67 | `interfaceOrder` | **执行顺序的唯一来源** |
 | 69–73 | 模板与判定 | `requestParamTemplate` / `responseParamTemplate` / `resultJudge` / `judgeName`（默认 `ruleSpec`） |
+| 74 | `callDirection` | **调用方向**（`CallDirection` 枚举：`OUTBOUND` 出网 / `INBOUND` 被调），空值等价 `OUTBOUND`；`inbound()`（`117`）是编排器唯一读取入口 |
 | 77–79 | 策略 | `preStrategyName` / `postStrategyName`（= Spring bean 名） |
 | 81–85 | 元数据 | `status`（1 启用）/ `version` / `remark` |
 | 87–101 | 删除标记 + 审计列 | `delStatus` / `deletedSeq`（逻辑删除）；`addUserId` / `addTime` / `addRequestId` / `modifyUserId` / `modifyTime` / `modifyRequestId`（注意 `addTime` 是 **`LocalDateTime`**，不是 `Date`） |
 
-字段共 **28 个**，与 `ifmap_config` 的 28 列一一对应。
+字段共 **29 个**，与 `ifmap_config` 的 29 列一一对应。
 
 **踩点**：`IfmapConfig` 是 `BeanPropertyRowMapper` 的映射目标，加字段时**必须**同时确认
-① DDL 有该列（28 列）② `JdbcConfigRepository` 的 SELECT 列表包含它 ③ INSERT/UPDATE 的占位数跟着变。
+① DDL 有该列（29 列）② `JdbcConfigRepository` 的 SELECT 列表包含它 ③ INSERT/UPDATE 的占位数跟着变。
 三者任缺其一，运行期表现为「字段永远是 null」而不是报错。
 
 ### 4.4 `config/ExecutionLog.java`（221 行）

@@ -349,7 +349,7 @@ public interface ConfigRepository {
 | `IfmapStrategyHook` | 38 个 Impl，`strategy_name` = Spring bean 名（落地后**拆为 `pre_strategy_name` / `post_strategy_name` 两列**，分 `PRE` / `POST` 相位） | **bean 名 / 类简单名 / 宽松小写名**（三 key，解决 P0-7） | 策略钩子（补参数、文件上传…） |
 | `FullParamStrategy` | 20 个 Impl，`@FullParam(partnerCode, busiNode)` | 注解值 | 主参数组包（如 961 行的 `FinancingFullParamStrategyImpl`） |
 | `LogicBranchStrategy` | 12 个 Impl，`@LogicBranch` + 反射 `getDeclaredMethod` | 注解值 + **Action Key** | 分支动作（改走 ActionRegistry，不再反射方法名，见 TS-6） |
-| `IfmapCallbackHandler` | `IfmapConfigApplication` 17 个回调 | `interfaceNo` | 银行回调（上传通知、放款结果…） |
+| ~~`IfmapCallbackHandler`~~ | `IfmapConfigApplication` 17 个回调 | ~~`interfaceNo`~~ | **v2 已移除**：被调场景改由「配置 + `call_direction=INBOUND`」表达（见 [`12-被调接口配置指南`](12-被调接口配置指南.md)），不再需要宿主逐接口写 handler |
 
 **`IfmapStrategyHook` 三 key 注册**（直接解决 P0-7，且对宿主机零风险）：
 
@@ -398,7 +398,7 @@ public String myDateFormat(String dateValue, String pattern) { ... }
 | 类别 | 内容 | 是否需要 starter 提供接口 |
 |---|---|---|
 | 业务策略 | ECC 的 38 / 20 / 12 个 Impl | 提供接口 + 注册机制，实现归宿主机 |
-| 银行回调 | 17 个回调方法 | `IfmapCallbackHandler` SPI |
+| 银行回调 | 17 个回调方法 | **v2 已移除**：改由配置表达（`call_direction=INBOUND` + 判定 + 逻辑分支动作），宿主只需写动作 |
 | 条件参数 | `IfmapConfigManager:276` 民生硬编码 | `IfmapRequest.attributes` → `RuleContext`（规则方法把 `RuleContext` 声明为第一个形参即可读）；原计划的 `ConditionValueResolver` SPI 因**无调用方**已删（见 CHANGELOG Removed） |
 | 上下文 | 租户/操作人/请求 ID | `IfmapRequestAdapter` + `TenantResolver` |
 | 脱敏 | 各银行报文敏感字段 | `LogMasker` SPI（默认实现覆盖通用证件号/卡号/手机号） |
@@ -1211,10 +1211,10 @@ public interface LogMasker {
 |---|---|---|
 | `TenantResolver`（W3 顺延） | ✅ core `spi/TenantResolver` + `HeaderTenantResolver`（优先级：上下文 `tenantId` > 请求头 > 默认 `-1`；请求头名与默认租户可配） | — |
 | `IfmapRequest` 门面 | ✅ `model/IfmapRequest`（不可变 + Builder、`of(Map)`、`empty()`、大小写不敏感 `getHeader`、`withAttribute`）与 `model/IfmapResult`、`model/PartnerCall` | 模型放 `model` 包（设计稿写作"门面"） |
-| 三类策略 SPI | ✅ `IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy`（方法名 `match(StrategyContext)`）+ `IfmapActionHandler` + `IfmapCallbackHandler` | 四/五类（含动作与回调）一并落地，比计划多 |
+| 三类策略 SPI | ✅ `IfmapStrategyHook` / `FullParamStrategy` / `LogicBranchStrategy`（方法名 `match(StrategyContext)`）+ `IfmapActionHandler`（`IfmapCallbackHandler` 已随后续版本移除，见下） | 动作一并落地，比计划多 |
 | "三工厂" → 注册表 | ✅ `StrategyHookRegistry`（key = **bean 名**，含 `decapitalizeLoose` 别名与冲突诊断）/ `FullParamStrategyRegistry`（key = `bank\|busi`，查找 exact → `(partner,*)` → `(*,busi)` → `(*,*)`）/ `LogicBranchStrategyRegistry`（key → 多实现） | 用注册表替代"工厂 + 反射按方法名调用"，对应方案 v1 P0-7 / TS-6 |
 | `ActionRegistry` | ✅ `@IfmapAction("submit")` 或显式 key；`failOnMissingAction` 默认 `true`（缺失即抛 `IfmapStrategyException`） | 取代 `method_flag` 反射（方法重命名不再静默失效） |
-| `CallbackRegistry` | ✅ `@IfmapCallback("IF_X")` 或显式 key；未注册接口号直接抛异常（不再静默什么都不做） | 取代存量 17 个回调方法 |
+| `CallbackRegistry` | ❌ **已移除**（CHANGELOG Removed）：接收分支从未进入主链路，回调日志也永远进不了判定列；被调场景由 `call_direction=INBOUND` 走同一条编排链路取代 | 原计划取代存量 17 个回调方法，最终方案改为「配置化」 |
 | 执行顺序与环检测 | ✅ `orchestrator/InterfaceOrdering`：`topological(sort(enabled))`（DFS + 环检测，异常含"循环依赖"与完整路径）；**并递归加载 `front_interface_no` 前置链**（`MAX_FRONT_DEPTH = 64` 护栏） | 递归加载是计划外补充 —— 仓储按单一 `interface_no` 查询，不递归拿不到前置接口；**该形态随后被整体删除**（改为 `interface_order` 单一定序 + 起点截断，见顶部「历史稿提示」） |
 | 契约自检 0 违规 | ✅ `validate/ContractValidator` + `ContractReport.toMarkdown()`：模板 JSON 合法性 + `@FUN` 规则名存在 + 参数可匹配重载；`ContractValidatorTest` 断言"全注册时零违规" | 增补"模板非法 JSON"检查（渲染必经 jsonOps 解析，非法必在运行期炸） |
 | 判定器（计划外） | ✅ `orchestrator/ResponseJudge`：`result_flag` 为空 = 成功、`success_value` 多值 `;`/`,`、忽略大小写、响应非 JSON 只判失败**不抛异常** | 存量判定逻辑分散在多处，此处收敛为一处 |

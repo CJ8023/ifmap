@@ -22,7 +22,6 @@ import cn.cj.ifmap.admin.spi.EnumOption;
 import cn.cj.ifmap.core.rule.RuleDescriptor;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
@@ -54,14 +53,13 @@ public class IfmapMetaAdminController {
     private final FullParamStrategyRegistry fullParams;
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
-    private final CallbackRegistry callbacks;
     private final IfmapEnumCatalog enums;
 
     public IfmapMetaAdminController(ConfigAdminService service, RuleRegistry rules,
                                     StrategyHookRegistry strategyHooks,
                                     FullParamStrategyRegistry fullParams,
                                     LogicBranchStrategyRegistry logicBranches,
-                                    ActionRegistry actions, CallbackRegistry callbacks,
+                                    ActionRegistry actions,
                                     IfmapEnumCatalog enums) {
         this.enums = enums == null ? IfmapEnumCatalog.empty() : enums;
         this.service = service;
@@ -70,7 +68,6 @@ public class IfmapMetaAdminController {
         this.fullParams = fullParams;
         this.logicBranches = logicBranches;
         this.actions = actions;
-        this.callbacks = callbacks;
     }
 
     /** 已注册规则（模板 DSL 里 {@code @FUN} 可用清单）。 */
@@ -85,7 +82,7 @@ public class IfmapMetaAdminController {
         return actions.keys();
     }
 
-    /** 已注册策略与回调（{@code pre_strategy_name} / {@code post_strategy_name} / 分支判定 key / 全量参数 key）。 */
+    /** 已注册策略（{@code pre_strategy_name} / {@code post_strategy_name} / 分支判定 key / 全量参数 key）。 */
     @GetMapping("/strategies")
     public Map<String, Object> strategies() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -93,7 +90,6 @@ public class IfmapMetaAdminController {
         result.put("fullParams", fullParams.keys());
         result.put("logicBranches", logicBranches.keys());
         result.put("actions", actions.keys());
-        result.put("callbacks", callbacks.keys());
         return result;
     }
 

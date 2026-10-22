@@ -38,7 +38,6 @@ import cn.cj.ifmap.core.spi.LogMasker;
 import cn.cj.ifmap.core.spi.SystemClockProvider;
 import cn.cj.ifmap.core.spi.TenantResolver;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
@@ -94,7 +93,6 @@ public final class IfmapOrchestrator {
     private final FullParamStrategyRegistry fullParams;
     private final LogicBranchStrategyRegistry logicBranches;
     private final ActionRegistry actions;
-    private final CallbackRegistry callbacks;
     private final PartnerServiceGateway gateway;
     private final ExecutionLogSink logSink;
     private final LogMasker logMasker;
@@ -113,7 +111,6 @@ public final class IfmapOrchestrator {
         this.fullParams = builder.fullParams;
         this.logicBranches = builder.logicBranches;
         this.actions = builder.actions;
-        this.callbacks = builder.callbacks;
         this.gateway = builder.gateway;
         this.logSink = builder.logSink;
         this.logMasker = builder.logMasker;
@@ -384,7 +381,6 @@ public final class IfmapOrchestrator {
         return merged;
     }
 
-    /** 初始池：{@code payload.pool} 为 Map 时浅拷一份（不写回、不持有宿主对象）。 */
     /**
      * 本步入参的来源。
      *
@@ -435,6 +431,7 @@ public final class IfmapOrchestrator {
         }
     }
 
+    /** 初始池：{@code payload.pool} 为 Map 时浅拷一份（不写回、不持有宿主对象）。 */
     private Map<String, Object> initialPool(IfmapRequest request) {
         Map<String, Object> pool = new LinkedHashMap<String, Object>();
         // 预置池 = payload.pool（断点续跑时宿主把上次的池回放进来）；浅拷一份，不持有宿主对象
@@ -585,17 +582,6 @@ public final class IfmapOrchestrator {
         return false;
     }
 
-    /** 银行回调入口（替换存量 17 个回调方法）。 */
-    public IfmapResult callback(IfmapRequest request, String interfaceNo, String rawBody) {
-        long start = clock.currentTimeMillis();
-        String tenantId = tenantResolver.resolve(request);
-        // 回调不走模板/判定：原样把 body 交给宿主 handler，只额外补一条执行日志
-        IfmapResult result = callbacks.dispatch(interfaceNo, request, rawBody);
-        writeLog(tenantId, request, null, rawBody, null, result.isSuccess(),
-                clock.currentTimeMillis() - start, result.getErrorMessage());
-        return result;
-    }
-
     /** 模板为空 → 原样返回 source：把「没配模板」当成「不做变换」，而不是渲染出 "null"。 */
     private String render(String template, String source, RuleContext ruleContext) {
         if (trimToNull(template) == null) {
@@ -615,12 +601,6 @@ public final class IfmapOrchestrator {
             LOG.debug("ifmap 响应模板渲染结果不是合法 JSON：{}", e.getMessage());
             return null;
         }
-    }
-
-    /** 回调入口用：没有判定结论（成败由宿主动作自己给），只落基本列。 */
-    private void writeLog(String tenantId, IfmapRequest request, IfmapConfig config, String requestJson,
-                          String response, boolean success, long elapsed, String errorMessage) {
-        writeLog(tenantId, request, config, requestJson, response, success, elapsed, errorMessage, null);
     }
 
     /**
@@ -770,7 +750,6 @@ public final class IfmapOrchestrator {
         private FullParamStrategyRegistry fullParams;
         private LogicBranchStrategyRegistry logicBranches;
         private ActionRegistry actions;
-        private CallbackRegistry callbacks;
         private PartnerServiceGateway gateway;
         private ExecutionLogSink logSink;
         private LogMasker logMasker;
@@ -817,11 +796,6 @@ public final class IfmapOrchestrator {
 
         public Builder actions(ActionRegistry actions) {
             this.actions = actions;
-            return this;
-        }
-
-        public Builder callbacks(CallbackRegistry callbacks) {
-            this.callbacks = callbacks;
             return this;
         }
 
@@ -886,9 +860,6 @@ public final class IfmapOrchestrator {
             }
             if (actions == null) {
                 this.actions = new ActionRegistry();
-            }
-            if (callbacks == null) {
-                this.callbacks = new CallbackRegistry();
             }
             return new IfmapOrchestrator(this);
         }

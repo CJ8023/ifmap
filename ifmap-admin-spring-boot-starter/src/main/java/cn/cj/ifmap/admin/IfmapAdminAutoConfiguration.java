@@ -26,7 +26,6 @@ import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.rule.RuleRegistry;
 import cn.cj.ifmap.core.spi.IdGenerator;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
@@ -211,10 +210,9 @@ public class IfmapAdminAutoConfiguration {
                                                              FullParamStrategyRegistry fullParams,
                                                              LogicBranchStrategyRegistry logicBranches,
                                                              ActionRegistry actions,
-                                                             CallbackRegistry callbacks,
                                                              IfmapEnumCatalog enums) {
         return new IfmapMetaAdminController(service, rules, strategyHooks, fullParams, logicBranches, actions,
-                callbacks, enums);
+                enums);
     }
 
     @Bean

@@ -17,11 +17,9 @@ package cn.cj.ifmap.spring;
 
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategy;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
-import cn.cj.ifmap.core.spi.IfmapCallbackHandler;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategy;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
@@ -49,7 +47,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>{@link FullParamStrategy} → 按 {@code @FullParam(partnerCode, busiNode)} 注册</li>
  *   <li>{@link LogicBranchStrategy} → 按 {@code @LogicBranch} 注册</li>
  *   <li>{@link IfmapActionHandler} → 按 {@code @IfmapAction} 注册</li>
- *   <li>{@link IfmapCallbackHandler} → 按接口号注册</li>
  * </ul>
  *
  * <p>宿主机 bean 缺失注解时注册会失败并<b>快速失败</b>（启动期就报，不留到线上）。</p>
@@ -91,10 +88,6 @@ public class IfmapStrategyRegistrar implements BeanPostProcessor, BeanFactoryAwa
             beanFactory.getBean(ActionRegistry.class).register((IfmapActionHandler) bean);
             registered = true;
         }
-        if (bean instanceof IfmapCallbackHandler) {
-            beanFactory.getBean(CallbackRegistry.class).register((IfmapCallbackHandler) bean);
-            registered = true;
-        }
         if (registered) {
             registeredBeanNames.add(beanName);
             log.info("ifmap 已注册宿主机策略 bean：[{}]（{}）", beanName, ClassUtils.getUserClass(bean).getName());
@@ -108,8 +101,7 @@ public class IfmapStrategyRegistrar implements BeanPostProcessor, BeanFactoryAwa
                 || bean instanceof StrategyHookRegistry
                 || bean instanceof FullParamStrategyRegistry
                 || bean instanceof LogicBranchStrategyRegistry
-                || bean instanceof ActionRegistry
-                || bean instanceof CallbackRegistry;
+                || bean instanceof ActionRegistry;
     }
 
     /** 已注册的策略 bean 名（供排障与测试断言）。 */

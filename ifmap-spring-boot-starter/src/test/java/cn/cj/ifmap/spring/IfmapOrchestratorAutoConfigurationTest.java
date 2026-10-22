@@ -26,11 +26,8 @@ import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.spi.ExecutionLogSink;
 import cn.cj.ifmap.core.spi.HeaderTenantResolver;
-import cn.cj.ifmap.core.spi.IfmapCallback;
-import cn.cj.ifmap.core.spi.IfmapCallbackHandler;
 import cn.cj.ifmap.core.spi.TenantResolver;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParam;
 import cn.cj.ifmap.core.strategy.FullParamStrategy;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
@@ -104,19 +101,11 @@ class IfmapOrchestratorAutoConfigurationTest {
         }
     }
 
-    /** 声明了回调但忘记加注解 → 启动期快速失败。 */
-    public static class UnannotatedCallback implements IfmapCallbackHandler {
+    /** 实现了分支策略却忘记加注解 → 启动期快速失败。 */
+    public static class UnannotatedBranch implements LogicBranchStrategy {
         @Override
-        public IfmapResult handle(IfmapRequest request, String rawBody) {
-            return IfmapResult.success(Collections.<String, Object>emptyMap());
-        }
-    }
-
-    @IfmapCallback("CB_CMB")
-    public static class CmbCallback implements IfmapCallbackHandler {
-        @Override
-        public IfmapResult handle(IfmapRequest request, String rawBody) {
-            return IfmapResult.success(Collections.<String, Object>singletonMap("echo", rawBody));
+        public boolean match(StrategyContext context) {
+            return false;
         }
     }
 
@@ -144,7 +133,6 @@ class IfmapOrchestratorAutoConfigurationTest {
             assertNotNull(context.getBean(FullParamStrategyRegistry.class));
             assertNotNull(context.getBean(LogicBranchStrategyRegistry.class));
             assertNotNull(context.getBean(ActionRegistry.class));
-            assertNotNull(context.getBean(CallbackRegistry.class));
             assertNotNull(context.getBean(ExecutionLogSink.class));
             assertNotNull(context.getBean(IfmapOrchestrator.class));
             assertTrue(context.getBean(TenantResolver.class) instanceof HeaderTenantResolver);
@@ -152,11 +140,10 @@ class IfmapOrchestratorAutoConfigurationTest {
     }
 
     @Test
-    @DisplayName("宿主机策略 bean 被自动收集：按 bean 名 / @FullParam / @LogicBranch / @IfmapAction / @IfmapCallback")
+    @DisplayName("宿主机策略 bean 被自动收集：按 bean 名 / @FullParam / @LogicBranch / @IfmapAction")
     void collectsHostStrategies() {
         runner("ifmap_orc_collect")
                 .withBean("allInOneStrategy", AllInOneStrategy.class, AllInOneStrategy::new)
-                .withBean("cmbCallback", CmbCallback.class, CmbCallback::new)
                 .run(context -> {
                     StrategyHookRegistry strategyHooks = context.getBean(StrategyHookRegistry.class);
                     assertTrue(strategyHooks.contains("allInOneStrategy"), "pre_/post_strategy_name 应按 bean 名直接可用");
@@ -171,13 +158,8 @@ class IfmapOrchestratorAutoConfigurationTest {
                     ActionRegistry actions = context.getBean(ActionRegistry.class);
                     assertTrue(actions.contains("submitApply"));
 
-                    assertTrue(context.getBean(CallbackRegistry.class).contains("CB_CMB"));
-                    assertEquals("hi", context.getBean(CallbackRegistry.class)
-                            .dispatch("CB_CMB", IfmapRequest.empty(), "hi").getData().get("echo"));
-
                     IfmapStrategyRegistrar registrar = context.getBean(IfmapStrategyRegistrar.class);
                     assertTrue(registrar.registeredBeanNames().contains("allInOneStrategy"));
-                    assertTrue(registrar.registeredBeanNames().contains("cmbCallback"));
                 });
     }
 
@@ -185,10 +167,10 @@ class IfmapOrchestratorAutoConfigurationTest {
     @DisplayName("策略 bean 缺注解 → 启动期快速失败（不把问题留到线上）")
     void missingAnnotationFailsFast() {
         runner("ifmap_orc_unannotated")
-                .withBean("unannotatedCallback", UnannotatedCallback.class, UnannotatedCallback::new)
+                .withBean("unannotatedBranch", UnannotatedBranch.class, UnannotatedBranch::new)
                 .run(context -> {
-                    assertNotNull(context.getStartupFailure(), "缺 @IfmapCallback 应导致启动失败");
-                    assertTrue(context.getStartupFailure().getMessage().contains("@IfmapCallback"),
+                    assertNotNull(context.getStartupFailure(), "缺 @LogicBranch 应导致启动失败");
+                    assertTrue(context.getStartupFailure().getMessage().contains("@LogicBranch"),
                             context.getStartupFailure().getMessage());
                 });
     }

@@ -36,7 +36,6 @@ import cn.cj.ifmap.core.spi.SnowflakeIdGenerator;
 import cn.cj.ifmap.core.spi.SystemClockProvider;
 import cn.cj.ifmap.core.spi.TenantResolver;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
@@ -181,12 +180,6 @@ public class IfmapAutoConfiguration {
         return registry;
     }
 
-    @Bean
-    @ConditionalOnMissingBean
-    public CallbackRegistry ifmapCallbackRegistry() {
-        return new CallbackRegistry();
-    }
-
     /** 部署前契约自检（由管理端调用，不在启动时扫库）。 */
     @Bean
     @ConditionalOnMissingBean
@@ -215,7 +208,6 @@ public class IfmapAutoConfiguration {
                                                    FullParamStrategyRegistry fullParams,
                                                    LogicBranchStrategyRegistry logicBranches,
                                                    ActionRegistry actions,
-                                                   CallbackRegistry callbacks,
                                                    ObjectProvider<PartnerServiceGateway> gatewayProvider,
                                                    ObjectProvider<ExecutionLogSink> logSinkProvider,
                                                    LogMasker logMasker,
@@ -231,7 +223,6 @@ public class IfmapAutoConfiguration {
                     .fullParams(fullParams)
                     .logicBranches(logicBranches)
                     .actions(actions)
-                    .callbacks(callbacks)
                     .gateway(gatewayProvider.getIfAvailable())
                     .logSink(logSinkProvider.getIfAvailable())
                     .logMasker(logMasker)

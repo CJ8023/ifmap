@@ -33,7 +33,6 @@ import cn.cj.ifmap.core.spi.DefaultLogMasker;
 import cn.cj.ifmap.core.spi.HeaderTenantResolver;
 import cn.cj.ifmap.core.spi.RepositoryExecutionLogSink;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategy;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
@@ -853,20 +852,6 @@ class IfmapOrchestratorTest {
 
         assertTrue(result.isSuccess(), "dry-run 要能拿一份合法入参替换掉真实原文：" + result.getErrorMessage());
         assertEquals("AP7", result.getData().get("applyNo"));
-    }
-
-    @Test
-    void callbackRegistryDispatchesAndRejectsUnknownInterface() {
-        CallbackRegistry callbacks = new CallbackRegistry();
-        callbacks.register("CB_A", (request, rawBody) -> IfmapResult.success(Collections.singletonMap("body", rawBody)));
-
-        IfmapOrchestrator orchestrator = IfmapOrchestrator.builder()
-                .engine(engine()).repository(repository).tenantResolver(new HeaderTenantResolver())
-                .callbacks(callbacks).build();
-
-        assertEquals("hi", orchestrator.callback(IfmapRequest.empty(), "CB_A", "hi").getData().get("body"));
-        assertThrows(IfmapStrategyException.class,
-                () -> orchestrator.callback(IfmapRequest.empty(), "CB_B", "hi"));
     }
 
     @Test

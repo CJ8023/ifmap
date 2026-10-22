@@ -29,7 +29,6 @@ import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
-import cn.cj.ifmap.core.strategy.CallbackRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
@@ -357,7 +356,6 @@ class ConfigAdminServiceTest {
                 .logicBranches(new LogicBranchStrategyRegistry())
                 .strategyHooks(new StrategyHookRegistry())
                 .fullParams(new FullParamStrategyRegistry())
-                .callbacks(new CallbackRegistry())
                 .gateway(new FailingGateway())
                 .build();
     }

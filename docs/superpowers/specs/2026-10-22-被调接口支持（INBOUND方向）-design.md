@@ -200,10 +200,7 @@ public IfmapResult executeInbound(IfmapRequest request, String interfaceNo, Stri
 2. **判定失败时 `data` 里没有这一步的产物**：`renderResponse` / `applyPostStrategy` 确实照常执行（与成败无关），但产物只在判定成功时才 `pool.put`（`:270-272`），而 `IfmapResult.data` 是 `flattenPool(pool)` 摊出来的（`:218-219`、`:378-390`）⇒ 失败步的应答**进不了 `data`**。宿主只剩 `errorMessage` / `failType` / `rawResponse`。见 §4.4.2。
 3. **`$.seqNo` 每次渲染都不同**，不要用它当幂等键。
 
-成功率不同回不同应答体（DSL 没有 if，两条路都行）：
-
-- **A（推荐，零代码）**：宿主按 `result.isSuccess()` 分叉 —— 成功回 `result.getData()`，失败回自己的错误信封（`{"code":"9999","msg":err}`）。HTTP 状态也归宿主定。
-- **B（要"失败也带业务字段"）**：`post_strategy_name` 里读 `context.getResponseJson()`（对方报文）+ `context.getRequest()`，用 `context.setResponseData(map)` **整体替换**产物：
+**掺我方动态字段**（受理时间、traceId）：`post_strategy_name` 里改产物（返回 Map 是「合并」，`setResponseData(map)` 是「整体替换」，二选一）：
 
 ```java
 @Component("ackWithServerTime")   // 与 ifmap_config.post_strategy_name 对齐
@@ -216,10 +213,12 @@ public class AckWithServerTime implements IfmapStrategyHook {
         Map<String, Object> ack = new LinkedHashMap<String, Object>(context.getResponseData());
         ack.put("serverTime", String.valueOf(System.currentTimeMillis()));
         context.setResponseData(ack);           // 整体替换产物：必须给 Map 才生效（:345-349）
-        return null;                            // 返回 Map 则是"合并"，两者按需选一个
+        return null;                            // 返回 Map 则是「合并」，两种按需选一个
     }
 }
 ```
+
+**判定失败时的应答**是完全另一个问题（模板渲染不出来，引擎也没给出口）—— 见 §4.4.2。
 
 **怎么预览 ACK 而不真被调用**：管理端 dry-run（`dryRun:132`）传 `mockResponse` = 一份"伪造的对方报文"，返回的 `IfmapResult.data` 就是将要回给对方的 ACK（D5）。这也是验收 ACK 配置最省事的手段。
 

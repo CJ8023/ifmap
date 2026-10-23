@@ -84,7 +84,7 @@ public class DemoController {
 | `ifmap-spring-boot-starter` | 17 | Spring Boot 3 自动装配（引擎/仓储/策略收集/建表/日志清理） |
 | `ifmap-admin-spring-boot-starter` | 17 | 管理端 REST（配置 CRUD/校验/试跑/历史回滚/巡检）+ 零构建可视化页面，默认关闭 |
 | `ifmap-demo-pure-java` | 8 | 纯 Java 用法示例 |
-| `ifmap-demo-spring-boot3` | 17 | Spring Boot 3 用法示例（可 `java -jar` 直接跑） |
+| `ifmap-demo-spring-boot3` | 17 | Spring Boot 3 用法示例（可 `java -jar` 直接跑；出网与被调两个方向） |
 
 ## 文档
 

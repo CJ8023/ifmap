@@ -92,7 +92,7 @@ ifmap 逐条对齐修正：
 | `ifmap-spring-boot-starter` | Spring Boot 3 自动配置：建表、仓储（可选缓存）、引擎、规则自动收集 | 17+ | starter-jdbc、provider-jdbc、json-jackson、caffeine(可选) |
 | `ifmap-admin-spring-boot-starter` | 管理端 REST（配置 CRUD、校验、历史与回滚、分支维护、巡检）+ 零构建可视化页面（`{base-path}/ui/`）；`ifmap.admin.enabled=true` 才装配 | 17+ | starter、provider-jdbc、starter-web、autoconfigure |
 | `ifmap-demo-pure-java` | 纯 Java（非 Spring）可运行示例 | 8+ | core + json-jackson |
-| `ifmap-demo-spring-boot3` | Spring Boot 3 可运行示例（H2 内存库，`java -jar` 即跑通全链路） | 17+ | starter |
+| `ifmap-demo-spring-boot3` | Spring Boot 3 可运行示例（H2 内存库，`java -jar` 即跑通全链路；**出网 + 被调两个方向**都有示例） | 17+ | starter |
 
 依赖方向严格单向：`demo → json-jackson / json-fastjson → core`、`provider-jdbc → core`、`provider-remote → core`，**core 不反向依赖任何实现**。
 

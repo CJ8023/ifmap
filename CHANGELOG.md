@@ -25,7 +25,11 @@
   （`response_param_template` 为空 / `request_param_template` 非空 / `pre_strategy_name` 非空）
   + **3 个 warning**（`result_judge` 是 `always` / 尚无逻辑分支 / 排在出网步骤之后）；
   `/enums` 新增 `callDirection` 字典（值 = 枚举名）；页面新增「调用方向」字段与列表「方向」列。
-- **`docs/12-被调接口配置指南.md`**：执行路径差异、判定 vs 业务结论、应答组装、完整示例、十一条坑、排障表。
+- **`docs/12-被调接口配置指南.md`**：执行路径差异、判定 vs 业务结论、应答组装、完整示例、十二条坑、排障表。
+- **demo 增补被调方向演示例**（`ifmap-demo-spring-boot3`）：`InboundNoticeDemo`（`ApplicationRunner`
+  播种 `BIZ_NOTICE` INBOUND 配置 + 2 条分支，跑「成功 / 业务失败 / 状态不认识」三个场景）+
+  `NoticeAcceptedAction`（原地补应答字段）/ `NoticeFailedAction`（把 `0000` 覆盖成 `2001` + `retryable`）；
+  配 4 个用例（H2 全上下文），`mvn -pl ifmap-demo-spring-boot3 -am test` 8 例全绿。
 
 ### Removed（回调通道 —— 破坏性）
 - **删除 `CallbackRegistry` / `IfmapCallback` / `IfmapCallbackHandler` / `IfmapOrchestrator.callback(...)`**

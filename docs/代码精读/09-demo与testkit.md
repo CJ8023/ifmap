@@ -5,7 +5,7 @@
 | 模块 | 文件（含 pom） | 行数 | 定位 |
 |---|---|---|---|
 | `ifmap-demo-pure-java` | 4 | 219 | **零 Spring** 的引擎用法演示（证 core 零依赖） |
-| `ifmap-demo-spring-boot3` | 10 | 641 | 引入 starter 的**完整编排**用法 + 管理端宿主 |
+| `ifmap-demo-spring-boot3` | 13 | 1,064 | 引入 starter 的**完整编排**用法（出网 + 被调两个方向）+ 管理端宿主 |
 | `ifmap-testkit` | 5 | 1,217 | 真库/内存库测试基座 + **自动清理** |
 
 ---
@@ -41,7 +41,7 @@
 
 ---
 
-## 2. `ifmap-demo-spring-boot3`（6 个 Java 主类 + 2 个 yml + 1 个测试）
+## 2. `ifmap-demo-spring-boot3`（9 个 Java 主类 + 2 个 yml + 1 个测试）
 
 ### 2.1 `IfmapDemoApplication`（35 行）
 
@@ -71,7 +71,49 @@
 `@IfmapAction("submit")` + `execute(StrategyContext)`。注解值是 `ifmap_logic_branch_config.method_flag`
 （**不再按方法名反射**，方法改名不会静默失效）。
 
-### 2.6 `DemoRunner`（141 行）· 完整链路演示例
+### 2.6 `InboundNoticeDemo`（213 行）· 被调方向演示例
+
+`@Component @Order(2) implements ApplicationRunner`，与 `DemoRunner`（`@Order` 更小，先跑）**互不干扰**：
+另一个业务节点（`notice`）、另一个接口编号（`BIZ_NOTICE`）、另一个租户内的一组表行。
+
+| 行 | 成员 | 说明 |
+|---|---|---|
+| 65–67 | 常量 | `TENANT="1001"` / `INTERFACE_NO="BIZ_NOTICE"` / `BUSI_NODE="notice"` |
+| 78 | `ACK_TEMPLATE` | 应答模板，根是**对方原文**：`$.applyNo` / `$.['seqNo']` 取对方字段，`"0000"` 是字面量 |
+| 91 | `INBOUND_JUDGE` | `{"any":[eq SUCCESS, eq FAILED]}` —— 判定口径是「报文**可受理**」，不是「业务成败」 |
+| 107 | `run(...)` | 播种 + 三个场景 |
+| 136 | `call(scene, rawBody)` | **唯一入口** `executeInbound(...)`；`ackOf` 取不到东西就说明被判失败了 |
+| 162 | `ackOf(result)` | 池里有没有本步产物 = 有没有应答（判失败的步骤不入池） |
+| 172 | `seedIfAbsent()` | 幂等：先查再插 |
+| 178 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
+| 201 | `insertBranch(...)` | 两条分支：`ACCEPTED/SUCCESS` → `noticeAccepted`，`FAILED/FAILED` → `noticeFailed` |
+
+三个场景覆盖了被调方向的三个终态（`docs/12` §7）：
+
+| 场景 | `noticeStatus` | 判定 | 分支 | 应答 |
+|---|---|---|---|---|
+| 成功通知 | `SUCCESS` | 过 | `ACCEPTED` | `0000` + 动作补 `approveNo` |
+| 失败通知 | `FAILED` | 过（业务失败也是有效推送） | `FAILED` | 动作把 `code` 覆盖成 `2001` + `retryable` |
+| 状态不认识 | `PENDING` | **不过** | 不执行 | **没有**（宿主自己回 `1xxx`，引擎不兜底） |
+
+> 应答模板里 `"partnerSeqNo":"$.['seqNo']"` 与 `"ourSeqNo":"$.seqNo"` 并列**不是笔误**：
+> `$.seqNo` 是模板 DSL 的保留路径（生成我方流水号，不看源报文），取源报文同名字段必须写方括号形式
+> `$.['seqNo']`；少写那个点（`$['seqNo']`）会被当成**字面量**原样输出。这条坑已记进 `docs/12` §9 第 12 条。
+
+### 2.7 `NoticeAcceptedAction`（58 行）· 受理分支动作
+
+`@Component @IfmapAction("noticeAccepted")`。`execute` 里把 `context.getResponseData()` 强转成
+`Map<String,Object>` **原地 `put`** —— 这个 Map 与池里、返回值里、日志里的是**同一个对象**，
+所以 `approveNo` 补上去以后三处同时可见。重新赋值（`data = new HashMap<>()`）则完全无效（`docs/12` §6）。
+
+### 2.8 `NoticeFailedAction`（61 行）· 处理失败分支动作
+
+`@IfmapAction("noticeFailed")`。把模板里的 `code=0000` **覆盖成 `2001`**，并加 `retryable=true`。
+
+> 演示的重点是「**业务失败不要抛异常**」：动作在 `writeLog` 之前执行，抛出去会带走执行日志，
+> 而且宿主拿不到应答 Map（表现为对方超时 + 我方无日志）。见 `docs/12` §9 第 10 条。
+
+### 2.9 `DemoRunner`（141 行）· 完整链路演示例
 
 | 行 | 成员 | 说明 |
 |---|---|---|
@@ -89,7 +131,7 @@
 - `:125` `setPreStrategyName("demoStrategy")` —— **bean 名首字母小写**，写类名会找不到；
 - `:130-139` 分支：`methodFlag="submit"` + `logicBranchFlag="submit"` + `logicBranchValue="0000"`（三者各自含义不同，见 03 篇）。
 
-### 2.7 两个 yml
+### 2.10 两个 yml
 
 **`application.yml`（30 行）· 默认档（H2 内存库）**
 
@@ -118,9 +160,20 @@
 > 且 `+` 在 URL 里会被解码成空格 → 必须写 `%2B08:00`（两处）。
 > 这段注释就是 `CannotGetJdbcConnectionException` 那次的结案记录，**别删**。
 
-### 2.8 `IfmapDemoApplicationTest`（122 行）
+### 2.11 `IfmapDemoApplicationTest`（213 行，8 例）
 
-用 H2 起完整上下文，验证：建表、`DemoRunner` 幂等、编排结果、分支动作被触发。
+用 H2 起完整上下文。出网方向 4 例：建表、`DemoRunner` 幂等、规则收集与整链路渲染；
+被调方向 4 例：
+
+| 行 | 用例 | 断言要点 |
+|---|---|---|
+| 135 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
+| 153 | `inboundAcceptedFillsAck` | 判定过 + 分支 `ACCEPTED` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
+| 168 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，分支 `FAILED`，`code=2001`、`retryable=true` |
+| 180 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
+
+> 前序策略那一条断言写成"null 或空串"：列定义是 `NOT NULL DEFAULT ''`，写 `null` 会被库兜成空串，
+> 两者在引擎里等价（都表示"没配"）—— 不要用 `assertNull` 把它写死。
 
 ---
 
@@ -252,6 +305,8 @@
 | demo 的 banner 4（故意写错规则名） | `IfmapQuickStart:59` | 这是产品对存量引擎的**核心差异演示**，删了 demo 就没论点了 |
 | `DemoStrategy` 同时实现两个接口 | `DemoStrategy:44` | 演示"一个 bean 可以承担多个策略角色"，且 `apply` 与 `assemble` 语义不同 |
 | `DemoRunner.seedIfAbsent` 的幂等 | `:108` | 不幂等的话重复启动就 1062；演示"配置写入要判重" |
+| `InboundNoticeDemo` 第三个场景（`PENDING`） | `InboundNoticeDemo:125` | 演示"判定失败时**没有**应答"，比只演成功路径更能说明"引擎不兜底错误码"的设计选择 |
+| ACK 模板里 `$.['seqNo']` 与 `$.seqNo` 并列 | `InboundNoticeDemo:78` | 一个是"对方的字段"、一个是"我方生成的流水号"；这对写法是可运行的反例教材，别改成统一写法 |
 | `application.yml` 的 `web-application-type: none` | `:8` | `docs/08` 与设计文档承诺「非 Web 应用可退出 / `java -jar` exit=0」—— 改回去就破坏契约 |
 | `application-mysql.yml` 头部 9–16 行注释 | `:9-16` | `CannotGetJdbcConnectionException` 的结案记录（成对时区 + `%2B`） |
 | `application-mysql.yml` 的 `ddl.auto: false` | `:38` | 生产由 DBA 执行 SQL（用户明确要求保留） |

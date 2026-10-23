@@ -15,6 +15,9 @@
   `009-backfill-branch-judge.sql`（旧两列**机械 1:1** 回填：`flag` 空 → `always`；`flag` → `strategy`；
   `value` 按 `[;,]` 切开 → `judged` 的 `value` 数组 + `ignoreCase:true`）→
   `010-drop-logic-branch-legacy.sql`（DROP 两列，**可裁剪**，不可回退）。
+  **009 整段必须是一个 changeset**（`SET SESSION group_concat_max_len` + 临时表 + `INSERT` + `UPDATE` + `DROP`）：
+  临时表与会话变量都是**连接级**的，拆开会被连接池换物理连接打断（`1146 table doesn't exist`），
+  更隐蔽的是 `group_concat_max_len` 静默回落 1024 字节 ⇒ `GROUP_CONCAT` 截断 ⇒ 回填出**错的规格且不报错**。
   `IfmapSchemaInitializer.ALTER_FILES` **只收 008**（自动 DDL 不做有损删列）；009/010 由迁移 kit 或 DBA 执行。
   **只跑过自动 DDL 的库**：存量行 `branch_judge` 是空串 ⇒ 运行期 **fail-closed**（`fail_type=SPEC_INVALID`，
   不执行任何分支），必须手工回填（[`docs/10`](docs/10-迁移指南.md) §3.4）。

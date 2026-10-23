@@ -52,7 +52,6 @@ CREATE TEMPORARY TABLE `${tablePrefix}tmp_branch_judged` (
   KEY `idx_${tablePrefix}tmp_branch_judged` (`key_id`, `ord`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
---changeset caijun:009-logic-branch-backfill-split
 INSERT INTO `${tablePrefix}tmp_branch_judged` (`key_id`, `ord`, `piece`)
 SELECT s.`key_id`, n.`n`, TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.`joined`, ';', n.`n`), ';', -1))
 FROM (SELECT `key_id`, REPLACE(`logic_branch_value`, ',', ';') AS `joined`
@@ -66,7 +65,6 @@ JOIN (SELECT 1 AS `n` UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
   ON n.`n` <= 1 + LENGTH(s.`joined`) - LENGTH(REPLACE(s.`joined`, ';', ''))
 WHERE TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.`joined`, ';', n.`n`), ';', -1)) <> '';
 
---changeset caijun:009-logic-branch-backfill-update
 UPDATE `${tablePrefix}logic_branch_config` b
 LEFT JOIN (SELECT `key_id`,
                   CONCAT('{"op":"judged","value":[',

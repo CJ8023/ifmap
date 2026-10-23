@@ -141,8 +141,9 @@ public final class JsonConfigMapper {
         b.setInterfaceNo(required(row, "interfaceNo", source));
         b.setLogicBranchName(required(row, "logicBranchName", source));
         b.setMethodFlag(text(row, "methodFlag"));
-        b.setLogicBranchFlag(orEmpty(row, "logicBranchFlag"));
-        b.setLogicBranchValue(orEmpty(row, "logicBranchValue"));
+        // 必填：兜底分支要显式写 {"op":"always"}。远端没下发就当场失败，
+        // 而不是给个空串让运行期 fail-closed —— 后者要等到真正调接口才发现，且难定位到"远端少了一列"
+        b.setBranchJudge(required(row, "branchJudge", source));
         // 缺列按下标补齐：存量引擎「按返回顺序生效」，全填 0 会退化成按主键兜底
         b.setLogicBranchOrder(integer(row, "logicBranchOrder", source, index));
         b.setRemark(orEmpty(row, "remark"));

@@ -291,11 +291,13 @@ class JsonConfigMapperTest {
     @Test
     @DisplayName("逻辑分支：远端不给 logic_branch_order 时按下标补齐，保全「按返回顺序生效」语义")
     void branchesFallBackToIndexOrder() {
-        String body = "[{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\",\"logicBranchFlag\":\"\"},"
-                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.partnerCode\","
-                + "\"logicBranchValue\":\"A|B\",\"methodFlag\":\"methodA\"},"
-                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.partnerCode\","
-                + "\"logicBranchOrder\":9}]";
+        String body = "[{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\","
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\"},"
+                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\","
+                + "\"branchJudge\":\"{\\\"any\\\":[{\\\"op\\\":\\\"judged\\\","
+                + "\\\"value\\\":[\\\"0000\\\"]}]}\",\"methodFlag\":\"methodA\"},"
+                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\","
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"logicBranchOrder\":9}]";
         List<LogicBranchConfig> branches = JsonConfigMapper.toBranches(JSON, body, Long.valueOf(3L));
 
         assertEquals(3, branches.size());
@@ -303,12 +305,12 @@ class JsonConfigMapperTest {
         assertEquals(Integer.valueOf(2), branches.get(1).getLogicBranchOrder());
         assertEquals(Integer.valueOf(9), branches.get(2).getLogicBranchOrder());
 
-        assertEquals("", branches.get(0).getLogicBranchFlag());
+        assertEquals("{\"op\":\"always\"}", branches.get(0).getBranchJudge());
         assertNull(branches.get(0).getMethodFlag());
-        assertTrue(branches.get(0).isDefaultBranch());
+        assertTrue(branches.get(0).isActionAbsent(), "methodFlag 为空 = 该分支不执行动作");
         assertEquals("methodA", branches.get(1).getMethodFlag());
-        assertFalse(branches.get(1).isDefaultBranch());
-        assertEquals("", branches.get(2).getLogicBranchValue());
+        assertFalse(branches.get(1).isActionAbsent());
+        assertTrue(branches.get(1).getBranchJudge().contains("judged"), branches.get(1).getBranchJudge());
         assertEquals("", branches.get(2).getRemark());
         assertEquals(Integer.valueOf(0), branches.get(0).getDelStatus());
         assertEquals(Long.valueOf(0L), branches.get(0).getDeletedSeq());
@@ -318,12 +320,17 @@ class JsonConfigMapperTest {
     @Test
     @DisplayName("逻辑分支：缺 interface_no 或 logic_branch_name → 失败")
     void branchRequiredColumnsMissingFail() {
-        String noName = "[{\"interfaceNo\":\"IF_A\",\"logicBranchFlag\":\"$.a\"}]";
+        String noName = "[{\"interfaceNo\":\"IF_A\",\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}]";
         IfmapConfigException error = assertThrows(IfmapConfigException.class,
                 () -> JsonConfigMapper.toBranches(JSON, noName, null));
         assertTrue(error.getMessage().contains("logicBranchName"), error.getMessage());
         assertThrows(IfmapConfigException.class,
                 () -> JsonConfigMapper.toBranches(JSON, "[{\"logicBranchName\":\"x\"}]", null));
+        // branchJudge 是必填列：远端漏下发要当场失败，而不是留个空串等运行期 fail-closed
+        IfmapConfigException noJudge = assertThrows(IfmapConfigException.class,
+                () -> JsonConfigMapper.toBranches(JSON,
+                        "[{\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"x\"}]", null));
+        assertTrue(noJudge.getMessage().contains("branchJudge"), noJudge.getMessage());
     }
 
     private static String withOrder(String orderValue) {

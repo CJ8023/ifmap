@@ -68,12 +68,14 @@ class RemoteConfigRepositoryEngineTest {
             + "\\\"op\\\":\\\"eq\\\",\\\"value\\\":\\\"0000\\\"}]}\"}"
             + "]";
 
-    /** 远端分支报文：一条常规（按结果值命中）+ 一条兜底（flag 为空，只在常规全不命中时生效）。 */
+    /** 远端分支报文：一条常规（按结果判定值命中）+ 一条兜底（always，只在常规全不命中时生效）。 */
     private static final String BRANCH_JSON = "["
             + "{\"keyId\":2001,\"interfaceNo\":\"IF_REMOTE\",\"logicBranchName\":\"成功提交\","
-            + "\"logicBranchFlag\":\"submit\",\"logicBranchValue\":\"0000\",\"methodFlag\":\"doSubmit\"},"
+            + "\"branchJudge\":\"{\\\"any\\\":[{\\\"op\\\":\\\"judged\\\","
+            + "\\\"value\\\":[\\\"0000\\\"],\\\"ignoreCase\\\":true}]}\","
+            + "\"methodFlag\":\"doSubmit\"},"
             + "{\"keyId\":2002,\"interfaceNo\":\"IF_REMOTE\",\"logicBranchName\":\"兜底\","
-            + "\"logicBranchFlag\":\"\",\"methodFlag\":\"doFallback\"}"
+            + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"methodFlag\":\"doFallback\"}"
             + "]";
 
     /** 宿主规则。 */
@@ -133,7 +135,7 @@ class RemoteConfigRepositoryEngineTest {
 
         assertTrue(result.isSuccess(), result.getErrorMessage());
         assertEquals("AP9", result.getData().get("applyNo"));
-        assertEquals("submit", result.getMatchedBranch());
+        assertEquals("成功提交", result.getMatchedBranch(), "matchedBranch 是分支名，不是策略键");
         assertEquals(java.util.Collections.singletonList("submit"), executed,
                 "常规分支命中后不应再执行兜底分支");
         assertEquals(1, gateway.requests.size());

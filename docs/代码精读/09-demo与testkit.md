@@ -86,14 +86,14 @@
 | 162 | `ackOf(result)` | 池里有没有本步产物 = 有没有应答（判失败的步骤不入池） |
 | 172 | `seedIfAbsent()` | 幂等：先查再插 |
 | 178 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
-| 201 | `insertBranch(...)` | 两条分支：`ACCEPTED/SUCCESS` → `noticeAccepted`，`FAILED/FAILED` → `noticeFailed` |
+| 200 | `insertBranch(...)` | 两条分支：`branch_judge` = `any[$.noticeStatus eq SUCCESS]` → `noticeAccepted`，`eq FAILED` → `noticeFailed`（`branch_judge` **必填**，兜底才写 `always`） |
 
 三个场景覆盖了被调方向的三个终态（`docs/12` §7）：
 
-| 场景 | `noticeStatus` | 判定 | 分支 | 应答 |
+| 场景 | `noticeStatus` | 判定 | 分支（`matchedBranch`） | 应答 |
 |---|---|---|---|---|
-| 成功通知 | `SUCCESS` | 过 | `ACCEPTED` | `0000` + 动作补 `approveNo` |
-| 失败通知 | `FAILED` | 过（业务失败也是有效推送） | `FAILED` | 动作把 `code` 覆盖成 `2001` + `retryable` |
+| 成功通知 | `SUCCESS` | 过 | `受理分支` | `0000` + 动作补 `approveNo` |
+| 失败通知 | `FAILED` | 过（业务失败也是有效推送） | `失败分支` | 动作把 `code` 覆盖成 `2001` + `retryable` |
 | 状态不认识 | `PENDING` | **不过** | 不执行 | **没有**（宿主自己回 `1xxx`，引擎不兜底） |
 
 > 应答模板里 `"partnerSeqNo":"$.['seqNo']"` 与 `"ourSeqNo":"$.seqNo"` 并列**不是笔误**：
@@ -168,8 +168,8 @@
 | 行 | 用例 | 断言要点 |
 |---|---|---|
 | 135 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
-| 153 | `inboundAcceptedFillsAck` | 判定过 + 分支 `ACCEPTED` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
-| 168 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，分支 `FAILED`，`code=2001`、`retryable=true` |
+| 153 | `inboundAcceptedFillsAck` | 判定过 + `matchedBranch="受理分支"` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
+| 168 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，`matchedBranch="失败分支"`，`code=2001`、`retryable=true` |
 | 180 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
 
 > 前序策略那一条断言写成"null 或空串"：列定义是 `NOT NULL DEFAULT ''`，写 `null` 会被库兜成空串，

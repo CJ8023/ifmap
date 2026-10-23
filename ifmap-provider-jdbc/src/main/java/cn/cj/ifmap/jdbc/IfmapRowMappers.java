@@ -48,8 +48,8 @@ public final class IfmapRowMappers {
 
     /** 逻辑分支列清单。 */
     static final String LOGIC_BRANCH_COLUMNS =
-            "`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`logic_branch_flag`,"
-            + "`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`";
+            "`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`branch_judge`,"
+            + "`logic_branch_order`,`remark`,`del_status`,`deleted_seq`";
 
     /** 配置变更历史列清单。 */
     static final String HISTORY_COLUMNS =
@@ -111,8 +111,7 @@ public final class IfmapRowMappers {
                 b.setInterfaceNo(rs.getString("interface_no"));
                 b.setMethodFlag(rs.getString("method_flag"));
                 b.setLogicBranchName(rs.getString("logic_branch_name"));
-                b.setLogicBranchFlag(rs.getString("logic_branch_flag"));
-                b.setLogicBranchValue(rs.getString("logic_branch_value"));
+                b.setBranchJudge(rs.getString("branch_judge"));
                 b.setLogicBranchOrder(rs.getInt("logic_branch_order"));
                 b.setRemark(rs.getString("remark"));
                 b.setDelStatus(rs.getInt("del_status"));

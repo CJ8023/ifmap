@@ -25,3 +25,12 @@ databaseChangeLog:
       file: db/changelog/v1.0.0/006-execution-log-judge-columns.sql
   - include:
       file: db/changelog/v1.0.0/007-config-call-direction.sql
+  # 008/009/010 是逻辑分支判定换血（flag+value → branch_judge）。
+  # 009 是数据回填（MySQL 语法，临时表 + JSON_QUOTE），新库执行也是空跑。
+  # 复用存量表且存量模块仍在跑的场景（tablePrefix=bankint_）要注释掉 010，见文件内注释。
+  - include:
+      file: db/changelog/v1.0.0/008-logic-branch-branch-judge.sql
+  - include:
+      file: db/changelog/v1.0.0/009-backfill-branch-judge.sql
+  - include:
+      file: db/changelog/v1.0.0/010-drop-logic-branch-legacy.sql

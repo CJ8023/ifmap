@@ -155,7 +155,7 @@ class IfmapDemoApplicationTest {
         IfmapResult result = orchestrator.executeInbound(noticeRequest(), "BIZ_NOTICE", "notice", notice("SUCCESS"));
 
         assertTrue(result.isSuccess(), "报文可受理 → 判定通过：" + result.getErrorMessage());
-        assertEquals("ACCEPTED", result.getMatchedBranch());
+        assertEquals("受理分支", result.getMatchedBranch(), "matchedBranch 是 logic_branch_name");
         Map<String, Object> ack = ackOf(result);
         assertEquals("0000", ack.get("code"));
         // $.seqNo 是保留路径（生成我方流水号），取对方同名字段必须写 $.['seqNo']
@@ -170,7 +170,7 @@ class IfmapDemoApplicationTest {
         IfmapResult result = orchestrator.executeInbound(noticeRequest(), "BIZ_NOTICE", "notice", notice("FAILED"));
 
         assertTrue(result.isSuccess(), "业务失败 ≠ 报文不可受理，判定仍要过");
-        assertEquals("FAILED", result.getMatchedBranch());
+        assertEquals("失败分支", result.getMatchedBranch());
         Map<String, Object> ack = ackOf(result);
         assertEquals("2001", ack.get("code"), "动作原地改 Map 覆盖模板里的 0000");
         assertEquals(Boolean.TRUE, ack.get("retryable"));

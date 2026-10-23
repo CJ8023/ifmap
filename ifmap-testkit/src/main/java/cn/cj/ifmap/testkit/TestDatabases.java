@@ -95,9 +95,13 @@ public final class TestDatabases {
     /**
      * 生产 DDL（Liquibase changelog 的全部脚本），顺序即执行顺序。
      *
-     * <p>001~004 是 {@code CREATE TABLE}，005~007 是 {@code ALTER TABLE}：新库顺序执行同样落到
+     * <p>001~004 是 {@code CREATE TABLE}，005~008/010 是 {@code ALTER TABLE}：新库顺序执行同样落到
      * 目标结构，「存量库升级」与「全新建库」不会分叉。新增 changeset 时<b>必须同时</b>加到
      * {@code IfmapSchemaInitializer.ALTER_FILES}（{@code ddl.auto} 走那份）与这里（测试走这份）。</p>
+     *
+     * <p><b>009 故意不在这里</b>：它是数据回填（{@code JSON_QUOTE} + 临时表 + 数字派生表，MySQL 语法），
+     * 只对存量行有意义；测试库每张表都是刚建的空表，跑它只会引入一块 H2 无法执行的 SQL。
+     * 它的等价性不由"能不能执行"保证，而由 {@code BranchJudgeEquivalenceTest} 双跑对照保证。</p>
      */
     public static final List<String> PRODUCTION_DDL = Collections.unmodifiableList(Arrays.asList(
             "db/changelog/v1.0.0/001-create-ifmap-config.sql",
@@ -106,7 +110,9 @@ public final class TestDatabases {
             "db/changelog/v1.0.0/004-create-config-history.sql",
             "db/changelog/v1.0.0/005-config-result-judge.sql",
             "db/changelog/v1.0.0/006-execution-log-judge-columns.sql",
-            "db/changelog/v1.0.0/007-config-call-direction.sql"));
+            "db/changelog/v1.0.0/007-config-call-direction.sql",
+            "db/changelog/v1.0.0/008-logic-branch-branch-judge.sql",
+            "db/changelog/v1.0.0/010-drop-logic-branch-legacy.sql"));
 
     /** 执行日志归档冷表（可选运维脚本，字面量前缀需自行替换）。 */
     public static final String ARCHIVE_DDL = "db/optional/execution-log-partition/04-create-archive-table.sql";

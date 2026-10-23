@@ -1,0 +1,37 @@
+--liquibase formatted sql
+-- Copyright 2026 caijun
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- =====================================================================================
+-- 逻辑分支判定列换血（1/3）：加 branch_judge
+--
+-- 为什么不是改 002：002 已在存量库执行过，改它会让 Liquibase checksum 校验失败
+-- （部署方被迫 clear-checksums，那等于把校验关掉）。所以新增 008/009/010，
+-- 「新库 = 001..010 顺序执行」与「存量库 = 只执行 008/009/010」得到同一份结构。
+--
+-- 【不自动回填】历史行的 branch_judge 由 009 按 {@code logic_branch_flag}/{@code logic_branch_value}
+-- 机械映射（策略键 / 判定值归属语义都能 1:1 表达）。**只跑自动 DDL 的环境**
+-- （ifmap.ddl.auto=true，见 IfmapSchemaInitializer.ALTER_FILES）不会执行 009：
+-- 那种环境下存量行的 branch_judge 是空串 → 运行期 fail-closed（SPEC_INVALID），
+-- 不会静默落到兜底分支；处置方式见 docs/10-迁移指南.md §7。
+--
+-- 【非空表】严格模式（MySQL 5.7+ STRICT_TRANS_TABLES）下，给非空表加
+-- `text NOT NULL` 且无默认值的列会报 1364/1138。处置顺序（同样不补占位值）：
+--   1) 先按可空列加：ALTER TABLE `${tablePrefix}logic_branch_config` ADD COLUMN `branch_judge` text;
+--   2) 先执行 009 回填；
+--   3) 再收紧：ALTER TABLE `${tablePrefix}logic_branch_config` MODIFY COLUMN `branch_judge` text NOT NULL;
+-- =====================================================================================
+
+--changeset caijun:008-logic-branch-add-branch-judge
+ALTER TABLE `${tablePrefix}logic_branch_config` ADD COLUMN `branch_judge` text NOT NULL COMMENT '分支判定规格（JSON；必填，无默认值 ⇒ 未配置即判定失败，不静默落到兜底）';

@@ -112,10 +112,15 @@ class RemoteConfigRepositoryTest {
     @DisplayName("queryLogicBranches：远端不给顺序列时保持返回顺序（下标补齐），已删除的被剔除")
     void queryLogicBranchesKeepsRemoteOrder() {
         String body = "["
-                + "{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\",\"logicBranchFlag\":\"$.partnerCode\"},"
-                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\",\"logicBranchFlag\":\"$.partnerCode\"},"
-                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"已删\",\"delStatus\":1},"
-                + "{\"keyId\":14,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\",\"logicBranchFlag\":\"\"}"
+                + "{\"keyId\":11,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"甲行\","
+                + "\"branchJudge\":\"{\\\"any\\\":[{\\\"path\\\":\\\"$.partnerCode\\\","
+                + "\\\"op\\\":\\\"exists\\\"}]}\"},"
+                + "{\"keyId\":12,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"乙行\","
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"methodFlag\":\"doX\"},"
+                + "{\"keyId\":13,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"已删\",\"delStatus\":1,"
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"methodFlag\":\"doY\"},"
+                + "{\"keyId\":14,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"兜底\","
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\",\"methodFlag\":\"doZ\"}"
                 + "]";
         StubFetcher fetcher = new StubFetcher().reply(body);
         List<LogicBranchConfig> branches = new RemoteConfigRepository(fetcher, JSON).queryLogicBranches("-1", "IF_A");
@@ -135,8 +140,10 @@ class RemoteConfigRepositoryTest {
     @Test
     @DisplayName("queryLogicBranches：显式顺序优先于下标")
     void explicitBranchOrderWins() {
-        String body = "[{\"keyId\":1,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"后\",\"logicBranchOrder\":9},"
-                + "{\"keyId\":2,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"先\",\"logicBranchOrder\":1}]";
+        String body = "[{\"keyId\":1,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"后\",\"logicBranchOrder\":9,"
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\"},"
+                + "{\"keyId\":2,\"interfaceNo\":\"IF_A\",\"logicBranchName\":\"先\",\"logicBranchOrder\":1,"
+                + "\"branchJudge\":\"{\\\"op\\\":\\\"always\\\"}\"}]";
         List<LogicBranchConfig> branches = new RemoteConfigRepository(new StubFetcher().reply(body), JSON)
                 .queryLogicBranches("-1", "IF_A");
         assertEquals("先", branches.get(0).getLogicBranchName());

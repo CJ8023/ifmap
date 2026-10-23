@@ -135,11 +135,10 @@ public class JdbcConfigWriter {
      * <p>自动补齐：{@code keyId}、{@code delStatus = 0}、{@code deletedSeq = 0}、
      * {@code tenantId}（为空时 -1）、{@code logicBranchOrder}（为空时 0）。</p>
      *
-     * <p><b>空值语义</b>：{@code logic_branch_flag} / {@code logic_branch_value} / {@code method_flag}
-     * 都允许为空 —— "flag 与 value 皆空"就是<b>默认兜底分支</b>的定义，{@code method_flag} 为空表示命中该分支后
-     * 不执行宿主动作。三列在 DDL 里都是 {@code NOT NULL DEFAULT ''}（或可空），所以它们不能进必填校验，
-     * 这里统一按"空串落库"处理（而不是 NULL）：既避开 {@code NOT NULL} 列写 NULL 的报错，也让唯一键
-     * {@code uk_..._logic_branch} 对"默认兜底分支"只有一条生效。</p>
+     * <p><b>空值语义</b>：{@code branch_judge} 是<b>必填</b>（DDL 里 {@code text NOT NULL} 且无默认值）——
+     * 兜底分支要显式写 {@code {"op":"always"}}，不再用"两列皆空"这种隐式约定（空串在运行期是
+     * fail-closed，不是兜底）。{@code method_flag} 为空表示命中该分支后不执行宿主动作，仍按空串落库
+     * （避开 {@code NOT NULL} 列写 NULL，也让唯一键 {@code uk_..._logic_branch} 只有一条生效）。</p>
      */
     public long insert(LogicBranchConfig branch) {
         if (branch == null) {
@@ -151,15 +150,15 @@ public class JdbcConfigWriter {
         }
         JdbcValues.require(branch.getInterfaceNo(), "interfaceNo");
         JdbcValues.require(branch.getLogicBranchName(), "logicBranchName");
+        JdbcValues.require(branch.getBranchJudge(), "branchJudge");
         String sql = "INSERT INTO `" + tables.logicBranchTable() + "`"
-                + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`logic_branch_flag`,"
-                + "`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
-                + " VALUES (?,?,?,?,?,?,?,?,?,0,0)";
+                + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,`branch_judge`,"
+                + "`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
+                + " VALUES (?,?,?,?,?,?,?,?,0,0)";
         jdbc.update(sql, id,
                 JdbcValues.orDefault(branch.getTenantId(), -1L),
                 branch.getInterfaceNo(), JdbcValues.orEmpty(branch.getMethodFlag()),
-                JdbcValues.orEmpty(branch.getLogicBranchName()), JdbcValues.orEmpty(branch.getLogicBranchFlag()),
-                JdbcValues.orEmpty(branch.getLogicBranchValue()),
+                JdbcValues.orEmpty(branch.getLogicBranchName()), branch.getBranchJudge(),
                 JdbcValues.orDefault(branch.getLogicBranchOrder(), 0),
                 JdbcValues.orEmpty(branch.getRemark()));
         branch.setKeyId(id);
@@ -262,14 +261,14 @@ public class JdbcConfigWriter {
         }
         JdbcValues.require(branch.getInterfaceNo(), "interfaceNo");
         JdbcValues.require(branch.getLogicBranchName(), "logicBranchName");
+        JdbcValues.require(branch.getBranchJudge(), "branchJudge");
         String sql = "UPDATE `" + tables.logicBranchTable() + "` SET"
-                + " `interface_no` = ?, `method_flag` = ?, `logic_branch_name` = ?, `logic_branch_flag` = ?,"
-                + " `logic_branch_value` = ?, `logic_branch_order` = ?, `remark` = ?"
+                + " `interface_no` = ?, `method_flag` = ?, `logic_branch_name` = ?, `branch_judge` = ?,"
+                + " `logic_branch_order` = ?, `remark` = ?"
                 + " WHERE `key_id` = ? AND `del_status` = 0";
         try {
             return jdbc.update(sql, branch.getInterfaceNo(), JdbcValues.orEmpty(branch.getMethodFlag()),
-                    JdbcValues.orEmpty(branch.getLogicBranchName()), JdbcValues.orEmpty(branch.getLogicBranchFlag()),
-                    JdbcValues.orEmpty(branch.getLogicBranchValue()),
+                    JdbcValues.orEmpty(branch.getLogicBranchName()), branch.getBranchJudge(),
                     JdbcValues.orDefault(branch.getLogicBranchOrder(), 0),
                     JdbcValues.orEmpty(branch.getRemark()), branch.getKeyId()) == 1;
         } catch (DuplicateKeyException e) {

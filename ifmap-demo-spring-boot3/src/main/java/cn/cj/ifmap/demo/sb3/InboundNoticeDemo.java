@@ -193,21 +193,26 @@ public class InboundNoticeDemo implements ApplicationRunner {
         long keyId = writer.insert(config);
         log.info("已写入被调配置 keyId={}（INBOUND / 无请求模板 / 无前序策略）", keyId);
 
-        // 两条常规分支：按判定取到的实际值（$.noticeStatus）匹配，各自一个动作
-        insertBranch("受理分支", "ACCEPTED", "SUCCESS", 1, "noticeAccepted");
-        insertBranch("失败分支", "FAILED", "FAILED", 2, "noticeFailed");
+        // 两条常规分支：branch_judge 自己从原文取值判断（顶层只能 always / all / any，
+        // 单条件就包一层 any）。先后顺序由 logic_branch_order 决定，首个命中即执行。
+        // 也可以写 {"any":[{"op":"judged","value":["SUCCESS"]}]}：judged 比的是 result_judge
+        // 命中的那个值（actualValue），这里用路径表达式更直观、也不依赖判定内部实现。
+        insertBranch("受理分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"SUCCESS\"}]}",
+                1, "noticeAccepted");
+        insertBranch("失败分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"FAILED\"}]}",
+                2, "noticeFailed");
     }
 
-    private void insertBranch(String name, String flag, String value, int order, String methodFlag) {
+    private void insertBranch(String name, String branchJudge, int order, String methodFlag) {
         LogicBranchConfig branch = new LogicBranchConfig();
         branch.setTenantId(Long.valueOf(TENANT));
         branch.setInterfaceNo(INTERFACE_NO);
         branch.setMethodFlag(methodFlag);
         branch.setLogicBranchName(name);
-        branch.setLogicBranchFlag(flag);
-        branch.setLogicBranchValue(value);
+        // 必填：留空是"非法配置"（运行期 fail-closed），不是"兜底"。兜底要显式写 {"op":"always"}
+        branch.setBranchJudge(branchJudge);
         branch.setLogicBranchOrder(Integer.valueOf(order));
         long branchId = writer.insert(branch);
-        log.info("已写入逻辑分支 keyId={}（{}：value={} / 动作={}）", branchId, name, value, methodFlag);
+        log.info("已写入逻辑分支 keyId={}（{}：judge={} / 动作={}）", branchId, name, branchJudge, methodFlag);
     }
 }

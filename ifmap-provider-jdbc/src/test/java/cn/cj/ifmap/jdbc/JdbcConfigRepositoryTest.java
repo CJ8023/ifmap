@@ -176,7 +176,7 @@ class JdbcConfigRepositoryTest {
         assertEquals(3, list.size());
         assertEquals("b1", list.get(0).getLogicBranchName());
         assertEquals("b2", list.get(1).getLogicBranchName());
-        assertTrue(list.get(2).isDefaultBranch());
+        assertTrue(list.get(2).isActionAbsent(), "methodFlag 为空 = 该分支不执行动作");
     }
 
     // ------------------------------------------------------------------ 写入
@@ -426,10 +426,13 @@ class JdbcConfigRepositoryTest {
     private long branch(String interfaceNo, String methodFlag, int order, long keyId) {
         String sql = "INSERT INTO `" + prefix + "logic_branch_config`"
                 + " (`key_id`,`tenant_id`,`interface_no`,`method_flag`,`logic_branch_name`,"
-                + "`logic_branch_flag`,`logic_branch_value`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
-                + " VALUES (?,?,?,?,?,?,?,?,'',0,0)";
+                + "`branch_judge`,`logic_branch_order`,`remark`,`del_status`,`deleted_seq`)"
+                + " VALUES (?,?,?,?,?,?,?,'',0,0)";
         jdbc.update(sql, keyId, Long.parseLong(TENANT), interfaceNo, methodFlag,
-                methodFlag == null ? "默认分支" : methodFlag, "$.flag", "1", order);
+                methodFlag == null ? "默认分支" : methodFlag,
+                methodFlag == null ? "{\"op\":\"always\"}"
+                        : "{\"any\":[{\"op\":\"strategy\",\"value\":\"" + methodFlag + "\"}]}",
+                order);
         return keyId;
     }
 }

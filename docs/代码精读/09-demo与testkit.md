@@ -129,7 +129,7 @@
 `seedIfAbsent` 里几个值得抄的细节：
 - `:123` `resultJudge` 写成 `{"all":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`；
 - `:125` `setPreStrategyName("demoStrategy")` —— **bean 名首字母小写**，写类名会找不到；
-- `:130-139` 分支：`methodFlag="submit"` + `logicBranchFlag="submit"` + `logicBranchValue="0000"`（三者各自含义不同，见 03 篇）。
+- `:130-139` 分支：`methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge`（`{"any":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`）——动作键、分支名、判定规格三者各自含义不同，见 03 篇。
 
 ### 2.10 两个 yml
 

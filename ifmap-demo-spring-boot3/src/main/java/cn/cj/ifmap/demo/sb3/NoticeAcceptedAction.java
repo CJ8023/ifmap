@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 被调方向的「受理」分支动作（{@code logic_branch_flag=ACCEPTED}）。
+ * 被调方向的「受理」分支动作（分支名 {@code 受理分支}，`branch_judge` = {@code $.noticeStatus eq SUCCESS}）。
  *
  * <p>应答报文此时<b>已经渲染好</b>（{@code response_param_template}）并回填到
  * {@link StrategyContext#getResponseData()}，动作要做的是<b>原地改这个 Map</b> 补上模板里

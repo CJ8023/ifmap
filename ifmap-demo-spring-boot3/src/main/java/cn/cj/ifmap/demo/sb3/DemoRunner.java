@@ -132,10 +132,10 @@ public class DemoRunner implements ApplicationRunner {
         branch.setInterfaceNo(INTERFACE_NO);
         branch.setMethodFlag("submit");
         branch.setLogicBranchName("成功分支");
-        branch.setLogicBranchFlag("submit");
-        branch.setLogicBranchValue("0000");
+        // branch_judge 与 result_judge 同一套语法：这里直接看原文的 resultCode
+        branch.setBranchJudge("{\"any\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         branch.setLogicBranchOrder(Integer.valueOf(1));
         long branchId = writer.insert(branch);
-        log.info("已写入演示逻辑分支 keyId={}（flag=submit / value=0000 / 动作=submit）", branchId);
+        log.info("已写入演示逻辑分支 keyId={}（judge=$.resultCode eq 0000 / 动作=submit）", branchId);
     }
 }

@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 被调方向的「处理失败」分支动作（{@code logic_branch_flag=FAILED}）。
+ * 被调方向的「处理失败」分支动作（分支名 {@code 失败分支}，`branch_judge` = {@code $.noticeStatus eq FAILED}）。
  *
  * <p>对方推的是「放款失败」的通知：报文本身可受理（判定通过、要回 ACK），
  * 但我方处理结论是失败。做法是<b>把应答模板里的成功码覆盖成失败码</b>，

@@ -84,7 +84,9 @@ ifmap:
 | PUT | `/branches/{keyId}` | 修改分支 |
 | DELETE | `/branches/{keyId}` | 逻辑删除分支 |
 
-分支**不写历史**（设计 §6.5 决策）：分支表没有 `version` 列，且分支属于接口配置的一部分，改分支的"留痕"由接口配置的 `UPDATE` 历史承载。分支唯一键是 `(tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)`，所以「同接口 + 同方法 + 同名」不允许重复；`method_flag` 可为空（空 = 该分支**不执行动作**）；**“兜底分支”是另一个维度**：`logic_branch_flag` 为空才是兜底分支（不参与常规匹配，只在常规分支全部未命中时生效，每个接口最多 1 条）。
+分支**不写历史**（设计 §6.5 决策）：分支表没有 `version` 列，且分支属于接口配置的一部分，改分支的"留痕"由接口配置的 `UPDATE` 历史承载。分支唯一键是 `(tenant_id, interface_no, method_flag, logic_branch_name, deleted_seq)`，所以「同接口 + 同方法 + 同名」不允许重复；`method_flag` 可为空（空 = 该分支**不执行动作**）；**“兜底分支”是另一个维度**：`branch_judge = {"op":"always"}` 才是兜底分支（不参与常规匹配，只在常规分支全部未命中时生效，每个接口最多 1 条），**空规格不是兜底、而是非法配置**。
+
+> ⚠️ **接口契约变更（BREAKING）**：分支的 DTO 就是 `LogicBranchConfig` 本体，`logicBranchFlag` / `logicBranchValue` 两个字段消失、新增 `branchJudge`（字符串，内容是判定规格 JSON）。同步消费 `/branches` 的脚本 / 报表要一起改。
 
 ### 3.3 元数据（配置页的下拉与即时校验用）
 
@@ -171,9 +173,18 @@ ifmap:
 | `pre_strategy_name` / `post_strategy_name` 已注册 | `StrategyHookRegistry` |
 | 请求模板里的 `$.pool.<接口号>` 指向**本节点内更早**的步骤 | `ConfigRepository.queryConfigsByBusiNode`（同序或后续步骤、自引用、拼错的接口号一律拒；响应模板不判——它的根是对方原始回参，可能真有个叫 `pool` 的业务字段） |
 | 唯一键不冲突（**两个维度**） | `(tenant_id, interface_no, deleted_seq)`（接口号租户内唯一）+ `(tenant_id, busi_node, interface_order, deleted_seq)`（顺序节点内唯一） |
-| 分支集合：默认兜底 ≤ 1、顺序唯一、`method_flag` 已注册 | `validateBranches` / `validateBranch` |
+| 分支集合：规格非空且合法、兜底（`always`）≤ 1、顺序唯一、动作名已注册 | `validateBranches` / `validateBranch` |
+| 分支规格里的 `strategy` 键已注册 | `LogicBranchStrategyRegistry` —— 未注册只给 **warning**（跨环境可能"先配后注册"），但写错键在运行期**不会报错**，只会表现为"这条分支永远不命中" |
+| 分支规格里的 `judged` 有值可判 | 该接口的 `result_judge` 在**所有** `busi_node` 上都是 `always` → **error**（`judged` 拿不到 `actualValue`，条件永不成立，属于"配了但没用"） |
 
-关于最后一行：**默认兜底分支（`logic_branch_flag`/`value` 都空）最多 1 条**——引擎取首个命中者，第二条永远不会生效，属于"配了但没用"的静默陷阱，所以新增第二条时直接拒。
+关于最后三行：
+
+- **兜底分支（`{"op":"always"}`）最多 1 条**——引擎取首个命中者，第二条永远不会生效，所以新增第二条时直接拒。
+  注意口径变了：旧的判据是"`logic_branch_flag`/`value` 都空"，那是**隐式**约定（且把所有"只填了 flag"的分支都误判成兜底）；
+  现在必须是**显式**的 `{"op":"always"}`。
+- **空规格（`""` / `{}` / `{"all":[]}`）直接 error**，报错文案会给出处置路径（兜底写 `always`；存量数据按
+  [`docs/10`](10-迁移指南.md) §7 回填）。运行期遇到空/非法规格是 **fail-closed**（`fail_type=SPEC_INVALID`），
+  所以"空 = 兜底"这种隐式兜底绝不能留。
 
 ## 6. 变更历史与回滚
 
@@ -275,7 +286,7 @@ REST 是给机器和 curl 用的，运营同学要的是能点的页面。所以
 |---|---|
 | 配置 | 分页查询（租户 / 接口 / 节点 / 资方 / 状态 / 含已删）、新建、编辑、**保存前校验**、**试跑**、启停、逻辑删除、变更历史、一键回滚 |
 | 配置 · 判定编辑器 | `result_judge` 三选一：**不判定**（`{"op":"always"}`）/ **单条件**（path + op + value + ignoreCase，`exists`/`notBlank` 自动禁用 value、`in`/`notIn` 收逗号分隔数组）/ **原始 JSON**（多条件、`any` 嵌套等复杂组合照原样提交，页面不把它降级成单条件） |
-| 逻辑分支 | 按接口查分支（含兜底分支标记）、新建 / 编辑 / 删除（`logic_branch_flag` 留空即兜底分支） |
+| 逻辑分支 | 按接口查分支（列表列出每个分支的判定规格，未配置显示 `(未配置)`）、新建 / 编辑 / 删除（**判定编辑器与 `result_judge` 同一个组件**，分支模式额外放开 `strategy` / `judged` 两个算子并把 path 置灰；兜底分支选「兜底」即 `{"op":"always"}`） |
 | 巡检 | 全量巡检结果分条展示，一键**复制 Markdown 报告**（直接贴工单） |
 | 规则与字典 | 已注册规则（`@FUN` 可用项）、动作（`method_flag`）、策略、宿主机字典——**全部由服务端 `/rules`、`/actions`、`/strategies`、`/enums` 提供，页面不硬编码** |
 

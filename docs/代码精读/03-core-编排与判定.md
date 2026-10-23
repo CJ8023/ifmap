@@ -136,12 +136,12 @@
 | 行 | 方法 | 说明 |
 |---|---|---|
 | 522 | `applyBranch` | 取 `queryLogicBranches(tenantId, interfaceNo)`；空 → DEBUG 返回 null |
-| 529–541 | **两趟扫描** | 第一趟顺手记住**第一条** `logic_branch_flag` 为空的兜底分支（`catchAll`），并跳过它 |
-| 542–545 | 常规命中 | `matches` → `executeBranch` → 立即返回 |
-| 547–551 | 兜底 | 常规全不中才走 `catchAll`（**即使它排在前面也不会抢常规分支的命中**） |
-| 552–554 | 都没有 | WARN（带分支条数与 `actualValue`）返回 null |
-| 558 | `executeBranch` | `setMatchedBranch(flag)`；动作键 = `methodFlag`，为空时**退回用 `logic_branch_flag` 当动作名**（`561–562`）；返回 `flag` |
-| 567 | `matches` | ① `logicBranches.matches(flag, context)` 策略命中（`569`）；② 否则 `logic_branch_value` 按 `[;,]` 切分后 `equalsIgnoreCase` 逐个比（`576–581`）；`value` 或 `actualValue` 为空 → false（`572–575`） |
+| — | **先全量校验** | 遍历所有分支的 `branch_judge`，任一非法 ⇒ 整步 `FAIL`（`fail_type=SPEC_INVALID`）、不执行任何分支、**不抛异常**（fail-closed 优先于"跳过坏的继续跑"） |
+| — | **两趟扫描** | 第一趟只挑出兜底分支（规格 `{"op":"always"}`，`BranchJudgeSpec.isAlways` 判编译后的根节点），并跳过它；其余按 `logic_branch_order` 升序求值，首个 `MATCHED` 立即执行 |
+| — | 兜底 | 常规全不中才走兜底（**即使它排在前面也不会抢常规分支的命中**） |
+| — | 都没有 | WARN（带分支条数与 `actualValue`）返回 null |
+| — | `executeBranch` | `setMatchedBranch(logicBranchName)`（**改记分支名，原记 flag**）；动作键 = `methodFlag`，为空 = **不执行动作**（原「为空退回用 flag 当动作名」的隐藏行为已删） |
+| — | `BranchJudge` | 规格编译一次进 1024 条 LRU（**解析失败也缓存**）；求值根是**对方原文**，与 `result_judge` 共用 `JsonReadContext`；三分 `MATCHED` / `MISSED` / `invalid` |
 
 ### 2.8 渲染与日志（586–692）
 
@@ -284,7 +284,8 @@ javadoc 明确写了「**顺序只有一个来源**」—— 拓扑排序那层�
 | 4 | 「前序策略返回空 Map，请求没变」 | 空/`null` 视为"没额外参数"，直接返回原报文 | `:283` |
 | 5 | 「配了 `pre_strategy_name` 启动就抛异常」 | `failOnMissingStrategy` 默认 `true`（刻意：配了名字却没注册，静默跳过更危险） | `:275` |
 | 6 | 「兜底分支排在第一条，抢走了所有命中」 | 不会 —— 兜底分支被单独拎到 `catchAll`，只在常规全不中时生效 | `:417-438` |
-| 7 | 「分支动作没执行」 | 动作键 = `methodFlag`，为空才退回 `logic_branch_flag`；**两者都空 → `ActionRegistry.execute` 直接抛**（`method_flag` 为空是配置错误，不受 `failOnMissingAction` 控制） | `:448-449` + `ActionRegistry:91-93` |
+| 7 | 「分支动作没执行」 | 动作键 = `methodFlag`，**为空 = 该分支不执行动作**（原「退回用 `logic_branch_flag` 当动作名」已随该列一起删除）；配了个没注册的动作名 → `ActionRegistry.execute` 直接抛（不受 `failOnMissingAction` 控制） | `executeBranch` + `ActionRegistry:91-93` |
+| 7.1 | 「分支一条都没命中」 | `branch_judge` 非法（含空串）是 `SPEC_INVALID` 整步失败；规格合法但不匹配才是"未命中"（落 WARN，落到兜底分支） | `BranchJudge` + `ConfigValidator.checkBranchJudge` |
 | 8 | 「`ifmap_interface_exec_log.error_msg` 只有对方原话」 | `failureMessage` 只拼非空段 | `:549` |
 | 9 | 「日志表 `tenant_id` 是 -1」 | `parseTenantId` 解析失败/空一律 `-1` | `:566` |
 | 10 | 「dry-run 里 `gateway=null` 却报成功」 | 无网关时只做本地渲染，`PartnerOutcome.ofBody(null)` → 判定层按"响应为空"归因 | `:372-375` |

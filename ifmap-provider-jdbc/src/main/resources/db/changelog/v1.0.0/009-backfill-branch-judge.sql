@@ -54,7 +54,7 @@ SELECT s.`key_id`, n.`n`, TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(s.`joined`, ';', 
 FROM (SELECT `key_id`, REPLACE(`logic_branch_value`, ',', ';') AS `joined`
         FROM `${tablePrefix}logic_branch_config`
        WHERE COALESCE(`branch_judge`, '') = ''
-         AND TRIM(`logic_branch_flag`) <> '') s
+         AND COALESCE(TRIM(`logic_branch_flag`), '') <> '') s
 JOIN (SELECT 1 AS `n` UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
       UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8
       UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12
@@ -71,7 +71,7 @@ LEFT JOIN (SELECT `key_id`,
              FROM `${tablePrefix}tmp_branch_judged`
             GROUP BY `key_id`) j ON j.`key_id` = b.`key_id`
 SET b.`branch_judge` = CASE
-      WHEN TRIM(b.`logic_branch_flag`) = '' THEN '{"op":"always"}'
+      WHEN COALESCE(TRIM(b.`logic_branch_flag`), '') = '' THEN '{"op":"always"}'
       WHEN j.`judged` IS NULL THEN CONCAT('{"any":[{"op":"strategy","value":',
              JSON_QUOTE(TRIM(b.`logic_branch_flag`)), '}]}')
       ELSE CONCAT('{"any":[{"op":"strategy","value":', JSON_QUOTE(TRIM(b.`logic_branch_flag`)),

@@ -126,7 +126,7 @@ public class ConfigValidator {
      *
      * <p>{@code branch_judge} 为空<b>不是</b>"没配判定"，而是<b>非法</b>：空规格在运行期是 fail-closed
      * （{@code SPEC_INVALID}，该步直接失败），不会静默落到兜底分支。存量数据要按
-     * {@code docs/10-迁移指南.md §7} 回填 —— 所以这里按 error 报，并给出处置方式。</p>
+     * {@code docs/10-迁移指南.md §3.4} 回填 —— 所以这里按 error 报，并给出处置方式。</p>
      */
     public ValidationResult validateBranches(String tenantId, String interfaceNo) {
         ValidationResult result = new ValidationResult();
@@ -628,7 +628,7 @@ public class ConfigValidator {
         String name = row.getLogicBranchName();
         if (isBlank(raw)) {
             result.error("分支 " + name + " 未配置 branch_judge：兜底分支要显式写 {\"op\":\"always\"}；"
-                    + "存量数据请按 docs/10-迁移指南.md §7 回填（空规格在运行期是 fail-closed，不是兜底）");
+                    + "存量数据请按 docs/10-迁移指南.md §3.4 回填（空规格在运行期是 fail-closed，不是兜底）");
             return false;
         }
         List<String> errors = BranchJudgeSpec.errorsOf(raw, jsonOps);

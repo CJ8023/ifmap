@@ -25,8 +25,8 @@ sed -i 's/bankint_/acme_/g' *.sql
 | 维度 | 是否变化 | 说明 |
 |---|---|---|
 | 表名 | **变** | `bankint_*` → `ifmap_*`（项目更名后 DDL 同步更名） |
-| 列名 | **2 处改名 + 1 处拆分 + 1 处退出** | 改名：`bank_code` → `partner_code`、`bank_name` → `partner_name`（标识符不再锁死在「银行」：同一列要承载银行 / 保理 / 信托 / 小贷 / 保险等各类合作机构）；拆分：`strategy_name` → `pre_strategy_name` + `post_strategy_name`（出网前 / 回参之后的两个钩子）；退出：`front_interface_no` 已从目标 DDL 删除（前后序改由 `interface_order` + 跨步骤共享池表达）；**其余列名原样保留** → 没有 ETL、没有字段映射表 |
-| 列定义 | 部分变化 | 新增 8 列（config 3 / branch 2 / log 1 / **前后序策略 2**）+ **条件新增列** `financing_mode` 与 `pre_strategy_name` + `post_strategy_name`（存量没有就加，见 §9.4 ①⑥；`yfl_bill` 那一类还要再补 `interface_code`/`project_code`/`interface_name`，见 §9.4 ③）、改类型/长度/可空 30+ 列、加 9 个索引/唯一键（config 的唯一键由一把五列**拆成两把**，见 §9.4 ⑥） |
+| 列名 | **2 处改名 + 1 处拆分 + 1 处退出 + 1 处合并** | 改名：`bank_code` → `partner_code`、`bank_name` → `partner_name`（标识符不再锁死在「银行」：同一列要承载银行 / 保理 / 信托 / 小贷 / 保险等各类合作机构）；拆分：`strategy_name` → `pre_strategy_name` + `post_strategy_name`（出网前 / 回参之后的两个钩子）；退出：`front_interface_no` 已从目标 DDL 删除（前后序改由 `interface_order` + 跨步骤共享池表达）；合并：`logic_branch_flag` + `logic_branch_value` → 单列 `branch_judge`（分支判定规格，与 `result_judge` 同一套 DSL，见 §3.3）；**其余列名原样保留** → 没有 ETL、没有字段映射表 |
+| 列定义 | 部分变化 | 新增 9 列（config 3 / **branch 3** / log 1 / **前后序策略 2**）+ **删掉 branch 的 2 个旧判定列**（净 +1）+ **条件新增列** `financing_mode` 与 `pre_strategy_name` + `post_strategy_name`（存量没有就加，见 §9.4 ①⑥；`yfl_bill` 那一类还要再补 `interface_code`/`project_code`/`interface_name`，见 §9.4 ③）、改类型/长度/可空 30+ 列、加 9 个索引/唯一键（config 的唯一键由一把五列**拆成两把**，见 §9.4 ⑥） |
 
 所以整个迁移 = **`ADD COLUMN` → 回填 → 改列名与列类型 / 加唯一键与索引 → `RENAME TABLE`**。
 
@@ -85,15 +85,42 @@ sed -i 's/bankint_/acme_/g' *.sql
 | 序号 | 文件 | 做什么 | 算法 / 锁（MySQL 5.7） | 预期耗时 | 回滚 |
 |---|---|---|---|---|---|
 | 0 | `00-precheck.sql` | 只读体检：环境参数、表体量、列清单基线、**唯一键冲突**、类型可转换性、长度/NULL 超限、零值时间、兜底分支、时区 | 只读 | 配置表秒级；日志表看体量 | 不需要 |
-| 1 | `01-add-columns.sql` | 加 5 个新列（config 3 / branch 2 / log 1）+ **1 个条件新列** `financing_mode`（1.1 段，存量已有该列就删掉那条语句），全部带 `DEFAULT` | **`ALGORITHM=INPLACE, LOCK=NONE`**（纯 `ADD COLUMN`：允许并发 DML） | 秒级~分钟级 | `DROP COLUMN`（同样在线） |
-| 2 | `02-backfill.sql` | 回填 `deleted_seq`（历史软删行）与 `logic_branch_order`；**人工复核分支顺序** | 普通 `UPDATE` | 秒级 | 回填值可重算 |
-| 3 | `03-modify-and-index.sql` | **改列名**（`bank_code`/`bank_name` → `partner_code`/`partner_name`）+ 改类型/长度/可空 + 建唯一键与索引 | 配置表：**`ALGORITHM=COPY, LOCK=SHARED`**（改名与类型变更合并进**同一条** `ALTER`，不多花一次重建）；日志表：索引单独走在线 DDL，类型变更看体量 | 配置表秒级；日志表看体量（大表走 gh-ost） | 反向 `CHANGE COLUMN` 改回旧列名 + 按 `00` 留档的 `COLUMN_TYPE` 反向 `MODIFY`（先 `DROP INDEX`） |
+| 1 | `01-add-columns.sql` | 加 6 个新列（config 3 / branch 3（含 **`branch_judge`**）/ log 1）+ **1 个条件新列** `financing_mode`（1.1 段，存量已有该列就删掉那条语句），其余带 `DEFAULT` | **`ALGORITHM=INPLACE, LOCK=NONE`**（纯 `ADD COLUMN`：允许并发 DML） | 秒级~分钟级 | `DROP COLUMN`（同样在线） |
+| 2 | `02-backfill.sql` | 回填 `deleted_seq`（历史软删行）、`logic_branch_order`、**`branch_judge`（旧两列 → 判定规格，1:1 机械映射）**；**人工复核分支顺序与判定规格** | 普通 `UPDATE`（+ 一张临时表展开多值） | 秒级 | 回填值可重算（`branch_judge` 只填空行，幂等） |
+| 3 | `03-modify-and-index.sql` | **改列名**（`bank_code`/`bank_name` → `partner_code`/`partner_name`）+ 改类型/长度/可空（含 `branch_judge` → `text NOT NULL`）+ **删掉分支的两个旧判定列** + 建唯一键与索引 | 配置表：**`ALGORITHM=COPY, LOCK=SHARED`**（改名与类型变更合并进**同一条** `ALTER`，不多花一次重建）；日志表：索引单独走在线 DDL，类型变更看体量 | 配置表秒级；日志表看体量（大表走 gh-ost） | 反向 `CHANGE COLUMN` 改回旧列名 + 按 `00` 留档的 `COLUMN_TYPE` 反向 `MODIFY`（先 `DROP INDEX`） |
 | 4 | `04-rename-tables.sql` | `RENAME TABLE bankint_* → ifmap_*`（**切换时刻**） | 元数据操作 | 毫秒级 | 再 `RENAME` 回去 |
-| 5 | `05-verify.sql` | 迁移后核对：列数/列定义、索引、回填完整性、行数指纹、时间抽样、分支顺序、查询冒烟 | 只读 | 秒级 | 不需要 |
+| 5 | `05-verify.sql` | 迁移后核对：列数（branch **16**）/列定义、索引、回填完整性（含判定规格非空 + 合法 JSON + 兜底 ≤ 1 条）、行数指纹、时间抽样、分支顺序、查询冒烟 | 只读 | 秒级 | 不需要 |
 
 **为什么 `RENAME` 放最后**：改名之后存量代码（SQL 里写死 `bankint_config`）立刻失效。
 正确顺序是「共存期先把结构改完、把新链路验证完，切换那一刻才改名」；
 反过来「先改名再慢慢改结构」= 切换期间旧模块已不可用、新模块又没就绪。
+
+### 3.3 分支判定列换血（`logic_branch_flag` + `logic_branch_value` → `branch_judge`）
+
+`ifmap_logic_branch_config` 原来的"标志 + 判定值"两列合并成一列 **`branch_judge`**，
+语法与接口级的 `result_judge` **同一套**（同一个校验器、同一个深度上限、同一套 `all/any` 与 `ignoreCase`），
+只是额外允许两个分支专用算子 `strategy` / `judged`：
+
+| 旧数据 | 新规格 | 说明 |
+|---|---|---|
+| `logic_branch_flag` 空 | `{"op":"always"}` | 旧"兜底分支"；**显式**表达，不再是"空列"这种隐式约定 |
+| flag 有值、`logic_branch_value` 空 | `{"any":[{"op":"strategy","value":"<flag>"}]}` | 走 `@LogicBranch` 策略通道 |
+| 两者都有 | `{"any":[{"op":"strategy","value":"<flag>"},{"op":"judged","value":["a","b"],"ignoreCase":true}]}` | 策略命中**或**判定值命中（`any` = 旧的"两通道任一命中"） |
+| flag 空、value 非空（脏数据） | `{"op":"always"}` | 旧代码里 flag 空即走兜底、value 从未生效 ⇒ 迁成 always 不改行为 |
+
+要点（都是踩过的坑）：
+
+- **机械 1:1，不顺手清洗**。分支选错不会报错，只会"跑了另一个动作"——最难发现的一类事故；
+  等价性由 core 的 `BranchJudgeEquivalenceTest`（96 格双跑对照）守住。
+- 多值分隔符是 `[;,]`（**不是** 002 建表注释里写的 `|`，那是文档笔误），元素逐个 `TRIM`、空段丢弃。
+- 一个单元格里的值个数**上限 16**（回填的数字派生表只到 16，超出的会被静默丢掉）⇒
+  `00-precheck` 第 10.3.1 条把它做成**阻塞项**。
+- 回填**幂等**：只处理 `branch_judge` 为空的行，重复执行不会覆盖已有值。
+- 删旧两列（03 的 B-2 段）**不可回退**（只能从备份恢复）。想先观察一天的就把那条 `ALTER` 注释掉，
+  此时 `05-verify` 第 1 节会显示 18 列而不是 16 —— 属**已知可选偏差**，观察期结束记得补执行。
+
+> 只跑过官方自动 DDL（`ifmap.ddl.auto=true`，执行 008/010 之外的 changeset 视配置而定）的库，
+> `branch_judge` 可能已存在但是空串，且旧两列还在 —— 见 `01-add-columns.sql` 的 **3.1 段**判据。
 
 一条命令跑一步（按需替换连接串）：
 
@@ -205,6 +232,8 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 | `Invalid use of NULL value`（1138）/ `Column 'x' cannot be null`（1048） | 目标为 `NOT NULL` 但存量有 NULL | 按第 8.2 条补默认值（**不要**靠列的 `DEFAULT`：显式写 NULL 不生效） |
 | `Incorrect datetime value`（1292） | 存在 `'0000-00-00 00:00:00'` 零值时间 | 先修值再重跑（第 9 条） |
 | `Incorrect integer value: 'xx'`（1292） | `interface_order` 里有非数字值 | 按第 7.1 条清理（非数字/空 → 0） |
+| `Unknown column 'branch_judge' in 'field list'`（1054）**出现在 02/03** | `01` 的 `branch_judge` 那条 `ADD COLUMN` 没执行（或用了旧版脚本） | 补执行 `01-add-columns.sql` 第 2 段；已存在的库先看 `01` 的 3.1 段判据 |
+| `Column 'branch_judge' cannot be null`（1048） | 02 第 4 步没跑（或跑失败），但 03 已经把列收紧成 `NOT NULL` | 先重跑 02 第 4 步（幂等），自检"判定规格未回填 = 0"后再跑 03 |
 | `Unknown column 'bank_code' in 'field list'`（**1054**） | 03 已把列名改成 `partner_code`，但存量模块的 SQL 还在用旧列名 | 按 §2「路径 A 下的列改名怎么处置」三选一。已执行完想临时救回来：`CHANGE COLUMN partner_code bank_code ...` 反向改回即可（列名变更不动数据，无损失） |
 | `Specified key was too long; max key length is 767 bytes`（1071） | 老表 `ROW_FORMAT=COMPACT`，唯一键超 767 字节 | 本 kit 的 03 已带 `ROW_FORMAT=DYNAMIC`（COPY 时顺带转行格式）；若仍报错，先单独 `ALTER TABLE ... ROW_FORMAT=DYNAMIC` |
 | `Lock wait timeout exceeded`（1205） | 长事务占用表 | 查 `information_schema.INNODB_TRX`，结束长事务后再执行；不要靠调大超时绕过去 |
@@ -221,7 +250,8 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 |---|---|---|---|---|
 | 1 | `interface_order` 排序 | 该列**从未被引擎使用**，执行顺序取决于 DB 返回顺序（不确定） | 引擎显式排序：`interface_order` 升序，同值按 `key_id` | ① `char(2) → smallint` 后 `'10' < '2'` 的字符串排序问题消失；② **必须**按业务预期核对顺序，建议整理成 10/20/30 留白写法 |
 | 2 | 逻辑分支顺序 | "标志为空"= 兜底分支，靠 DB 返回顺序决定谁先命中 | 兜底分支**不参与常规匹配**，只在所有常规分支都未命中时生效 | `02` 已回填并人工复核；**顺序错 = 命中错**，属 P0 |
-| 3 | 兜底/动作两个语义 | 两个含义混在 `method_flag` 上判断 | `logic_branch_flag` 空 = **兜底分支**；`method_flag` 空 = **该分支不执行动作**（两件事，别混） | 配置数据零改动；宿主把 `method_flag` 指向的动作注册成 `@IfmapAction` bean |
+| 3 | 兜底/动作两个语义 | 兜底靠"`logic_branch_flag` 为空"隐式表达 | 兜底**显式**写 `branch_judge = {"op":"always"}`（每接口最多 1 条，admin 与 `05` 都会拦第 2 条）；`method_flag` 空 = **该分支不执行动作**（两件事，别混） | `02` 第 4 步已把旧"空标志"转成 `always`；宿主把 `method_flag` 指向的动作注册成 `@IfmapAction` bean |
+| 3.1 | 分支判定值比较 | `logic_branch_value` 按 `[;,]` 切分后 `equalsIgnoreCase` | 回填成 `{"op":"judged","value":[…],"ignoreCase":true}` —— **行为完全一致**（这是唯一一处刻意的"看起来更严格但其实等价"：回填时显式带上 `ignoreCase`） | 无需手工处理；但要留意：**以后新配的分支默认严格匹配**，要靠 `ignoreCase` 显式声明 |
 | 4 | 规则名 | 存量自定义规则库里有一部分名字与 ifmap 内置规则不一致，取不到值时会**静默变成空值** | core 内置 18 个规则（同名者行为一致）；其余需宿主用 `@IfmapRule` 注册 | 用 admin 端 `/audit` 做启动期契约自检（要求 0 违规），把存量规则名逐个对上 |
 | 5 | 模板非法 JSON | 存进去也能跑（取不到值 → 空） | `ContractValidator` 判定为违规（admin 保存会被拒） | `00-precheck` 第 10.2 条先扫出来 |
 | 6 | 时间语义 | `timestamp` 随会话时区显示 | `datetime(3)` 固定值 | 迁移前后抽样逐行比对（`00` 第 9.3 条 vs `05` 第 6 节） |
@@ -236,11 +266,11 @@ pt-osc 同理（`--alter` 内容完全一样，加 `--no-drop-old-table` 便于�
 - [ ] 磁盘余量 ≥ 最大表大小 × 1.5（`COPY` / 在线加索引期间新旧两份并存）
 - [ ] 记录当前会话时区，且全流程固定 `SET time_zone='+08:00'`
 - [ ] `00-precheck.sql` 全部"期望 0 / ≤ 1"通过，输出留档（这是迁移前的**唯一**基线）
-- [ ] `01-add-columns.sql` 执行完成，自检 8 个新列都在（存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name` 时删掉对应的 `ADD COLUMN`，自检相应减少到 5~7 行）
-- [ ] `02-backfill.sql` 执行完成，自检全 0；**分支顺序已人工复核**
-- [ ] `03-modify-and-index.sql` 执行完成：**`bank_code`/`bank_name` 已改名为 `partner_code`/`partner_name`**（用 `SHOW FULL COLUMNS` 复核）、9 条索引都在；大表走 gh-ost 且已 `--dry-run`
+- [ ] `01-add-columns.sql` 执行完成，自检 9 个新列都在（含 `branch_judge`；存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name` 时删掉对应的 `ADD COLUMN`，自检相应减少到 6~8 行）
+- [ ] `02-backfill.sql` 执行完成，自检全 0（含"判定规格未回填 = 0"）；**分支顺序 + 判定规格已逐个接口对照旧两列复核**
+- [ ] `03-modify-and-index.sql` 执行完成：**`bank_code`/`bank_name` 已改名为 `partner_code`/`partner_name`**（用 `SHOW FULL COLUMNS` 复核）、`branch_judge` 已是 `text NOT NULL`、**旧两列 `logic_branch_flag`/`logic_branch_value` 已删除**（若刻意跳过，记一笔观察期结束要补）、9 条索引都在；大表走 gh-ost 且已 `--dry-run`
 - [ ] **存量模块的列名已处置**（§2 路径 A 的三种做法选一种），并用存量侧的**真实 SQL** 跑过冒烟
-- [ ] `05-verify.sql` 第 1~4 节（结构 / 索引 / 回填 / 唯一键效果）通过
+- [ ] `05-verify.sql` 第 1~4 节（结构（branch 16 列）/ 索引 / 回填（含判定规格）/ 唯一键效果）通过
 - [ ] M2 规则与策略对齐完成：启动期契约自检 0 违规
 - [ ] 切换到路径 B：停存量模块 → `04-rename-tables.sql` → 起 ifmap → `05-verify.sql` 全量通过
 - [ ] 观察 1~2 个业务日：执行日志成功率/耗时正常，无 `ifmap_config` 相关异常

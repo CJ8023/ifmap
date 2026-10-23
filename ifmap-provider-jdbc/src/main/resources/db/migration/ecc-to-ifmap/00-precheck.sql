@@ -61,7 +61,10 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE,
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
--- 与目标 DDL 的列数对比：config 25 → 28（+3）、logic_branch 15 → 17（+2）、execution_log 16 → 17（+1）
+-- 与目标 DDL 的列数对比：config 25 → 28（+3）、logic_branch 15 → 16、execution_log 16 → 17（+1）
+-- ★ logic_branch 的净变化是 **+1**：加一列 `branch_judge`（分支判定规格），删掉旧的
+--   `logic_branch_flag` + `logic_branch_value`（两列合并成一列，见 02-backfill 第 4 步 / 03 的 B 段）。
+--   这两个旧列在 02 回填期间**必须还在**（回填的输入），所以它们不在下面的「缺列待办」口径里。
 -- ⚠️ 「25 → 28」这个对比是**按 kit 的参考环境**写的：实测有的存量环境 config 是 22 列
 --    （没有 interface_code / project_code / interface_name，却多一个 interface_url，见 README §9.4），
 --    列数对不上属正常 —— 以第 3.1 步的「列齐备性」清单为准。
@@ -74,7 +77,10 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE,
 --      处置规则：
 --        · 缺的是「目标 DDL 有、存量没有」的列（如 `financing_mode`、`pre_strategy_name` +
 --          `post_strategy_name`）→ 它是**新增列**，01-add-columns.sql 里已备好对应的 ADD COLUMN（注释里标 ★）；
---        · 缺的是「kit 引用、但目标 DDL 也没有」的列 → 把 03 里对应的 MODIFY 行删掉即可。
+--        · 缺的是「kit 引用、但目标 DDL 也没有」的列 → 把 03 里对应的 MODIFY 行删掉即可；
+--        · 缺 `logic_branch_flag` / `logic_branch_value` → **阻塞项**（不是待办）：02 第 4 步的
+--          1:1 回填以它们为输入。只有"库里已经是新结构、只是补 DDL"的环境才会缺，此时把
+--          02 第 4 步整段跳过（并在 README 记录：该库的 branch_judge 是应用侧写入的）。
 --      本步输出的是**待办清单，不是门禁**（各环境存量结构不同，README §9.4 有实测对照）。
 -- ---------------------------------------------------------------------------
 SELECT r.tbl AS table_name, r.col AS missing_column
@@ -356,6 +362,33 @@ SELECT tenant_id, interface_no, COUNT(*) AS fallback_cnt,
 --   · `logic_branch_flag` 为空 = **兜底分支**（不参与常规匹配，仅当所有常规分支都未命中时生效）；
 --   · `method_flag` 为空 = **该分支不执行任何动作**（与"兜底"是两件事）。
 -- 迁移后兜底分支的优先级由 logic_branch_order 决定（02-backfill.sql 会给它一个大值）。
+-- 迁移后「兜底」的表达从"flag 空"变成显式的 `branch_judge = '{"op":"always"}'`
+-- （02-backfill 第 4 步机械转换，行为不变；每个接口仍最多 1 条，05-verify 第 3 节会复核）。
+
+-- 10.3.1 ★ 分支判定值「元素个数」上限：**期望 0 行**（阻塞项）
+--      第 4 步回填会把 `logic_branch_value` 按 [;,] 切成 `{"any":[{"op":"judged",...}]}` 的数组，
+--      数字派生表只到 16 ⇒ 一个单元格里超过 16 个值，**多出来的会被静默丢掉**（分支少一个命中值，
+--      运行时只会表现为"该分支莫名不命中"）。实测每个单元格通常 ≤ 3 个值，超过 16 基本等于脏数据。
+--      有行 = 先人工确认/清理这些行（或把 02 第 4 步的数字表扩到更大），不要直接跑回填。
+--
+--      元素个数 = 1 + 分隔符个数（先把 `,` 归一成 `;`，与引擎口径一致）；
+--      空段/空白段会被回填丢弃，这里按"上限"估计，多算一个不影响判定。
+SELECT `key_id`, `interface_no`, TRIM(`logic_branch_flag`) AS flag, `logic_branch_value` AS raw_value,
+       TRIM(`logic_branch_value`) AS trimmed_value
+  FROM `bankint_logic_branch_config`
+ WHERE `del_status` = 0
+   AND 1 + LENGTH(REPLACE(`logic_branch_value`, ',', ';'))
+         - LENGTH(REPLACE(REPLACE(`logic_branch_value`, ',', ';'), ';', '')) > 16
+ ORDER BY `key_id`;
+
+-- 10.3.2 元素个数分布（信息性；0 = value 空 → 只走 strategy 通道，直接迁成 {"any":[{"op":"strategy",...}]}）
+SELECT cnt AS value_cnt, COUNT(*) AS rows_cnt FROM (
+         SELECT CASE WHEN TRIM(`logic_branch_value`) = '' THEN 0
+                     ELSE 1 + LENGTH(REPLACE(`logic_branch_value`, ',', ';'))
+                            - LENGTH(REPLACE(REPLACE(`logic_branch_value`, ',', ';'), ';', ''))
+                END AS cnt
+           FROM `bankint_logic_branch_config` WHERE `del_status` = 0) v
+ GROUP BY cnt ORDER BY cnt;
 
 -- 10.4 execution_result 取值分布（char(2) → varchar(16)，值本身不变）
 SELECT execution_result, COUNT(*) AS cnt

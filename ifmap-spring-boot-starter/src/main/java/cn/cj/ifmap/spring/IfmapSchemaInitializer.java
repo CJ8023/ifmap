@@ -86,7 +86,7 @@ public class IfmapSchemaInitializer implements InitializingBean {
             "db/changelog/v1.0.0/007-config-call-direction.sql",
             // 008 = 逻辑分支加 branch_judge。009（数据回填）/010（删旧列）故意不在自动 DDL 里：
             // 回填要动存量数据（且是 MySQL 语法），删列会让"复用存量表且存量模块仍在跑"的部署方式失效。
-            // 只跑自动 DDL 时存量行 branch_judge 为空 ⇒ 运行期 fail-closed 并指向 docs/10 §7 的回填脚本。
+            // 只跑自动 DDL 时存量行 branch_judge 为空 ⇒ 运行期 fail-closed 并指向 docs/10 §3.4 的回填脚本。
             "db/changelog/v1.0.0/008-logic-branch-branch-judge.sql"
     };
 

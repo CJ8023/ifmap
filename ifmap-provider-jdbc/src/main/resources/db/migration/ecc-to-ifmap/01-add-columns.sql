@@ -14,6 +14,8 @@
 
 -- =============================================================================
 -- 步骤 1/6：新增列（只加列：不改类型、不动数据、不影响写入）
+-- 本次改动带来的**唯一必做项**：逻辑分支表的 `branch_judge`（第 2 段的 ★ 那条）。
+-- 旧的两列 `logic_branch_flag` / `logic_branch_value` 在这一步**不动**（回填的输入）。
 -- 前置：00-precheck.sql 全部通过；建议先备份（见 README 第 8 节 checklist）。
 --
 -- 算法与锁（MySQL 5.7 官方"Online DDL Operations"表格）：
@@ -85,11 +87,17 @@ ALTER TABLE `bankint_config`
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
--- 2) 逻辑分支表：+2 列（logic_branch_order / deleted_seq）
+-- 2) 逻辑分支表：+3 列（logic_branch_order / deleted_seq / branch_judge）
+--    其中 `branch_judge` 是本次唯一的**语义列**：旧的 `logic_branch_flag` + `logic_branch_value`
+--    两列合并成一列判定规格（详见 README §3.3 与 02-backfill 第 4 步）。
+--    ⚠️ 这里先建成 `text NULL` 是**刻意的**：02 只回填"能机械映射"的行，
+--       03 才把它收紧成 `text NOT NULL`（DDL 定义与 db/changelog/v1.0.0/008 一致，只是分两步走，
+--       免得 ADD COLUMN ... NOT NULL 在非严格模式下把存量行静默填成 ''）。
 -- ---------------------------------------------------------------------------
 ALTER TABLE `bankint_logic_branch_config`
   ADD COLUMN `logic_branch_order` smallint NOT NULL DEFAULT 0 COMMENT '分支匹配顺序，升序，先命中先生效；兜底分支不受顺序影响（建议仍设为最大，便于阅读）' AFTER `logic_branch_value`,
   ADD COLUMN `deleted_seq`        bigint   NOT NULL DEFAULT 0 COMMENT '软删除唯一化：未删除=0，删除时=key_id' AFTER `del_status`,
+  ADD COLUMN `branch_judge`       text     DEFAULT NULL COMMENT '分支判定规格（与 result_judge 同构的 DSL）：兜底分支写 {"op":"always"}；其余按 all/any 组合 path/strategy/judged 条件' AFTER `logic_branch_name`,
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
@@ -102,18 +110,35 @@ ALTER TABLE `bankint_execution_log`
   ALGORITHM=INPLACE, LOCK=NONE;
 
 -- ---------------------------------------------------------------------------
--- 4) 执行后自检：8 个新列都应存在
+-- 4) 执行后自检：9 个新列都应存在
 -- ---------------------------------------------------------------------------
 SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
   FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('bankint_config', 'bankint_logic_branch_config', 'bankint_execution_log')
    AND COLUMN_NAME IN ('financing_mode', 'pre_strategy_name', 'post_strategy_name',
-                       'status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg')
+                       'status', 'version', 'deleted_seq', 'logic_branch_order', 'error_msg',
+                       'branch_judge')
  ORDER BY TABLE_NAME, COLUMN_NAME;
--- **期望 8 行**；存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name`、
--- 按上面说明删掉了对应 ADD COLUMN 的，则相应减少（常见是 5 或 6 行）。
+-- **期望 9 行**；存量本来就有 `financing_mode` / `pre_strategy_name` + `post_strategy_name`、
+-- 按上面说明删掉了对应 ADD COLUMN 的，则相应减少（常见是 6 或 7 行）。
+-- `branch_judge` 这一行必须出现，否则 02 的回填会 1054。
 -- 少于期望说明有语句没执行成功，不要继续。
+
+-- ---------------------------------------------------------------------------
+-- ★ 2.1) 存量"只有官方 Liquibase 自动 DDL、没跑过本 kit"的库
+--      （即 ifmap 启动时 `ifmap.ddl.auto=true` 已经建过表/加过列）：
+--      这类库 `branch_judge` 已经存在（008 加过），但**内容是空串**，
+--      且 `logic_branch_flag` / `logic_branch_value` 还在（010 没有进自动 DDL）。
+--      处理：
+--        ① 跳过第 2 段里 `branch_judge` 那一行 ADD（否则 1060）；
+--        ② 照常跑 02（回填以旧两列为输入，空串 → 有值即可）；
+--        ③ 照常跑 03（收紧 NOT NULL + 可选 DROP 旧两列）。
+--      判据（一跑就知道走哪条路）：
+--        SELECT COUNT(*) FROM information_schema.COLUMNS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bankint_logic_branch_config'
+--           AND COLUMN_NAME = 'branch_judge';
+--        -- 1 = 走 2.1；0 = 正常走第 2 段。
 
 -- ---------------------------------------------------------------------------
 -- 回滚（如需）：
@@ -123,7 +148,7 @@ SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
 --   ALTER TABLE `bankint_config` DROP COLUMN `deleted_seq`, DROP COLUMN `version`, DROP COLUMN `status`,
 --     ALGORITHM=INPLACE, LOCK=NONE;
 --   ALTER TABLE `bankint_logic_branch_config` DROP COLUMN `deleted_seq`, DROP COLUMN `logic_branch_order`,
---     ALGORITHM=INPLACE, LOCK=NONE;
+--     DROP COLUMN `branch_judge`, ALGORITHM=INPLACE, LOCK=NONE;
 --   ALTER TABLE `bankint_execution_log` DROP COLUMN `error_msg`, ALGORITHM=INPLACE, LOCK=NONE;
 -- （DROP COLUMN 同样是 In Place + 允许并发 DML；但 01 之后通常已进入 02/03，回滚请整体考虑。）
 -- ---------------------------------------------------------------------------

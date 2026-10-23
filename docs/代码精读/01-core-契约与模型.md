@@ -211,13 +211,16 @@ javadoc 27–42 行写的是**实数契约**，由 `ifmap-json-tck` 固定，四
 
 `requestParam` / `responseParam` 在落库前已经过 `LogMasker` 脱敏 + `Logs.truncate` 截断。
 
-### 4.5 `config/LogicBranchConfig.java`（153 行）
+### 4.5 `config/LogicBranchConfig.java`（145 行）
 
-| 行 | 字段 | 说明 |
-|---|---|---|
-| 39–45 | `keyId` / `tenantId` / `interfaceNo` / `methodFlag` | `method_flag` = 命中后要执行的动作 key（`ActionRegistry`） |
-| 47–53 | `logicBranchName` / `logicBranchFlag` / `logicBranchValue` / `logicBranchOrder` | 判定两选一：**策略命中**（`flag` 走 `LogicBranchStrategyRegistry`）或**值命中**（`value` 按 `;`/`,` 切分逐个比较） |
-| 55–59 | `remark` / `delStatus` / `deletedSeq` | 逻辑删除 |
+| 字段 | 说明 |
+|---|---|
+| `keyId` / `tenantId` / `interfaceNo` / `methodFlag` | `method_flag` = 命中后要执行的动作 key（`ActionRegistry`）；**空 = 该分支不执行动作** |
+| `logicBranchName` / **`branchJudge`** / `logicBranchOrder` | 判定 = 一列规格（`branch_judge`，与 `result_judge` 同一套 DSL，额外放开 `strategy`/`judged` 两个无 path 算子）；`{"op":"always"}` = 兜底。旧的 `logicBranchFlag` + `logicBranchValue` 两列已合并删除 |
+| `remark` / `delStatus` / `deletedSeq` | 逻辑删除 |
+
+> 判定不再有"策略 or 判定值"的代码分支：两条通道都成了规格里的算子（`strategy` / `judged`），
+> 组合由 `all`/`any` 表达。解析/求值见 `orchestrator/branch/BranchJudge` 与 `judgement/BranchJudgeSpec`。
 
 ### 4.6 `config/ConfigQuery.java`（142 行）
 

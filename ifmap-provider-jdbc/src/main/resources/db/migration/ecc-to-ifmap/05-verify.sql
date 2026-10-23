@@ -24,14 +24,17 @@
 SET SESSION time_zone = '+08:00';
 
 -- ---------------------------------------------------------------------------
--- 1) 列数与关键列定义（期望列数：config 28 / logic_branch 17 / execution_log 17）
+-- 1) 列数与关键列定义（期望列数：config 28 / logic_branch 16 / execution_log 17）
 -- ---------------------------------------------------------------------------
 SELECT TABLE_NAME, COUNT(*) AS col_cnt
   FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME IN ('ifmap_config', 'ifmap_logic_branch_config', 'ifmap_execution_log')
  GROUP BY TABLE_NAME ORDER BY TABLE_NAME;
--- 期望 28 / 17 / 17。少列说明 01/03 漏了。
+-- 期望 28 / 16 / 17。少列说明 01/03 漏了。
+-- ⚠️ logic_branch 显示 **18** = 03 的 B-2（删旧两列）被刻意跳过（观察期）。这是**已知可选偏差**：
+--    功能上不影响（ifmap 只读 `branch_judge`），但旧列还在就还能被老代码写入 ⇒
+--    别停在这里，观察期结束务必补执行 B-2，然后重跑本节确认 16。
 -- ⚠️ 多列**未必是错**：kit 的原则是"只增不映射"，存量独有、目标 DDL 没有的列（实测有
 --    `fig_bank_code`（financing_scheme 变体）、`interface_url`（yfl_bill 变体））会原样留着，
 --    这些列都是 DEFAULT NULL，ifmap 的 INSERT 不写它们，不影响功能。
@@ -46,11 +49,12 @@ SELECT TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLU
                        'add_time', 'modify_time', 'status', 'version', 'deleted_seq',
                        'financing_mode', 'partner_code', 'partner_name', 'execution_time',
                        'pre_strategy_name', 'post_strategy_name',
-                       'logic_branch_order', 'logic_branch_flag', 'logic_branch_value',
+                       'logic_branch_order', 'branch_judge',
                        'method_flag', 'request_param', 'response_param', 'execution_result', 'error_msg')
  ORDER BY TABLE_NAME, ORDINAL_POSITION;
 -- 期望：interface_order smallint；busi_node varchar(32)；add_user_id varchar(64)；
 --       add_time datetime(3)；status tinyint(1)；deleted_seq bigint；logic_branch_order smallint；
+--       branch_judge **text NOT NULL**（无 DEFAULT：判定规格是必填语义，空规格在运行期 fail-closed）；
 --       partner_code varchar(32) NOT NULL；partner_name varchar(128)；financing_mode varchar(32)；
 --       pre_strategy_name / post_strategy_name varchar(128) NOT NULL DEFAULT ''；
 --       execution_time bigint；
@@ -85,10 +89,20 @@ UNION ALL
 SELECT 'branch 软删行未回填', COUNT(*) FROM ifmap_logic_branch_config
  WHERE del_status = 1 AND deleted_seq = 0
 UNION ALL
+-- 兜底分支的判据要**结构化**取（JSON_EXTRACT），不能拿原文和 '{"op":"always"}' 比字符串：
+-- 存成 '{ "op" : "always" }' 也同样是兜底（引擎按编译后的根节点判，见 BranchJudgeSpec.isAlways）。
 SELECT 'branch 兜底分支超过 1 条', COUNT(*) FROM (
          SELECT tenant_id, interface_no FROM ifmap_logic_branch_config
-          WHERE del_status = 0 AND (logic_branch_flag IS NULL OR logic_branch_flag = '')
+          WHERE del_status = 0
+            AND CASE WHEN JSON_VALID(`branch_judge`) = 1
+                     THEN JSON_UNQUOTE(JSON_EXTRACT(`branch_judge`, '$.op')) END = 'always'
           GROUP BY tenant_id, interface_no HAVING COUNT(*) > 1) t
+UNION ALL
+SELECT 'branch 判定规格为空（未回填）', COUNT(*) FROM ifmap_logic_branch_config
+ WHERE del_status = 0 AND COALESCE(TRIM(`branch_judge`), '') = ''
+UNION ALL
+SELECT 'branch 判定规格不是合法 JSON', COUNT(*) FROM ifmap_logic_branch_config
+ WHERE COALESCE(TRIM(`branch_judge`), '') <> '' AND JSON_VALID(`branch_judge`) = 0
 UNION ALL
 SELECT 'config status 异常', COUNT(*) FROM ifmap_config WHERE status IS NULL OR status NOT IN (0, 1);
 
@@ -133,12 +147,18 @@ SELECT key_id, add_time, modify_time FROM ifmap_config ORDER BY key_id LIMIT 20;
 -- ---------------------------------------------------------------------------
 -- 7) 分支顺序人工复核（兜底分支必须在最后）
 -- ---------------------------------------------------------------------------
-SELECT tenant_id, interface_no, key_id, logic_branch_order,
-       CASE WHEN logic_branch_flag IS NULL OR logic_branch_flag = '' THEN '兜底' ELSE '常规' END AS kind,
-       logic_branch_flag, logic_branch_value, method_flag
+SELECT tenant_id, interface_no, key_id, logic_branch_order, method_flag,
+       CASE WHEN CASE WHEN JSON_VALID(`branch_judge`) = 1
+                        THEN JSON_UNQUOTE(JSON_EXTRACT(`branch_judge`, '$.op')) END = 'always'
+            THEN '兜底' ELSE '常规' END AS kind,
+       `branch_judge`
   FROM ifmap_logic_branch_config
  WHERE del_status = 0
  ORDER BY tenant_id, interface_no, logic_branch_order, key_id;
+-- 复核要点（与 02 第 7 节同一口径，但这里没有旧两列可对照了 —— 所以 02 那一步**必须**认真看）：
+--   ① 每个接口的常规分支顺序符合业务预期；
+--   ② 兜底分支只有 1 条、排最后，且恰好是 {"op":"always"}；
+--   ③ 每个分支的规格都能被 ifmap 的解析器接受（保存一遍 → 不报「分支判定规格非法」即可）。
 
 -- ---------------------------------------------------------------------------
 -- 8) 引擎查询冒烟（与 JdbcConfigRepository 的 SQL 语义一致：按顺序取首个命中）
@@ -149,7 +169,7 @@ SELECT key_id, interface_no, busi_node, interface_order, status, del_status
  WHERE tenant_id = -1 AND del_status = 0
  ORDER BY interface_order ASC, key_id ASC LIMIT 5;
 
-SELECT key_id, interface_no, method_flag, logic_branch_flag, logic_branch_value, logic_branch_order
+SELECT key_id, interface_no, method_flag, branch_judge, logic_branch_order
   FROM ifmap_logic_branch_config
  WHERE tenant_id = -1 AND interface_no = '<你的接口编号>' AND del_status = 0
  ORDER BY logic_branch_order ASC, key_id ASC;

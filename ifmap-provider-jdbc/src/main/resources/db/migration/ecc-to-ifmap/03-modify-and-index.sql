@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- =============================================================================
--- 步骤 3/6：调整列名 + 列类型/长度/可空 + 建唯一键与索引
--- 前置：01、02 已完成；02 的"人工复核"（分支顺序）已确认。
+-- 步骤 3/6：调整列名 + 列类型/长度/可空 + 建唯一键与索引（+ 删掉分支的两个旧列）
+-- 前置：01、02 已完成；02 的"人工复核"（分支顺序 + 判定规格）已确认。
 --
 -- ★★ 算法与锁（MySQL 5.7 官方 "Online DDL Operations" 表格，本脚本的核心依据）：
 --    · 改变列数据类型 = In Place 否 / 重建表 是 / 允许并发 DML **否**
@@ -110,8 +110,9 @@ ALTER TABLE `bankint_logic_branch_config`
   MODIFY COLUMN `interface_no`       varchar(64)  NOT NULL              COMMENT '接口编号',
   MODIFY COLUMN `method_flag`        varchar(64)           DEFAULT NULL COMMENT '动作标识(Action Key)：分支命中后执行的动作，由宿主机 ActionRegistry 注册；空=该分支不执行动作',
   MODIFY COLUMN `logic_branch_name`  varchar(128) NOT NULL              COMMENT '逻辑分支名称',
-  MODIFY COLUMN `logic_branch_flag`  varchar(512) NOT NULL DEFAULT ''   COMMENT '逻辑分支标志（JsonPath 表达式，支持 $.a.b 与裸字段名）；空=兜底分支',
-  MODIFY COLUMN `logic_branch_value` varchar(512) NOT NULL DEFAULT ''   COMMENT '逻辑分支判断值，多值以 | 分隔',
+  -- ★ 判定规格收紧成 text NOT NULL：类型/可空性/注释与 db/changelog/v1.0.0/008 完全一致。
+  --   02 第 4 步已保证没有空值（NULL 也算未回填，自检会拦住）；这里再 NOT NULL 是最后一道闸。
+  MODIFY COLUMN `branch_judge`       text         NOT NULL              COMMENT '分支判定规格（与 result_judge 同构的 DSL）：兜底分支写 {"op":"always"}；其余按 all/any 组合 path/strategy/judged 条件',
   MODIFY COLUMN `remark`             varchar(512) NOT NULL DEFAULT ''   COMMENT '备注',
   MODIFY COLUMN `add_user_id`        varchar(64)  NOT NULL DEFAULT ''   COMMENT '添加人',
   MODIFY COLUMN `add_time`           datetime(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '添加时间',
@@ -123,10 +124,36 @@ ALTER TABLE `bankint_logic_branch_config`
   COMMENT='资方接口逻辑分支配置',
   ALGORITHM=COPY, LOCK=SHARED;
 -- 说明：
---   · `logic_branch_flag` / `logic_branch_value` 的 NULL 会被归一成 ''（DEFAULT ''），
---     语义不变：引擎把"空串"与"NULL"同等对待 —— 空 flag 就是**兜底分支**。
+--   · 旧的两列不再 MODIFY（它们马上要被删，见下面 B-2）；它们的 NULL / '' 差异已在 02 第 4 步
+--     被折叠进 `branch_judge`（flag 空 ↔ `{"op":"always"}`）。
 --   · 唯一键里 `method_flag` 可空 → MySQL 唯一键不约束 NULL，因此"同一个兜底动作名"
---     可以有多条；真正的兜底分支唯一性由"logic_branch_flag 空"表达，admin 端会拦住第 2 条。
+--     可以有多条；真正的兜底分支唯一性由 `branch_judge = '{"op":"always"}'` 表达，
+--     admin 端会拦住第 2 条，05-verify 第 3 节会在库里再复核一遍。
+
+-- ---------------------------------------------------------------------------
+-- B-2) ★★ 删掉旧的两列 `logic_branch_flag` / `logic_branch_value`（**不可回退**，先看说明）
+--
+--   为什么必须删：不删就永远存在两套口径 —— 老系统写 flag/value、ifmap 只读 branch_judge，
+--   两边一旦不一致（例如有人在老后台改了一个分支），分支选择就会"看着有配置却不生效"，
+--   而且没有任何报错。结构对齐（05-verify 期望 16 列）也要求删。
+--
+--   ⚠️ 前置（缺一不可）：
+--     ① 02 第 6 节自检全 0（判定规格都回填了）且第 7 节人工复核过；
+--     ② 应用已切到 ifmap（旧 ECC 写库路径已停），否则老代码会 1054 报错；
+--     ③ 已备份 `bankint_logic_branch_config` —— **这一列删了就只能从备份恢复**。
+--
+--   ⚠️ 想"先观察一天再删"的：把下面这条 ALTER 注释掉先跑完 04/05（05 的列数会显示 18 而不是 16，
+--      属预期偏差，README §9.5 有对应说明），观察期结束后再单独执行这一段。
+-- ---------------------------------------------------------------------------
+ALTER TABLE `bankint_logic_branch_config`
+  DROP COLUMN `logic_branch_flag`,
+  DROP COLUMN `logic_branch_value`,
+  ALGORITHM=INPLACE, LOCK=NONE;
+-- 回滚（只有备份能救）：
+--   ALTER TABLE `bankint_logic_branch_config`
+--     ADD COLUMN `logic_branch_flag`  varchar(512) NOT NULL DEFAULT '' AFTER `logic_branch_name`,
+--     ADD COLUMN `logic_branch_value` varchar(512) NOT NULL DEFAULT '' AFTER `logic_branch_flag`;
+--   -- 结构能加回来，**数据加不回来**；要恢复数据只能从备份导入这两列。
 
 -- ===========================================================================
 -- C. 执行日志表（可能很大：先看体量再选路径）

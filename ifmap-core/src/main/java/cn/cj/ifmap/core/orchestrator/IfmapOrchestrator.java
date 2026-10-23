@@ -555,7 +555,7 @@ public final class IfmapOrchestrator {
             if (raw == null) {
                 return BranchOutcome.invalid("分支 " + describeBranch(branch)
                         + " 未配置 branch_judge；兜底分支请写 {\"op\":\"always\"}，"
-                        + "存量数据按 docs/10 §7 回填");
+                        + "存量数据按 docs/10 §3.4 回填");
             }
             String error = branchJudge.errorOf(raw);
             if (error != null) {

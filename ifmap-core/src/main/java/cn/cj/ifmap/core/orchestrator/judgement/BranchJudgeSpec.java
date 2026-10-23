@@ -73,20 +73,20 @@ public final class BranchJudgeSpec {
      * <p>保存期用它报"策略未注册"的 warning：写错策略键在运行期<b>不会报错</b>，
      * 只会表现为"这条分支永远不命中"，最后悄悄落到兜底分支 —— 典型的静默陷阱。</p>
      */
+    public static Set<String> strategyKeys(String raw, JsonOps jsonOps) {
+        try {
+            return parse(raw, jsonOps).strategyKeys();
+        } catch (RuntimeException e) {
+            return Collections.emptySet();
+        }
+    }
+
     /** 规格里是否用到某个算子（非法规格返回 {@code false}，先看 {@link #errorsOf}）。 */
     public static boolean usesOp(String raw, JsonOps jsonOps, JudgeOp op) {
         try {
             return parse(raw, jsonOps).ops().contains(op);
         } catch (RuntimeException e) {
             return false;
-        }
-    }
-
-    public static Set<String> strategyKeys(String raw, JsonOps jsonOps) {
-        try {
-            return parse(raw, jsonOps).strategyKeys();
-        } catch (RuntimeException e) {
-            return Collections.emptySet();
         }
     }
 }

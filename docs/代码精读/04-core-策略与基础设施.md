@@ -99,7 +99,9 @@
 
 ## 5. `strategy/LogicBranchStrategyRegistry.java`（119 行）
 
-一个 `logic_branch_flag` 可以挂**多个**策略（任一命中即算命中）。
+一个 `strategy` key（即 `branch_judge` 里 `{"op":"strategy","value":"..."}` 的 value）可以挂**多个**策略（任一命中即算命中）。
+规格里这个 key 若**一个都没注册**，`matches` 容错返回 `false`（运行期只会表现为"该分支永不命中"）⇒
+管理端保存时会报 **warning**（`ConfigValidator.checkStrategyKeys`）。
 
 | 行 | 成员 | 说明 |
 |---|---|---|

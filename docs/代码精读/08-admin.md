@@ -144,7 +144,7 @@
 | 551 | `checkUniqueKey(config, result)` | **同租户 + 同节点 + 同 `interface_order` 不能重复**（对应 `uk_config_order`） |
 | 590 | `sameOrder` | null 安全比较 |
 | 595 | `checkMethodFlag(row, result)` | 分支动作必须已注册（`ActionRegistry`） |
-| 610 | `isDefaultBranch(row)` | `logic_branch_flag` 空 = 兜底分支 |
+| — | `checkBranchJudge(row)` | 空规格 → error（文案给出回填路径，**空 ≠ 兜底**）；非法规格 → 逐条 error；`strategy` 键未注册 → warning；`judged` + 该接口所有节点 `result_judge=always` → error。兜底判据 = `BranchJudgeSpec.isAlways`（**旧的 `isDefaultBranch` 已删**：它把"只填了 flag"的分支全当兜底） |
 | 615 / 622 / 627 | `required` / `asTenantId` / `isBlank` | 小工具 |
 
 > `checkCallDirection`（236）是**被调接口**新增的：所有规则都只在 `INBOUND` 下触发，存量 `OUTBOUND` 配置的行为零变化。
@@ -357,8 +357,13 @@
 `remark` / `requestParamTemplate` / `responseParamTemplate`；新建默认值 `NEW_CONFIG_DEFAULTS`（`:495`）里 `callDirection: 'OUTBOUND'`。
 列表多一列「方向」（`directionLabel`，`:546`：`INBOUND` → 被调，其余 → 出网）。
 
-**`BRANCH_FIELDS`（483–492，8 项）**：`tenantId` / `interfaceNo` / `methodFlag`(dict:`#actions`) / `logicBranchName` /
-`logicBranchFlag` / `logicBranchValue` / `logicBranchOrder` / `remark`。
+**`BRANCH_FIELDS`（7 项）**：`tenantId` / `interfaceNo` / `methodFlag`(dict:`#actions`) / `logicBranchName` /
+**`branchJudge`**(judge，`branchOps:true` → 额外放开 `strategy`/`judged` 并禁用 path，`alwaysLabel:'兜底'`) /
+`logicBranchOrder` / `remark`。
+
+判定编辑器是**一个组件按 id 前缀复用**：`ed-resultJudge` 与 `br-branchJudge` 共用
+`judgeMode/judgeHint/syncJudgeEditor/readJudgeSpec`，子控件 id = `前缀 + 字段名 + 后缀`
+（`-condition/-path/-op/-value/-ignoreCase/-raw/-hint`，radio `name=<base>-mode`）。
 
 **`JUDGE_*` 常量（203–211）**：`JUDGE_OPS`（`eq/ne/in/notIn/exists/notBlank/regex`，与后端 `JudgeOp` 同序）、
 `JUDGE_LIST_OPS`（`in`/`notIn` 的 value 是数组）、`JUDGE_NO_VALUE_OPS`（`exists`/`notBlank`）、

@@ -4,6 +4,52 @@
 
 ## [Unreleased]
 
+### Changed（逻辑分支判定规格化 —— 破坏性：表结构与 `/branches` DTO）
+- **`ifmap_logic_branch_config` 的两列判定字段合并成一列 `branch_judge`**（`text NOT NULL`，**无默认值**）：
+  `logic_branch_flag`（策略键）+ `logic_branch_value`（判定值）→ `branch_judge`（判定规格 JSON）。
+  规格语法与接口级的 `result_judge` **完全同源**（同一校验器 `ResultJudgeSpec`、同一套 `all`/`any`、
+  同一深度上限 3、同一套 `ignoreCase`），只额外放开两个无 `path` 的算子 `strategy` / `judged`。
+  旧的两列各自只能表达一件事、组合语义（"策略或判定值命中"）还得靠代码里的 or 链，且"兜底分支"
+  靠"`flag` 空"隐式表达 —— 现在是一条显式规格，`{"op":"always"}` 就是兜底。
+- **迁移三件套**（Liquibase，按序）：`008-logic-branch-branch-judge.sql`（ADD COLUMN）→
+  `009-backfill-branch-judge.sql`（旧两列**机械 1:1** 回填：`flag` 空 → `always`；`flag` → `strategy`；
+  `value` 按 `[;,]` 切开 → `judged` 的 `value` 数组 + `ignoreCase:true`）→
+  `010-drop-logic-branch-legacy.sql`（DROP 两列，**可裁剪**，不可回退）。
+  `IfmapSchemaInitializer.ALTER_FILES` **只收 008**（自动 DDL 不做有损删列）；009/010 由迁移 kit 或 DBA 执行。
+  **只跑过自动 DDL 的库**：存量行 `branch_judge` 是空串 ⇒ 运行期 **fail-closed**（`fail_type=SPEC_INVALID`，
+  不执行任何分支），必须手工回填（[`docs/10`](docs/10-迁移指南.md) §3.4）。
+- **`LogicBranchConfig`**：删 `logicBranchFlag` / `logicBranchValue`、加 `branchJudge`；
+  `isDefaultBranch()`（`flag`/`value` 任一为空）→ `isActionAbsent()`。**`/branches` 的 DTO 就是该实体本体** ⇒
+  请求/响应字段变更（`branchJudge`），同步消费该接口的脚本 / 报表要一起改。
+- **引擎**：`BranchJudge`（编译后的规格 + 1024 条进程内 LRU，**解析失败也缓存**；三分结果
+  `MATCHED`/`MISSED`/`invalid`，**不抛异常**，非法即 fail-closed）；`IfmapOrchestrator.applyBranch`
+  **先全量校验再两趟匹配**（兜底 = `{"op":"always"}`，排第一条也不抢命中）；`matchedBranch` 与日志的
+  「命中分支」改为记 **`logic_branch_name`**（原记 `logic_branch_flag`，该列已删；分支名才是运维看得懂的标识）；
+  删掉"`method_flag` 为空时退回用 `flag` 当动作名"的隐藏行为（`method_flag` 空 = 不执行动作）。
+- **保存期校验**（`ConfigValidator`）：空规格 / 非法规格 = **error**（文案给出回填路径，别把它当兜底）；
+  兜底（`always`）每接口 ≤ 1 条（**只数合法规格**，避免一条坏配置顺带报成"兜底超 1 条"）；
+  `strategy` 键未注册 = **warning**（跨环境可能"先配后注册"，但写错键运行期只会"永远不命中"）；
+  `judged` + 该接口**所有** `busi_node` 的 `result_judge` 都是 `always` = **error**（判定值恒 `null` ⇒ 永不成立）。
+  删掉旧检查「配了 `logic_branch_value` 就必须配 `logic_branch_flag`」与旧的 `isDefaultBranch` 判据。
+- **`ResultJudgeSpec` 增 `ops()` / `strategyKeys()`**（编译后的树视图）、**`BranchJudgeSpec`** 门面
+  （`errorsOf` / `parse` / `isAlways` / `usesOp` / `strategyKeys`）—— 让"规格里用了哪些算子/策略键"
+  由**同一个解析器**回答，不写第二个文本扫描器。
+- **管理端**：判定编辑器**按 id 前缀参数化**（`ed-resultJudge` / `br-branchJudge` 复用同一个组件，
+  原来把 `ed-` 前缀写死 ⇒ 两个编辑器会撞 id）；分支模式额外放开 `strategy`（标量）/ `judged`（数组）
+  并把 `path` 置灰；分支列表列「判定 branch_judge」，未配置显示 `(未配置)`。
+- **`provider-remote`**：分支必填字段 `interface_no / logic_branch_name / branch_judge`，缺失或空白**直接抛**
+  （不 `orEmpty`：补空串等于把配置错误变成运行期失败）。
+- **迁移 kit**（`db/migration/ecc-to-ifmap`）：`00-precheck` 加"判定值元素个数 ≤ 16"**阻塞项**与
+  旧两列长度的动态体检；`01` 加 `branch_judge`（先是 `text NULL`）；`02` 第 4 步做 1:1 回填（临时表展开多值）；
+  `03` 收紧成 `text NOT NULL` 并删旧两列（B-2 段，可裁剪）；`05-verify` 列数 17 → **16**、兜底唯一性改按
+  `branch_judge` 结构化判定（`JSON_EXTRACT`，不是字符串比较）。
+- **等价性证明**：`BranchJudgeEquivalenceTest` 96 格双跑对照（旧 flag/value 语义 vs 新规格）+ 16 格
+  **已声明偏差**（唯一一处：旧代码对判定值 `trim()` 后忽略大小写，新规格严格匹配 —— 回填时已显式补
+  `ignoreCase:true` 保持等价，所以这一处只影响"以后新配的分支"）。core 220 测试全绿
+  （`IfmapOrchestratorTest` 32 → 36、`ResultJudgeSpecTest` 11、`BranchJudgeSpecTest` 4），
+  jdbc 62 → 65（新增 `LogicBranchSchemaTest` 3 例：`branch_judge` 是 `text` + `NOT NULL` + 无默认值、
+  旧两列已消失、显式省略 `branch_judge` 的 INSERT 被 DB 拒）。
+
 ### Added（被调接口：对方调我方 / `call_direction=INBOUND`）
 - **新列 `ifmap_config.call_direction`**（`007-config-call-direction.sql`，`varchar(16) NOT NULL DEFAULT 'OUTBOUND'`）：
   `OUTBOUND`＝我方调对方（默认，存量行为**零变化**）/ `INBOUND`＝对方调我方。空值等价 `OUTBOUND`（存量兼容），

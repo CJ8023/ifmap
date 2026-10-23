@@ -37,10 +37,14 @@
 -- 【为什么不是 UPDATE ... LIMIT 循环】需要保持幂等且不依赖存储过程。
 -- =====================================================================================
 
---changeset caijun:009-logic-branch-backfill-prepare
+-- 【为什么全部挤在一个 changeset 里】临时表是**连接级**的：Liquibase 只在同一个 changeset 内保证
+-- 各语句走同一条连接，拆成多个 changeset 时若连接池换了物理连接，INSERT/SELECT 会报 1146。
+-- 同理 `SET SESSION group_concat_max_len` 也必须和用到它的 GROUP_CONCAT 在同一个 changeset。
+-- 本 changeset 是**单向**的（没有 rollback：把已回填的规格清空只会让运行期 fail-closed），
+-- 回退走 `010-drop-logic-branch-legacy.sql` 的反向 —— 即从备份恢复。
+--changeset caijun:009-logic-branch-backfill
 SET SESSION group_concat_max_len = 8192;
 
---changeset caijun:009-logic-branch-backfill-tmp
 CREATE TEMPORARY TABLE `${tablePrefix}tmp_branch_judged` (
   `key_id` bigint       NOT NULL,
   `ord`    smallint     NOT NULL,
@@ -79,5 +83,4 @@ SET b.`branch_judge` = CASE
     END
 WHERE COALESCE(b.`branch_judge`, '') = '';
 
---changeset caijun:009-logic-branch-backfill-drop-tmp
 DROP TEMPORARY TABLE `${tablePrefix}tmp_branch_judged`;

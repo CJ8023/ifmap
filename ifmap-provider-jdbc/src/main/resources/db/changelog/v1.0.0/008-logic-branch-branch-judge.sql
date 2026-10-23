@@ -24,7 +24,7 @@
 -- 机械映射（策略键 / 判定值归属语义都能 1:1 表达）。**只跑自动 DDL 的环境**
 -- （ifmap.ddl.auto=true，见 IfmapSchemaInitializer.ALTER_FILES）不会执行 009：
 -- 那种环境下存量行的 branch_judge 是空串 → 运行期 fail-closed（SPEC_INVALID），
--- 不会静默落到兜底分支；处置方式见 docs/10-迁移指南.md §7。
+-- 不会静默落到兜底分支；处置方式见 docs/10-迁移指南.md §3.4。
 --
 -- 【非空表】严格模式（MySQL 5.7+ STRICT_TRANS_TABLES）下，给非空表加
 -- `text NOT NULL` 且无默认值的列会报 1364/1138。处置顺序（同样不补占位值）：

@@ -183,7 +183,7 @@ ifmap:
   注意口径变了：旧的判据是"`logic_branch_flag`/`value` 都空"，那是**隐式**约定（且把所有"只填了 flag"的分支都误判成兜底）；
   现在必须是**显式**的 `{"op":"always"}`。
 - **空规格（`""` / `{}` / `{"all":[]}`）直接 error**，报错文案会给出处置路径（兜底写 `always`；存量数据按
-  [`docs/10`](10-迁移指南.md) §7 回填）。运行期遇到空/非法规格是 **fail-closed**（`fail_type=SPEC_INVALID`），
+  [`docs/10`](10-迁移指南.md) §3.4 回填）。运行期遇到空/非法规格是 **fail-closed**（`fail_type=SPEC_INVALID`），
   所以"空 = 兜底"这种隐式兜底绝不能留。
 
 ## 6. 变更历史与回滚

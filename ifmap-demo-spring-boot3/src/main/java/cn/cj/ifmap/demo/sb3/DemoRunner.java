@@ -123,6 +123,8 @@ public class DemoRunner implements ApplicationRunner {
         config.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         // 按 bean 名指定策略钩子（DemoStrategy 的 bean 名 = demoStrategy）
         config.setPreStrategyName("demoStrategy");
+        // 前序改报文（ChannelCode 补进请求），后序改产物（settleRef/settleChannel 进 data）
+        config.setPostStrategyName("demoPostStrategy");
         config.setStatus(Integer.valueOf(1));
         long keyId = writer.insert(config);
         log.info("已写入演示配置 keyId={}", keyId);

@@ -187,6 +187,8 @@ public class InboundNoticeDemo implements ApplicationRunner {
         // 请求模板与前序策略留空：INBOUND 下它们不参与执行（管理端保存时也会各报一个 error）
         config.setRequestParamTemplate(null);
         config.setPreStrategyName(null);
+        // 被调方向没有请求报文可改，唯一能挂策略的地方就是后序（加工应答产物）
+        config.setPostStrategyName("noticeAckStamp");
         config.setResponseParamTemplate(ACK_TEMPLATE);
         config.setResultJudge(INBOUND_JUDGE);
         config.setStatus(Integer.valueOf(1));

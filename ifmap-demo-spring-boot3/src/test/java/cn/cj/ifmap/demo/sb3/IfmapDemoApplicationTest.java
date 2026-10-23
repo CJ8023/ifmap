@@ -42,6 +42,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,6 +85,9 @@ class IfmapDemoApplicationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DemoPartnerGateway gateway;
 
     @Test
     @DisplayName("starter 自动建表：4 张表都在")
@@ -129,6 +133,44 @@ class IfmapDemoApplicationTest {
         assertTrue(rendered.contains("\"applyDate\":\"20250308\""), "内置日期规则应生效：" + rendered);
         assertTrue(rendered.contains("\"applyNo\":\"AP20250101001\""), "路径取值应生效：" + rendered);
         assertTrue(rendered.contains("\"acctName\":\"张*\""), "strMask(NAME) 应脱敏：" + rendered);
+    }
+
+    @Test
+    @DisplayName("前序策略：渲染后、出网前把 channelCode 补进请求报文")
+    void preStrategyRewritesRequest() {
+        orchestrator.execute(applyRequest(), "BIZ_APPLY", "apply");
+
+        // 前序策略改的是"报文"，引擎出网之后不再暴露它 ⇒ 只能在网关这侧看
+        String sent = gateway.getLastRequest();
+        assertNotNull(sent, "网关应该收到过请求");
+        assertTrue(sent.contains("\"channelCode\":\"ECC\""), "前序策略应把 channelCode 补进报文：" + sent);
+        assertTrue(sent.contains("\"applyNo\":\"AP20250101001\""), "补字段不该弄丢原字段：" + sent);
+    }
+
+    @Test
+    @DisplayName("后序策略：产物多出 settleRef，且原有键仍在（是合并不是替换）")
+    void postStrategyAppendsToProduct() {
+        IfmapResult result = orchestrator.execute(applyRequest(), "BIZ_APPLY", "apply");
+
+        assertTrue(result.isSuccess(), "链路应成功：" + result.getErrorMessage());
+        assertEquals("STL-AP20250101001", result.getData().get("settleRef"), "后序策略应能读到产物并回填");
+        assertEquals("CMB-SETTLE", result.getData().get("settleChannel"));
+        assertEquals("AP20250101001", result.getData().get("applyNo"), "产物原有键必须保留");
+    }
+
+    @Test
+    @DisplayName("被调方向的后序策略：给应答盖字段；报文不可受理时它也跑了，但产物没有出口")
+    void inboundPostStrategyStampsAck() {
+        IfmapResult ok = orchestrator.executeInbound(noticeRequest(), "BIZ_NOTICE", "notice", notice("SUCCESS"));
+        Map<String, Object> ack = ackOf(ok);
+        assertNotNull(ack, "受理成功应有应答");
+        assertEquals("NOTICE", ack.get("ackChannel"), "后序策略补的字段应出现在应答里");
+        assertEquals("BIZ-NOTICE-0001", ack.get("ackBizId"));
+
+        IfmapResult rejected = orchestrator.executeInbound(noticeRequest(), "BIZ_NOTICE", "notice",
+                notice("PENDING"));
+        assertFalse(rejected.isSuccess(), "状态不认识 ⇒ 不可受理");
+        assertTrue(ackOf(rejected) == null, "判定失败 ⇒ 池里没有本步产物 ⇒ 三方拿不到任何应答");
     }
 
     @Test
@@ -185,6 +227,20 @@ class IfmapDemoApplicationTest {
         assertEquals("VALUE_MISMATCH", result.getFailType());
         assertNull(result.getMatchedBranch(), "判定失败时分支不执行");
         assertNull(ackOf(result), "产物不入池 ⇒ 没有应答，引擎不兜底");
+    }
+
+    /** 出网方向的演示请求：与 {@code DemoRunner} 里跑的那一份同源。 */
+    private static IfmapRequest applyRequest() {
+        return IfmapRequest.builder()
+                .tenantId("1001")
+                .bizId("BIZ-20250101-0001")
+                .operatorId("demo")
+                .requestId("REQ-1")
+                .put("orgCode", "12")
+                .put("applyNo", "AP20250101001")
+                .put("applyTime", "2025-03-08 10:20:30")
+                .put("acctName", "张三")
+                .build();
     }
 
     private static IfmapRequest noticeRequest() {

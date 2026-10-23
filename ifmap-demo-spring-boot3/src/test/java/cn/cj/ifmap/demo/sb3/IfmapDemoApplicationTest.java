@@ -21,6 +21,7 @@ import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
+import cn.cj.ifmap.core.exception.IfmapStrategyException;
 import cn.cj.ifmap.core.model.IfmapRequest;
 import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
@@ -29,6 +30,7 @@ import cn.cj.ifmap.core.rule.RuleRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -88,6 +91,9 @@ class IfmapDemoApplicationTest {
 
     @Autowired
     private DemoPartnerGateway gateway;
+
+    @Autowired
+    private DemoRunner demoRunner;
 
     @Test
     @DisplayName("starter 自动建表：4 张表都在")
@@ -192,6 +198,26 @@ class IfmapDemoApplicationTest {
     }
 
     @Test
+    @DisplayName("演示行漂移（策略 bean 改过名）不再让启动失败：下一次播种把配置覆盖回代码期望值")
+    void seedRealignsStaleDemoRow() {
+        // 模拟"代码改过名、库里还是旧值"：直接改库（不动 version，对齐时乐观锁才能命中）
+        jdbcTemplate.update("UPDATE `" + configTable() + "` SET `pre_strategy_name` = 'demoStrategy'"
+                + " WHERE `interface_no` = 'BIZ_APPLY'");
+        assertThrows(IfmapStrategyException.class,
+                () -> orchestrator.execute(applyRequest(), "BIZ_APPLY", "apply"),
+                "旧策略名必须 fail-fast，不能在运行期静默跳过");
+
+        // 第二次"启动"：播种逻辑应当发现指纹不一致并覆盖回期望值
+        demoRunner.run(new DefaultApplicationArguments());
+
+        IfmapConfig row = repository.queryConfigs("1001", "BIZ_APPLY", "apply").get(0);
+        assertEquals("demoPreStrategy", row.getPreStrategyName(), "播种应把策略名覆盖回当前 bean 名");
+        String sent = gateway.getLastRequest();
+        assertNotNull(sent, "对齐之后整条链路应该跑通（网关应收到请求）");
+        assertTrue(sent.contains("\"channelCode\":\"ECC\""), "前序策略重新生效：" + sent);
+    }
+
+    @Test
     @DisplayName("被调方向：业务成功 → 受理分支动作原地补字段，应答照常是 0000")
     void inboundAcceptedFillsAck() {
         IfmapResult result = orchestrator.executeInbound(noticeRequest(), "BIZ_NOTICE", "notice", notice("SUCCESS"));
@@ -227,6 +253,11 @@ class IfmapDemoApplicationTest {
         assertEquals("VALUE_MISMATCH", result.getFailType());
         assertNull(result.getMatchedBranch(), "判定失败时分支不执行");
         assertNull(ackOf(result), "产物不入池 ⇒ 没有应答，引擎不兜底");
+    }
+
+    /** 当前测试库里的配置表名（H2 用示例默认前缀；真库用本用例专属前缀，避免动到 ifmap_ 那套表）。 */
+    private static String configTable() {
+        return (TestDatabases.mysqlEnabled() ? TestDatabases.prefixFor(TEST_DB) : "ifmap_") + "config";
     }
 
     /** 出网方向的演示请求：与 {@code DemoRunner} 里跑的那一份同源。 */

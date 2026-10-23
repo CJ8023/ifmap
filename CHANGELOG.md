@@ -92,6 +92,28 @@
   `inboundPostStrategyStampsAck`（应答被盖章；`PENDING` 时后序照跑但产物无出口）。
 - `docs/12` 新增 §6.1「给应答补字段的三条通道怎么选」（应答模板 / 后序策略 / 分支动作，含"后序兜不了拒收"）。
 
+### Fixed（demo 启动即失败：库里那行还指着旧策略 bean 名）
+- **现象**：demo 起来就抛 `IfmapStrategyException: 前序策略未注册：pre_strategy_name=demoStrategy`。
+  原因是「演示数据」只在**表为空**时写入，而 `DemoStrategy` 早前改名为 `DemoPreStrategy`
+  （bean 名 `demoStrategy` → `demoPreStrategy`）—— 库里那行没见过这次改名，于是永远指着已不存在的 bean。
+  异常信息里列的是**当前注册**的 bean，完全看不出"是数据旧了"。
+- **修法**：演示播种从"只插一次"改成"**自对齐**"（新类 `DemoSeedSupport`，151 行）：
+  `DemoRunner` / `InboundNoticeDemo` 每次启动都拿代码里的期望值与库里那行比指纹（12 个演示拥有的字段），
+  不一致就覆盖回期望值（`writer.update` 带乐观锁），分支按 `logic_branch_name` 「有则改、无则插」，
+  最后清 `CachingConfigRepository` 的分支缓存（配置表不缓存，不用管）。
+  顺带解决另外两个同类漂移：改了请求/应答模板、改了 `branch_judge` 之后，库里旧行同样不会自己更新。
+  三条边界写进了 `DemoSeedSupport` 的 javadoc：只拷**自己拥有的字段**（`update` 写全列，
+  整体替换新对象会把 `project_code` / `remark` 擦成 `null`）、分支只 `insert` 会撞唯一键或留着旧 judge、
+  分支缓存不失效 ⇒ 引擎仍用旧规格。
+- 配置里 `call_direction` 显式写成 `OUTBOUND`（留 `null` 靠库默认值会让指纹每次都不一致）。
+- `IfmapDemoApplicationTest` 11 → **12 例**：`seedRealignsStaleDemoRow` 把库里的 `pre_strategy_name`
+  改成已不存在的 `demoStrategy`，先断言 `orchestrator.execute` 抛 `IfmapStrategyException`（引擎 fail-fast
+  是对的），再调一次 `demoRunner.run(...)`，断言策略名被覆盖回 `demoPreStrategy` 且网关重新收到带
+  `channelCode` 的报文。
+- **存量库无需手工改**：重启 demo 即自愈（想手动改也行：`UPDATE ifmap_config SET
+  pre_strategy_name='demoPreStrategy' WHERE pre_strategy_name='demoStrategy';`）。
+- `docs/代码精读/09` 补 §2.12 `DemoSeedSupport` 与「别删清单」三条；`docs/12` §9 补第 13 条坑。
+
 ### Removed（回调通道 —— 破坏性）
 - **删除 `CallbackRegistry` / `IfmapCallback` / `IfmapCallbackHandler` / `IfmapOrchestrator.callback(...)`**
   （连带只被它使用的 8 参 `writeLog` 重载；`IfmapAutoConfiguration` 不再有 `ifmapCallbackRegistry` bean，

@@ -16,6 +16,7 @@
 package cn.cj.ifmap.demo.sb3;
 
 import cn.cj.ifmap.core.IfmapEngine;
+import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.ConfigRepository;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
@@ -71,7 +72,7 @@ public class DemoRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        seedIfAbsent();
+        seedAndAlign();
 
         List<IfmapConfig> configs = repository.queryConfigs(TENANT, INTERFACE_NO, BUSI_NODE);
         log.info("从库里查到 {} 条配置（表已由 starter 自动建好）", configs.size());
@@ -104,11 +105,38 @@ public class DemoRunner implements ApplicationRunner {
                 result.isSuccess(), result.getData(), result.getMatchedBranch(), result.getElapsedMs());
     }
 
-    /** 幂等写入演示配置（重复启动不会插重）。 */
-    private void seedIfAbsent() {
-        if (!repository.queryConfigs(TENANT, INTERFACE_NO, BUSI_NODE).isEmpty()) {
-            return;
+    /**
+     * 演示配置「自对齐」而不是「只插一次」。
+     *
+     * <p>只判断「有没有」会踩一个很疼的坑：演示代码改过策略 bean 名（{@code demoStrategy} →
+     * {@code demoPreStrategy}）之后，库里那行还是旧值，启动时 {@code applyPreStrategy} 直接抛
+     * 「前序策略未注册」，整个 demo 起不来。规则与原因见 {@link DemoSeedSupport}。</p>
+     */
+    private void seedAndAlign() {
+        IfmapConfig desired = demoConfig();
+        List<IfmapConfig> existing = repository.queryConfigs(TENANT, INTERFACE_NO, BUSI_NODE);
+        if (existing.isEmpty()) {
+            log.info("已写入演示配置 keyId={}", writer.insert(desired));
+        } else {
+            seedExisting(existing.get(0), desired);
         }
+        long branchId = DemoSeedSupport.upsertBranch(repository, writer, TENANT, successBranch());
+        log.info("演示逻辑分支就绪 keyId={}（judge=$.resultCode eq 0000 / 动作=submit）", branchId);
+        DemoSeedSupport.invalidateBranches(repository, TENANT, INTERFACE_NO);
+    }
+
+    /** 库里已有演示配置：与代码不一致就覆盖回去（改名 / 改模板后最容易踩到）。 */
+    private void seedExisting(IfmapConfig row, IfmapConfig desired) {
+        if (DemoSeedSupport.alignConfig(writer, row, desired)) {
+            log.warn("演示配置与代码不一致，已覆盖回期望值（keyId={}）：pre={}，post={}",
+                    row.getKeyId(), row.getPreStrategyName(), row.getPostStrategyName());
+        } else {
+            log.info("演示配置已是最新（keyId={}）", row.getKeyId());
+        }
+    }
+
+    /** 演示配置的期望值（库里那行必须与它一致）。 */
+    private IfmapConfig demoConfig() {
         IfmapConfig config = new IfmapConfig();
         config.setTenantId(Long.valueOf(TENANT));
         config.setInterfaceNo(INTERFACE_NO);
@@ -118,6 +146,8 @@ public class DemoRunner implements ApplicationRunner {
         config.setPartnerCode("CMB");
         config.setPartnerName("招商银行");
         config.setInterfaceOrder(Integer.valueOf(1));
+        // 显式写成 OUTBOUND：指纹要拿它比对，留 null 依赖库默认值会让每次启动都判成"不一致"
+        config.setCallDirection(CallDirection.OUTBOUND);
         config.setRequestParamTemplate(REQUEST_TEMPLATE);
         config.setResponseParamTemplate(RESPONSE_TEMPLATE);
         config.setResultJudge("{\"all\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
@@ -126,9 +156,11 @@ public class DemoRunner implements ApplicationRunner {
         // 前序改报文（ChannelCode 补进请求），后序改产物（settleRef/settleChannel 进 data）
         config.setPostStrategyName("demoPostStrategy");
         config.setStatus(Integer.valueOf(1));
-        long keyId = writer.insert(config);
-        log.info("已写入演示配置 keyId={}", keyId);
+        return config;
+    }
 
+    /** 演示分支的期望值。 */
+    private LogicBranchConfig successBranch() {
         LogicBranchConfig branch = new LogicBranchConfig();
         branch.setTenantId(Long.valueOf(TENANT));
         branch.setInterfaceNo(INTERFACE_NO);
@@ -137,7 +169,6 @@ public class DemoRunner implements ApplicationRunner {
         // branch_judge 与 result_judge 同一套语法：这里直接看原文的 resultCode
         branch.setBranchJudge("{\"any\":[{\"path\":\"$.resultCode\",\"op\":\"eq\",\"value\":\"0000\"}]}");
         branch.setLogicBranchOrder(Integer.valueOf(1));
-        long branchId = writer.insert(branch);
-        log.info("已写入演示逻辑分支 keyId={}（judge=$.resultCode eq 0000 / 动作=submit）", branchId);
+        return branch;
     }
 }

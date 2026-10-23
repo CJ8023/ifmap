@@ -30,6 +30,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -105,7 +106,7 @@ public class InboundNoticeDemo implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        seedIfAbsent();
+        seedAndAlign();
         log.info("== 被调方向演示（call_direction=INBOUND）：资方调我方，我方按配置判定 + 分流 + 应答 ==");
 
         call("成功通知", "{"
@@ -168,11 +169,42 @@ public class InboundNoticeDemo implements ApplicationRunner {
         return ack instanceof Map ? (Map<String, Object>) ack : null;
     }
 
-    /** 幂等写入演示配置（重复启动不会插重）。 */
-    private void seedIfAbsent() {
-        if (!repository.queryConfigs(TENANT, INTERFACE_NO, BUSI_NODE).isEmpty()) {
-            return;
+    /**
+     * 演示配置「自对齐」而不是「只插一次」（规则与原因见 {@link DemoSeedSupport}）。
+     *
+     * <p>被调方向尤其容易撞上：后序策略的 bean 名（{@code noticeAckStamp}）写死在配置行里，
+     * 一旦演示代码改名，库里那行会让启动直接抛「后序策略未注册」。</p>
+     */
+    private void seedAndAlign() {
+        IfmapConfig desired = demoConfig();
+        List<IfmapConfig> existing = repository.queryConfigs(TENANT, INTERFACE_NO, BUSI_NODE);
+        if (existing.isEmpty()) {
+            log.info("已写入被调配置 keyId={}（INBOUND / 无请求模板 / 无前序策略）", writer.insert(desired));
+        } else {
+            seedExisting(existing.get(0), desired);
         }
+        long acceptedId = DemoSeedSupport.upsertBranch(repository, writer, TENANT,
+                branch("受理分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"SUCCESS\"}]}",
+                        1, "noticeAccepted"));
+        long failedId = DemoSeedSupport.upsertBranch(repository, writer, TENANT,
+                branch("失败分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"FAILED\"}]}",
+                        2, "noticeFailed"));
+        log.info("演示逻辑分支就绪：受理分支 keyId={} / 失败分支 keyId={}", acceptedId, failedId);
+        DemoSeedSupport.invalidateBranches(repository, TENANT, INTERFACE_NO);
+    }
+
+    /** 库里已有被调配置：与代码不一致就覆盖回去。 */
+    private void seedExisting(IfmapConfig row, IfmapConfig desired) {
+        if (DemoSeedSupport.alignConfig(writer, row, desired)) {
+            log.warn("被调配置与代码不一致，已覆盖回期望值（keyId={}）：direction={}，post={}",
+                    row.getKeyId(), row.getCallDirection(), row.getPostStrategyName());
+        } else {
+            log.info("被调配置已是最新（keyId={}）", row.getKeyId());
+        }
+    }
+
+    /** 被调配置的期望值（库里那行必须与它一致）。 */
+    private IfmapConfig demoConfig() {
         IfmapConfig config = new IfmapConfig();
         config.setTenantId(Long.valueOf(TENANT));
         config.setInterfaceNo(INTERFACE_NO);
@@ -192,20 +224,18 @@ public class InboundNoticeDemo implements ApplicationRunner {
         config.setResponseParamTemplate(ACK_TEMPLATE);
         config.setResultJudge(INBOUND_JUDGE);
         config.setStatus(Integer.valueOf(1));
-        long keyId = writer.insert(config);
-        log.info("已写入被调配置 keyId={}（INBOUND / 无请求模板 / 无前序策略）", keyId);
-
-        // 两条常规分支：branch_judge 自己从原文取值判断（顶层只能 always / all / any，
-        // 单条件就包一层 any）。先后顺序由 logic_branch_order 决定，首个命中即执行。
-        // 也可以写 {"any":[{"op":"judged","value":["SUCCESS"]}]}：judged 比的是 result_judge
-        // 命中的那个值（actualValue），这里用路径表达式更直观、也不依赖判定内部实现。
-        insertBranch("受理分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"SUCCESS\"}]}",
-                1, "noticeAccepted");
-        insertBranch("失败分支", "{\"any\":[{\"path\":\"$.noticeStatus\",\"op\":\"eq\",\"value\":\"FAILED\"}]}",
-                2, "noticeFailed");
+        return config;
     }
 
-    private void insertBranch(String name, String branchJudge, int order, String methodFlag) {
+    /**
+     * 演示分支的期望值。
+     *
+     * <p>两条常规分支：{@code branch_judge} 自己从原文取值判断（顶层只能 always / all / any，
+     * 单条件就包一层 any）。先后顺序由 {@code logic_branch_order} 决定，首个命中即执行。
+     * 也可以写 {@code {"any":[{"op":"judged","value":["SUCCESS"]}]}}：{@code judged} 比的是
+     * {@code result_judge} 命中的那个值（actualValue），这里用路径表达式更直观、也不依赖判定内部实现。</p>
+     */
+    private LogicBranchConfig branch(String name, String branchJudge, int order, String methodFlag) {
         LogicBranchConfig branch = new LogicBranchConfig();
         branch.setTenantId(Long.valueOf(TENANT));
         branch.setInterfaceNo(INTERFACE_NO);
@@ -214,7 +244,6 @@ public class InboundNoticeDemo implements ApplicationRunner {
         // 必填：留空是"非法配置"（运行期 fail-closed），不是"兜底"。兜底要显式写 {"op":"always"}
         branch.setBranchJudge(branchJudge);
         branch.setLogicBranchOrder(Integer.valueOf(order));
-        long branchId = writer.insert(branch);
-        log.info("已写入逻辑分支 keyId={}（{}：judge={} / 动作={}）", branchId, name, branchJudge, methodFlag);
+        return branch;
     }
 }

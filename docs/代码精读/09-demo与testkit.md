@@ -5,7 +5,7 @@
 | 模块 | 文件（含 pom） | 行数 | 定位 |
 |---|---|---|---|
 | `ifmap-demo-pure-java` | 4 | 219 | **零 Spring** 的引擎用法演示（证 core 零依赖） |
-| `ifmap-demo-spring-boot3` | 15 | 1,170 | 引入 starter 的**完整编排**用法（出网 + 被调两个方向，前后序策略各一例）+ 管理端宿主 |
+| `ifmap-demo-spring-boot3` | 16 | 1,412 | 引入 starter 的**完整编排**用法（出网 + 被调两个方向，前后序策略各一例）+ 管理端宿主 |
 | `ifmap-testkit` | 5 | 1,217 | 真库/内存库测试基座 + **自动清理** |
 
 ---
@@ -41,7 +41,7 @@
 
 ---
 
-## 2. `ifmap-demo-spring-boot3`（11 个 Java 主类 + 2 个 yml + 1 个测试）
+## 2. `ifmap-demo-spring-boot3`（12 个 Java 主类 + 2 个 yml + 1 个测试）
 
 ### 2.1 `IfmapDemoApplication`（35 行）
 
@@ -87,7 +87,7 @@
 `@IfmapAction("submit")` + `execute(StrategyContext)`。注解值是 `ifmap_logic_branch_config.method_flag`
 （**不再按方法名反射**，方法改名不会静默失效）。
 
-### 2.7 `InboundNoticeDemo`（220 行）· 被调方向演示例
+### 2.7 `InboundNoticeDemo`（249 行）· 被调方向演示例
 
 `@Component @Order(2) implements ApplicationRunner`，与 `DemoRunner`（`@Order` 更小，先跑）**互不干扰**：
 另一个业务节点（`notice`）、另一个接口编号（`BIZ_NOTICE`）、另一个租户内的一组表行。
@@ -95,16 +95,15 @@
 | 行 | 成员 | 说明 |
 |---|---|---|
 | 65–67 | 常量 | `TENANT="1001"` / `INTERFACE_NO="BIZ_NOTICE"` / `BUSI_NODE="notice"` |
-| 78 | `ACK_TEMPLATE` | 应答模板，根是**对方原文**：`$.applyNo` / `$.['seqNo']` 取对方字段，`"0000"` 是字面量 |
-| 91 | `INBOUND_JUDGE` | `{"any":[eq SUCCESS, eq FAILED]}` —— 判定口径是「报文**可受理**」，不是「业务成败」 |
-| 107 | `run(...)` | 播种 + 三个场景 |
-| 136 | `call(scene, rawBody)` | **唯一入口** `executeInbound(...)`；`ackOf` 取不到东西就说明被判失败了 |
-| 162 | `ackOf(result)` | 池里有没有本步产物 = 有没有应答（判失败的步骤不入池） |
-| 172 | `seedIfAbsent()` | 幂等：先查再插 |
-| 186 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
-| 191 | `setPostStrategyName("noticeAckStamp")` | 被调方向唯一能挂策略的位置（加工应答产物） |
-| 202 | `insertBranch(...)` | 两条分支：`branch_judge` = `any[$.noticeStatus eq SUCCESS]` → `noticeAccepted`，`eq FAILED` → `noticeFailed`（`branch_judge` **必填**，兜底才写 `always`） |
-
+| 79 | `ACK_TEMPLATE` | 应答模板，根是**对方原文**：`$.applyNo` / `$.['seqNo']` 取对方字段，`"0000"` 是字面量 |
+| 92 | `INBOUND_JUDGE` | `{"any":[eq SUCCESS, eq FAILED]}` —— 判定口径是「报文**可受理**」，不是「业务成败」 |
+| 108 | `run(...)` | 播种 + 三个场景 |
+| 137 | `call(scene, rawBody)` | **唯一入口** `executeInbound(...)`；`ackOf` 取不到东西就说明被判失败了 |
+| 163 | `ackOf(result)` | 池里有没有本步产物 = 有没有应答（判失败的步骤不入池） |
+| 178 | `seedAndAlign()` | 演示数据**自对齐**（见 §2.12）而不是"只插一次" |
+| 218 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
+| 223 | `setPostStrategyName("noticeAckStamp")` | 被调方向唯一能挂策略的位置（加工应答产物） |
+| 238 | `branch(name, judge, order, methodFlag)` | 两条分支：`branch_judge` = `any[$.noticeStatus eq SUCCESS]` → `noticeAccepted`，`eq FAILED` → `noticeFailed`（`branch_judge` **必填**，兜底才写 `always`） |
 三个场景覆盖了被调方向的三个终态（`docs/12` §7）：
 
 | 场景 | `noticeStatus` | 判定 | 分支（`matchedBranch`） | 应答 |
@@ -142,26 +141,47 @@
 > 演示的重点是「**业务失败不要抛异常**」：动作在 `writeLog` 之前执行，抛出去会带走执行日志，
 > 而且宿主拿不到应答 Map（表现为对方超时 + 我方无日志）。见 `docs/12` §9 第 10 条。
 
-### 2.11 `DemoRunner`（143 行）· 完整链路演示例
+### 2.11 `DemoRunner`（174 行）· 完整链路演示例
 
 | 行 | 成员 | 说明 |
 |---|---|---|
 | 45–47 | 常量 | `TENANT="1001"` / `INTERFACE_NO="BIZ_APPLY"` / `BUSI_NODE="apply"` |
-| 49 | `REQUEST_TEMPLATE` | 5 个字段：`bankOrgNo`（自定义规则）/ `$.applyNo` / `dateFormat` / `strMask(NAME)` / `$.channelCode`（**由策略钩子补**） |
-| 57 | `RESPONSE_TEMPLATE` | `{"applyNo":"$.data.applyNo"}` |
-| 73 | `run(args)` | 主流程 |
-| 76–80 | 查配置 + 查分支 | 顺带验证"表已由 starter 自动建好"与缓存装饰器生效 |
-| 88 | 仅渲染 | 不经编排，单独演示 `engine.render` |
-| 92–102 | **完整编排** | `orchestrator.execute(request, interfaceNo, busiNode)` |
-| 108 | `seedIfAbsent()` | **幂等写入**：先查再插，重复启动不插重 |
+| 50 | `REQUEST_TEMPLATE` | 5 个字段：`bankOrgNo`（自定义规则）/ `$.applyNo` / `dateFormat` / `strMask(NAME)` / `$.channelCode`（**由策略钩子补**） |
+| 58 | `RESPONSE_TEMPLATE` | `{"applyNo":"$.data.applyNo"}` |
+| 74 | `run(args)` | 主流程（第一句就是播种：`seedAndAlign()`） |
+| 77–81 | 查配置 + 查分支 | 顺带验证"表已由 starter 自动建好"与缓存装饰器生效 |
+| 89 | 仅渲染 | 不经编排，单独演示 `engine.render` |
+| 93–103 | **完整编排** | `orchestrator.execute(request, interfaceNo, busiNode)` |
+| 115 | `seedAndAlign()` | 演示数据**自对齐**（见 §2.12）：一致就跳过，不一致覆盖回期望值 |
+| 139 | `demoConfig()` | 期望值集中在这里；`:150` `setCallDirection(CallDirection.OUTBOUND)` —— **必须显式写**，留 `null` 靠库默认值会让指纹每次都不一致 |
+| 163 | `successBranch()` | `methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge` |
 
-`seedIfAbsent` 里几个值得抄的细节：
-- `:123` `resultJudge` 写成 `{"all":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`；
-- `:125` `setPreStrategyName("demoPreStrategy")` —— **bean 名首字母小写**，写类名会找不到；
-- `:127` `setPostStrategyName("demoPostStrategy")` —— 前序改报文（补 `channelCode`），后序改产物（补 `settleRef`）；
-- `:132` 分支：`methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge`（`{"any":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`）——动作键、分支名、判定规格三者各自含义不同，见 03 篇。
+`demoConfig()` 里几个值得抄的细节：
+- `:153` `resultJudge` 写成 `{"all":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`；
+- `:155` `setPreStrategyName("demoPreStrategy")` —— **bean 名首字母小写**，写类名会找不到；
+- `:157` `setPostStrategyName("demoPostStrategy")` —— 前序改报文（补 `channelCode`），后序改产物（补 `settleRef`）；
+- 分支的动作键、分支名、判定规格三者各自含义不同，别混（细节见 `successBranch()`）。
 
-### 2.12 两个 yml
+### 2.12 `DemoSeedSupport`（151 行）· 演示数据自对齐
+
+演示行一旦落库就是**数据**，不会跟着代码变。所以"有就跳过"是个陷阱：策略 bean 改过名
+（`demoStrategy` → `demoPreStrategy`）之后，库里那行还是旧值，启动时 `applyPreStrategy` 抛
+「前序策略未注册：`pre_strategy_name=demoStrategy`」—— 异常里列出的是**当前注册的 bean**，
+完全看不出"是数据旧了"。这个类就干三件事：
+
+| 行 | 方法 | 说明 |
+|---|---|---|
+| 57 | `matches(row, desired)` | 比 `fingerprint` 拼出来的**整串**，而不是 12 个字段各写一遍 `if`（加字段只改一处） |
+| 67 | `alignConfig(writer, row, desired)` | 不一致就覆盖回期望值；`writer.update` 带乐观锁（`version` 取自库里那行），失败直接抛 —— 演示带病跑比报错更难查 |
+| 88 | `copyOwned(target, source)` | 只拷**演示拥有的 12 个字段**。不整体替换成新对象：`update` 会写全列，新对象里 `project_code`/`judge_name`/`remark` 全是 `null`，会把演示行擦掉 |
+| 110 | `upsertBranch(...)` | 按 `logic_branch_name`「有则改、无则插」。只 `insert` 会撞唯一键；只"查空就跳过"会把**旧 judge** 留着，演示改了判定却在跑老逻辑 |
+| 131 | `invalidateBranches(...)` | **分支表走 `CachingConfigRepository` 缓存**，改完必须失效，否则引擎拿到的还是旧规格（配置表不缓存，那边不用管） |
+| 138 | `fingerprint(c)` | 演示拥有的 12 个字段用 `\u0001` 拼接（`null` 记作 `<null>`，因为"模板留空"是有意义的语义） |
+
+> 三个坑都写在这个类的 javadoc 里，照着踩一遍就能明白为什么"演示代码"也需要对齐逻辑：
+> ① 数据不跟代码走；② `writer.update` 写全列，所以只能覆盖自己拥有的字段；③ 缓存装饰器不会自己失效。
+
+### 2.13 两个 yml
 
 **`application.yml`（30 行）· 默认档（H2 内存库）**
 
@@ -190,20 +210,21 @@
 > 且 `+` 在 URL 里会被解码成空格 → 必须写 `%2B08:00`（两处）。
 > 这段注释就是 `CannotGetJdbcConnectionException` 那次的结案记录，**别删**。
 
-### 2.13 `IfmapDemoApplicationTest`（269 行，11 例）
+### 2.14 `IfmapDemoApplicationTest`（300 行，12 例）
 
-用 H2 起完整上下文。出网方向 6 例（建表、`DemoRunner` 幂等、规则收集、整链路渲染、**前序改报文**、**后序改产物**）；
-被调方向 5 例（含后序策略盖章）：
+用 H2 起完整上下文。出网方向 7 例（建表、`DemoRunner` 幂等、规则收集、整链路渲染、**前序改报文**、**后序改产物**、
+**播种自对齐**）；被调方向 5 例（含后序策略盖章）：
 
 | 行 | 用例 | 断言要点 |
 |---|---|---|
-| 139 | `preStrategyRewritesRequest` | 网关 `getLastRequest()` 里有 `"channelCode":"ECC"`（前序策略补的）且原字段 `applyNo` 仍在 |
-| 151 | `postStrategyAppendsToProduct` | `data.settleRef=STL-AP20250101001` / `settleChannel=CMB-SETTLE` / **原键 `applyNo` 保留**（合并不是替换） |
-| 162 | `inboundPostStrategyStampsAck` | 受理成功时应答里有后序补的 `ackChannel` / `ackBizId`；`PENDING` 时 `isSuccess()=false` 且池里无产物（后序跑了但没出口） |
-| 177 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
-| 195 | `inboundAcceptedFillsAck` | 判定过 + `matchedBranch="受理分支"` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
-| 210 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，`matchedBranch="失败分支"`，`code=2001`、`retryable=true` |
-| 222 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
+| 144 | `preStrategyRewritesRequest` | 网关 `getLastRequest()` 里有 `"channelCode":"ECC"`（前序策略补的）且原字段 `applyNo` 仍在 |
+| 156 | `postStrategyAppendsToProduct` | `data.settleRef=STL-AP20250101001` / `settleChannel=CMB-SETTLE` / **原键 `applyNo` 保留**（合并不是替换） |
+| 167 | `inboundPostStrategyStampsAck` | 受理成功时应答里有后序补的 `ackChannel` / `ackBizId`；`PENDING` 时 `isSuccess()=false` 且池里无产物（后序跑了但没出口） |
+| 182 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
+| 200 | `seedRealignsStaleDemoRow` | 把库里的 `pre_strategy_name` 改成已不存在的 `demoStrategy`：先断言 `orchestrator.execute` 抛 `IfmapStrategyException`（fail-fast），再调一次 `demoRunner.run(...)`，断言策略名被覆盖回 `demoPreStrategy` 且网关重新收到带 `channelCode` 的报文 —— 这条就是"改名后 demo 起不来"的回归用例 |
+| 220 | `inboundAcceptedFillsAck` | 判定过 + `matchedBranch="受理分支"` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
+| 235 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，`matchedBranch="失败分支"`，`code=2001`、`retryable=true` |
+| 247 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
 
 > 前序策略那一条断言写成"null 或空串"：列定义是 `NOT NULL DEFAULT ''`，写 `null` 会被库兜成空串，
 > 两者在引擎里等价（都表示"没配"）—— 不要用 `assertNull` 把它写死。
@@ -337,7 +358,9 @@
 | pure-java demo 的 `pretty()` | `IfmapQuickStart:79` | 整个 demo 的卖点是"依赖极少"，用 Jackson 美化就自打脸 |
 | demo 的 banner 4（故意写错规则名） | `IfmapQuickStart:59` | 这是产品对存量引擎的**核心差异演示**，删了 demo 就没论点了 |
 | `DemoPreStrategy` 同时实现两个接口 | `DemoPreStrategy:44` | 演示"一个 bean 可以承担多个策略角色"，且 `apply` 与 `assemble` 语义不同 |
-| `DemoRunner.seedIfAbsent` 的幂等 | `:108` | 不幂等的话重复启动就 1062；演示"配置写入要判重" |
+| `DemoRunner.seedAndAlign` 的"自对齐" | `DemoRunner:115` | 只判"有没有"会让库里旧行（旧策略名/旧模板）挡住启动（`前序策略未注册`）。对齐逻辑集中在 `DemoSeedSupport`，别把它改回"查空就 return" |
+| `DemoSeedSupport` 只拷 12 个字段 | `DemoSeedSupport:88` | `writer.update` 写全列：整体替换新对象会把 `project_code`/`remark` 等列擦成 null |
+| `DemoSeedSupport.invalidateBranches` | `DemoSeedSupport:131` | 分支表走缓存装饰器，改完不清缓存 ⇒ 引擎仍用旧 `branch_judge` |
 | `InboundNoticeDemo` 第三个场景（`PENDING`） | `InboundNoticeDemo:128` | 演示"判定失败时**没有**应答"，比只演成功路径更能说明"引擎不兜底错误码"的设计选择 |
 | `InboundNoticeDemo` 的 ACK 模板里 `$.['seqNo']` 与 `$.seqNo` 并列 | `InboundNoticeDemo:78` | 一个是"对方的字段"、一个是"我方生成的流水号"；这对写法是可运行的反例教材，别改成统一写法 |
 | `DemoPostStrategy` 的"读产物再回填" | `DemoPostStrategy:46` | 后序策略最小样例；javadoc 里「整体替换不保留原键」是唯一的就地说明 |

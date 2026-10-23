@@ -140,12 +140,33 @@ class IfmapAdminUiScriptTest {
         assertTrue(script.contains("'judgeName'"), "表单必须提供 judgeName（判定器选择）");
         assertTrue(!script.contains("resultFlag") && !script.contains("successValue"),
                 "老判定列已从库/接口里删除，页面不该再出现：否则一保存就写回不存在的字段");
-        assertTrue(script.contains("ed-judge-op") && script.contains("ed-judge-path")
-                && script.contains("ed-judge-value") && script.contains("ed-judge-raw"),
+        // id 由 prefix + name 拼出来（ed-resultJudge-op / br-branchJudge-op），后缀是契约的一半
+        assertTrue(script.contains("'-condition'") && script.contains("'-path'")
+                && script.contains("'-op'") && script.contains("'-value'") && script.contains("'-raw'"),
                 "缺少判定编辑器控件（path/op/value/原始 JSON）");
         // op 决定 value 是否必填：存在性判定与 always 不该要求 value
         assertTrue(script.contains("JUDGE_NO_VALUE_OPS") && script.contains("JUDGE_LIST_OPS"),
                 "必须按 op 区分 value 形态（exists/notBlank 无值、in/notIn 为数组）");
+    }
+
+    @Test
+    @DisplayName("分支判定复用同一判定编辑器，且单独放出 strategy/judged（无 path）")
+    void branchJudgeEditorIsWired() {
+        String script = stripComments(text(JS));
+
+        assertTrue(script.contains("'branchJudge'"), "分支表单必须提供 branchJudge 字段");
+        assertTrue(!script.contains("logicBranchFlag") && !script.contains("logicBranchValue"),
+                "老分支列已删除：页面若还读它们，保存时会把分支判定清空（等于每条分支都 fail-closed）");
+        assertTrue(script.contains("branchOps") && script.contains("JUDGE_BRANCH_OPS"),
+                "分支规格比 result_judge 多 strategy/judged，op 下拉要按字段放开");
+        assertTrue(script.contains("JUDGE_NO_PATH_OPS"),
+                "strategy/judged 没有 path：表单要禁用 path 输入，否则用户填了 path 后端直接判非法");
+        // 空规格对分支是非法（不是兜底）：提示文案必须与 result_judge 区分开
+        assertTrue(script.contains("emptyNote"),
+                "branch_judge 为空是 fail-closed，不能沿用 result_judge 的「未配置按 always 处理」");
+        assertTrue(script.contains("syncJudgeEditor('ed-resultJudge')")
+                        && script.contains("syncJudgeEditor('br-branchJudge')"),
+                "两个判定编辑器要各自同步（共用一套按 id 前缀取控件的实现）");
     }
 
     @Test

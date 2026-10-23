@@ -112,9 +112,11 @@ public class IfmapAdminAutoConfiguration {
                                                      JsonOps jsonOps,
                                                      StrategyHookRegistry strategyHooks,
                                                      ActionRegistry actions,
-                                                     AdminConfigRepository repository) {
+                                                     AdminConfigRepository repository,
+                                                     LogicBranchStrategyRegistry logicBranches) {
+        // logicBranches 只用于校验 branch_judge 里 strategy 算子的键是否已注册（写错不报错、只会永不命中）
         return new ConfigValidator(contractValidatorProvider.getIfAvailable(), jsonOps, strategyHooks,
-                actions, repository.get());
+                actions, repository.get(), logicBranches);
     }
 
     /** 全量巡检。 */

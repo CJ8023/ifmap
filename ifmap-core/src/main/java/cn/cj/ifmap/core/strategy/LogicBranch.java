@@ -22,7 +22,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * 声明逻辑分支策略的注册 key（对应 {@code logic_branch_flag}）。
+ * 声明逻辑分支策略的注册 key（对应 {@code branch_judge} 里 {@code strategy} 算子的 value）。
  *
  * @author caijun
  */
@@ -31,6 +31,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.TYPE)
 public @interface LogicBranch {
 
-    /** 注册 key（{@code logic_branch_flag}）。 */
+    /** 注册 key（{@code {"op":"strategy","value":"..."}} 里的 value）。 */
     String value();
 }

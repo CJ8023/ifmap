@@ -20,8 +20,11 @@ import cn.cj.ifmap.core.config.ConfigQuery;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.json.JsonOps;
+import cn.cj.ifmap.core.orchestrator.judgement.BranchJudgeSpec;
+import cn.cj.ifmap.core.orchestrator.judgement.JudgeOp;
 import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeSpec;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.template.DslExpressions;
 import cn.cj.ifmap.core.template.TemplateScanner;
@@ -46,8 +49,8 @@ import java.util.Set;
  *       <b>更早步骤</b>的接口号（T2，见 {@code checkPoolRefs}）；
  *       {@code pre_strategy_name} / {@code post_strategy_name} 必须在已注册的策略钩子里；</li>
  *   <li><b>结构约束</b>：{@code (tenant_id, interface_no)} 与 {@code (tenant_id, busi_node, interface_order)}
- *       两组唯一键都不能重复；分支的默认兜底 ≤ 1 条、{@code logic_branch_order} 不重复、
- *       {@code method_flag} 必须是已注册动作。</li>
+ *       两组唯一键都不能重复；分支的 {@code branch_judge} 必须合法、兜底（{@code {"op":"always"}}）≤ 1 条、
+ *       {@code logic_branch_order} 不重复、{@code method_flag} 必须是已注册动作。</li>
  *   <li><b>调用方向</b>：被调方向（{@code call_direction=INBOUND}）的执行路径与出网不同 ——
  *       不渲染请求模板、不跑前序策略、回参是对方原文，所以「配了但永不生效」和「跑完没输出」
  *       这两类必须在这里拦下（见 {@link #checkCallDirection}）。</li>
@@ -65,11 +68,17 @@ public class ConfigValidator {
     private final StrategyHookRegistry strategyHooks;
     private final ActionRegistry actions;
     private final JdbcConfigRepository repository;
+    private final LogicBranchStrategyRegistry logicBranches;
 
-    /** 依赖一次注入：契约校验器 + JSON 实现 + 各注册表（<b>只读</b>，仅用于判断名字是否存在）。 */
+    /**
+     * 依赖一次注入：契约校验器 + JSON 实现 + 各注册表（<b>只读</b>，仅用于判断名字是否存在）。
+     *
+     * @param logicBranches 分支策略注册表：只用于提示 {@code branch_judge} 里 {@code strategy} 算子的键
+     *                      是否已注册（写错的策略键在运行期不报错，只会让分支永远不命中）
+     */
     public ConfigValidator(ContractValidator contractValidator, JsonOps jsonOps,
                            StrategyHookRegistry strategyHooks, ActionRegistry actions,
-                           JdbcConfigRepository repository) {
+                           JdbcConfigRepository repository, LogicBranchStrategyRegistry logicBranches) {
         if (jsonOps == null) {
             throw new IllegalArgumentException("jsonOps 不能为空");
         }
@@ -81,6 +90,7 @@ public class ConfigValidator {
         this.strategyHooks = strategyHooks;
         this.actions = actions;
         this.repository = repository;
+        this.logicBranches = logicBranches;
     }
 
     /**
@@ -111,7 +121,13 @@ public class ConfigValidator {
         return result;
     }
 
-    /** 校验逻辑分支集合（默认兜底 ≤ 1、顺序唯一、动作已注册）。 */
+    /**
+     * 校验逻辑分支集合（规格合法、兜底 ≤ 1、顺序唯一、动作已注册）。
+     *
+     * <p>{@code branch_judge} 为空<b>不是</b>"没配判定"，而是<b>非法</b>：空规格在运行期是 fail-closed
+     * （{@code SPEC_INVALID}，该步直接失败），不会静默落到兜底分支。存量数据要按
+     * {@code docs/10-迁移指南.md §7} 回填 —— 所以这里按 error 报，并给出处置方式。</p>
+     */
     public ValidationResult validateBranches(String tenantId, String interfaceNo) {
         ValidationResult result = new ValidationResult();
         if (isBlank(interfaceNo)) {
@@ -121,24 +137,21 @@ public class ConfigValidator {
         if (rows.isEmpty()) {
             return result.warning("接口 " + interfaceNo + " 尚未配置逻辑分支");
         }
-        // 一趟扫完：兜底分支条数、顺序唯一、value 是否依赖 flag、动作是否已注册
-        int defaultCount = 0;
+        // 一趟扫完：兜底分支条数、顺序唯一、规格合法、动作是否已注册
+        int fallbackCount = 0;
         Set<Integer> orders = new LinkedHashSet<Integer>();
         for (LogicBranchConfig row : rows) {
-            if (isDefaultBranch(row)) {
-                defaultCount++;
+            if (checkBranchJudge(row, result, tenantId)) {
+                fallbackCount++;
             }
             if (!orders.add(row.getLogicBranchOrder())) {
                 result.error("分支顺序重复：logic_branch_order=" + row.getLogicBranchOrder()
                         + "（分支 " + row.getLogicBranchName() + "）");
             }
-            if (!isBlank(row.getLogicBranchValue()) && isBlank(row.getLogicBranchFlag())) {
-                result.error("分支 " + row.getLogicBranchName() + " 配了 logic_branch_value 却没有 logic_branch_flag");
-            }
             checkMethodFlag(row, result);
         }
-        if (defaultCount > 1) {
-            result.error("默认兜底分支最多 1 条（logic_branch_flag/value 均为空），当前 " + defaultCount + " 条");
+        if (fallbackCount > 1) {
+            result.error("兜底分支最多 1 条（branch_judge = {\"op\":\"always\"}），当前 " + fallbackCount + " 条");
         }
         return result;
     }
@@ -150,11 +163,9 @@ public class ConfigValidator {
             return result.error("分支不能为空");
         }
         required(result, "interfaceNo", branch.getInterfaceNo());
-        // method_flag 允许为空：默认兜底分支就是"flag/value 皆空、不需要动作"的那种
+        // method_flag 允许为空：命中该分支但不执行动作，是合法形态（"只占位"）
         required(result, "logicBranchName", branch.getLogicBranchName());
-        if (!isBlank(branch.getLogicBranchValue()) && isBlank(branch.getLogicBranchFlag())) {
-            result.error("配了 logic_branch_value 就必须配 logic_branch_flag");
-        }
+        boolean fallback = checkBranchJudge(branch, result, asTenantId(branch.getTenantId()));
         checkMethodFlag(branch, result);
         List<LogicBranchConfig> rows = repository.queryLogicBranches(
                 asTenantId(branch.getTenantId()), branch.getInterfaceNo(), false);
@@ -172,10 +183,10 @@ public class ConfigValidator {
                 result.error("已存在同名分支：(method_flag=" + branch.getMethodFlag()
                         + ", logic_branch_name=" + branch.getLogicBranchName() + ")");
             }
-            // 单条也会造成集合级违规：默认兜底分支全接口只能有 1 条（否则引擎取首个命中者，
+            // 单条也会造成集合级违规：兜底分支（always）全接口只能有 1 条（否则引擎取首个命中者，
             // 第二条永远不会生效，属于"配了但没用"的静默陷阱）
-            if (isDefaultBranch(branch) && isDefaultBranch(row)) {
-                result.error("默认兜底分支最多 1 条（logic_branch_flag/value 均为空），已存在："
+            if (fallback && BranchJudgeSpec.isAlways(row.getBranchJudge(), jsonOps)) {
+                result.error("兜底分支最多 1 条（branch_judge = {\"op\":\"always\"}），已存在："
                         + row.getLogicBranchName());
             }
         }
@@ -606,9 +617,86 @@ public class ConfigValidator {
         }
     }
 
-    /** 默认兜底分支的判据：flag 或 value 有一个为空（两者全空即「else 分支」）。 */
-    private static boolean isDefaultBranch(LogicBranchConfig row) {
-        return isBlank(row.getLogicBranchFlag()) || isBlank(row.getLogicBranchValue());
+    /**
+     * 校验一条分支的 {@code branch_judge}；返回<b>是否兜底分支</b>（{@code {"op":"always"}}）。
+     *
+     * <p>把"非法"和"兜底"分开报：非法规格返回 {@code false}（兜底计数不叠加），
+     * 否则一条坏配置可能顺带触发"兜底分支最多 1 条"，把用户引到错误的修复方向。</p>
+     */
+    private boolean checkBranchJudge(LogicBranchConfig row, ValidationResult result, String tenantId) {
+        String raw = row.getBranchJudge();
+        String name = row.getLogicBranchName();
+        if (isBlank(raw)) {
+            result.error("分支 " + name + " 未配置 branch_judge：兜底分支要显式写 {\"op\":\"always\"}；"
+                    + "存量数据请按 docs/10-迁移指南.md §7 回填（空规格在运行期是 fail-closed，不是兜底）");
+            return false;
+        }
+        List<String> errors = BranchJudgeSpec.errorsOf(raw, jsonOps);
+        if (!errors.isEmpty()) {
+            for (String error : errors) {
+                result.error("分支 " + name + " 的 branch_judge 非法：" + error);
+            }
+            return false;
+        }
+        if (BranchJudgeSpec.isAlways(raw, jsonOps)) {
+            return true;
+        }
+        checkStrategyKeys(name, BranchJudgeSpec.strategyKeys(raw, jsonOps), result);
+        if (BranchJudgeSpec.usesOp(raw, jsonOps, JudgeOp.JUDGED)) {
+            checkJudgedAgainstResultJudge(name, tenantId, row.getInterfaceNo(), result);
+        }
+        return false;
+    }
+
+    /** {@code strategy} 算子的键必须在注册表里：写错的键不会报错，只会让分支永不命中。 */
+    private void checkStrategyKeys(String name, Set<String> keys, ValidationResult result) {
+        if (keys.isEmpty()) {
+            return;
+        }
+        if (logicBranches == null || logicBranches.size() == 0) {
+            result.warning("尚未注册任何分支策略（@LogicBranch），strategy 算子无法校验：" + keys
+                    + "（分支 " + name + "）");
+            return;
+        }
+        for (String key : keys) {
+            if (!logicBranches.keys().contains(key)) {
+                result.warning("strategy 算子引用了未注册的策略键：" + key + "（分支 " + name
+                        + "，已注册：" + logicBranches.keys() + "）");
+            }
+        }
+    }
+
+    /**
+     * {@code judged} 算子比的是结果判定的 {@code actualValue}：接口的 {@code result_judge} 若是
+     * {@code always}，判定短路、{@code actualValue} 恒为 null ⇒ 这条条件<b>永不成立</b>。
+     *
+     * <p>这是"配了但没用"的静默陷阱（用户以为"值为 X 时走这条分支"，实际永远走不到），所以按 error 拦。
+     * 同一接口在多个业务节点都配了时，全部为 {@code always} 才算"永不成立"。</p>
+     */
+    private void checkJudgedAgainstResultJudge(String name, String tenantId, String interfaceNo,
+                                               ValidationResult result) {
+        if (judgedValueIsAlwaysNull(tenantId, interfaceNo)) {
+            result.error("分支 " + name + " 用了 judged 算子，但接口 " + interfaceNo
+                    + " 的 result_judge 是 always（不产生判定值）⇒ 该条件永不成立。"
+                    + "要么给接口配真实的结果判定，要么改用 path 算子");
+        }
+    }
+
+    /** 该接口在<b>所有</b>业务节点上的 {@code result_judge} 都是 always（或压根没配）。 */
+    private boolean judgedValueIsAlwaysNull(String tenantId, String interfaceNo) {
+        if (isBlank(interfaceNo)) {
+            return false;
+        }
+        List<IfmapConfig> configs = repository.queryConfigsByInterface(tenantId, interfaceNo);
+        if (configs.isEmpty()) {
+            return false;
+        }
+        for (IfmapConfig config : configs) {
+            if (!judgeIsAlways(config)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 必填校验：空白串等同没填（与 {@link #isBlank} 同口径）。 */

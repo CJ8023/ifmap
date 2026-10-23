@@ -129,15 +129,15 @@ final class AdminTestSupport {
         return config;
     }
 
+    /** 一条分支：{@code branchJudge} 是规格原文（兜底写 {@code {"op":"always"}}）。 */
     static LogicBranchConfig branch(String interfaceNo, String methodFlag, String name,
-                                    String flag, String value, int order) {
+                                    String branchJudge, int order) {
         LogicBranchConfig branch = new LogicBranchConfig();
         branch.setTenantId(1L);
         branch.setInterfaceNo(interfaceNo);
         branch.setMethodFlag(methodFlag);
         branch.setLogicBranchName(name);
-        branch.setLogicBranchFlag(flag);
-        branch.setLogicBranchValue(value);
+        branch.setBranchJudge(branchJudge);
         branch.setLogicBranchOrder(order);
         branch.setRemark("单测");
         return branch;

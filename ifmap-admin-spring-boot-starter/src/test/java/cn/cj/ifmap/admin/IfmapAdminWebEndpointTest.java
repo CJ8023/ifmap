@@ -217,8 +217,7 @@ class IfmapAdminWebEndpointTest {
         branch.put("interfaceNo", "WEB_IF_DR");
         branch.put("methodFlag", "submit");
         branch.put("logicBranchName", "命中提交");
-        branch.put("logicBranchFlag", "loanResult");
-        branch.put("logicBranchValue", "0000");
+        branch.put("branchJudge", "{\"all\":[{\"op\":\"judged\",\"value\":[\"0000\"]}]}");
         branch.put("logicBranchOrder", 1);
         ResponseEntity<Map<String, Object>> branchCreated = rest.exchange(BASE + "/branches", HttpMethod.POST,
                 new HttpEntity<Map<String, Object>>(branch, headers()),
@@ -244,8 +243,8 @@ class IfmapAdminWebEndpointTest {
                 });
         assertEquals(HttpStatus.OK, result.getStatusCode(), String.valueOf(result.getBody()));
         assertEquals(Boolean.TRUE, result.getBody().get("success"), String.valueOf(result.getBody()));
-        // matchedBranch 承载的是 logic_branch_flag（引擎侧语义），不是 logic_branch_name
-        assertEquals("loanResult", result.getBody().get("matchedBranch"), String.valueOf(result.getBody()));
+        // matchedBranch 承载的是 logic_branch_name（D12：分支标识就是分支名，不再回传 flag 那个内部串）
+        assertEquals("命中提交", result.getBody().get("matchedBranch"), String.valueOf(result.getBody()));
     }
 
     @Test

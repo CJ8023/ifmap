@@ -202,13 +202,24 @@
   /** 条件算子（顺序与后端 {@code JudgeOp} 一致；只有 always 走「不判定」单选项）。 */
   var JUDGE_OPS = ['eq', 'ne', 'in', 'notIn', 'exists', 'notBlank', 'regex'];
 
-  /** value 是**标量数组**的算子。 */
-  var JUDGE_LIST_OPS = { in: true, notIn: true };
+  /** 分支专用算子：无 path（读策略注册表 / 判定值），只有 branch_judge 允许。 */
+  var JUDGE_BRANCH_OPS = ['strategy', 'judged'];
+
+  /** 没有 path 的算子（带了 path 后端判非法，所以表单也不让填）。 */
+  var JUDGE_NO_PATH_OPS = { strategy: true, judged: true };
+
+  /** value 是**标量数组**的算子（judged 也是"归属"语义，与 in 同形）。 */
+  var JUDGE_LIST_OPS = { in: true, notIn: true, judged: true };
 
   /** 不需要 value 的算子（存在性 / 非空）。 */
   var JUDGE_NO_VALUE_OPS = { exists: true, notBlank: true };
 
-  var JUDGE_ALWAYS = '{\"op\":\"always\"}';
+  var JUDGE_ALWAYS = '{"op":"always"}';
+
+  /** 该字段允许的算子集：分支判定比结果判定多 strategy / judged。 */
+  function judgeOpsFor(spec) {
+    return spec && spec.branchOps ? JUDGE_OPS.concat(JUDGE_BRANCH_OPS) : JUDGE_OPS;
+  }
 
   /**
    * 把规格文本拆成「三选一」的表单状态。
@@ -218,10 +229,12 @@
    * 一律落到 {@code raw} 模式 —— 即「非法态提示」：原样给出 JSON，让人看见它不再是简单形态，
    * 而不是悄悄丢掉条件（静默丢条件 = 判定变宽，最难查的一类事故）。</p>
    */
-  function judgeSpecParts(raw) {
+  function judgeSpecParts(raw, spec) {
     var value = text(raw).trim();
+    var ops = judgeOpsFor(spec);
     if (value === '') {
-      return { mode: 'always', condition: null, note: '未配置时按 always 处理（保存前请显式确认）' };
+      return { mode: 'always', condition: null,
+        note: spec && spec.emptyNote ? spec.emptyNote : '未配置时按 always 处理（保存前请显式确认）' };
     }
     var parsed;
     try {
@@ -237,8 +250,10 @@
     }
     if (Array.isArray(parsed.all) && parsed.all.length === 1) {
       var condition = parsed.all[0];
-      if (condition && typeof condition === 'object' && typeof condition.path === 'string'
-        && JUDGE_OPS.indexOf(condition.op) >= 0 && !condition.all && !condition.any) {
+      var pathOk = condition && typeof condition === 'object' && JUDGE_NO_PATH_OPS[condition.op]
+        ? condition.path === undefined
+        : !!(condition && typeof condition.path === 'string');
+      if (pathOk && ops.indexOf(condition.op) >= 0 && !condition.all && !condition.any) {
         return { mode: 'condition', condition: condition, note: '' };
       }
     }
@@ -250,17 +265,19 @@
     };
   }
 
-  function judgeOpOptions(current) {
-    return JUDGE_OPS.map(function (op) {
+  function judgeOpOptions(current, ops) {
+    return ops.map(function (op) {
       return '<option value="' + op + '"' + (op === current ? ' selected' : '') + '>' + op + '</option>';
     }).join('');
   }
 
+  /** 判定编辑器（{@code type:'judge'}）：{@code prefix + spec.name} 就是这一组的 id 前缀。 */
   function judgeFieldHtml(prefix, spec, value) {
     var id = prefix + spec.name;
-    var parts = judgeSpecParts(value);
+    var parts = judgeSpecParts(value, spec);
+    var ops = judgeOpsFor(spec);
     var condition = parts.condition || {};
-    var op = JUDGE_OPS.indexOf(condition.op) >= 0 ? condition.op : 'eq';
+    var op = ops.indexOf(condition.op) >= 0 ? condition.op : 'eq';
     var valueText = '';
     if (Object.prototype.hasOwnProperty.call(condition, 'value')) {
       valueText = Array.isArray(condition.value) ? condition.value.join(', ') : String(condition.value);
@@ -272,46 +289,51 @@
     };
     var hidden = parts.mode === 'condition' ? '' : ' style="display:none"';
     var rawHidden = parts.mode === 'raw' ? '' : ' style="display:none"';
+    var note = spec.judgeNote || ('单列取代 result_flag + success_value：不需要判断结果就选「不判定」，' +
+      '但那条接口从此只看通道是否通');
     return '<div class="block judge-editor">' +
       '<span class="field-label">' + esc(spec.label) + '</span>' +
-      '<span class="muted">单列取代 result_flag + success_value：不需要判断结果就选「不判定」，' +
-      '但那条接口从此只看通道是否通</span>' +
+      '<span class="muted">' + esc(note) + '</span>' +
       '<div class="judge-modes">' +
-      radio('always', '不判定', '{"op":"always"}') +
+      radio('always', spec.alwaysLabel || '不判定', judgeAlwaysHint(spec)) +
       radio('condition', '单条件', 'path + op + value') +
       radio('raw', '原始 JSON', '复杂组合') +
       '</div>' +
-      '<div id="ed-judge-condition"' + hidden + '>' +
-      '<input id="ed-judge-path" data-field="judgePath" placeholder="$.code" value="' +
+      '<div id="' + id + '-condition"' + hidden + '>' +
+      '<input id="' + id + '-path" data-field="judgePath" placeholder="$.code" value="' +
       esc(condition.path || '') + '">' +
-      '<select id="ed-judge-op" data-field="judgeOp">' + judgeOpOptions(op) + '</select>' +
-      '<input id="ed-judge-value" data-field="judgeValue" placeholder="值（in/notIn 用英文逗号分隔）" value="' +
+      '<select id="' + id + '-op" data-field="judgeOp">' + judgeOpOptions(op, ops) + '</select>' +
+      '<input id="' + id + '-value" data-field="judgeValue" placeholder="值（in/notIn/judged 用英文逗号分隔）" value="' +
       esc(valueText) + '">' +
-      '<label class="inline"><input type="checkbox" id="ed-judge-ignoreCase"' +
+      '<label class="inline"><input type="checkbox" id="' + id + '-ignoreCase"' +
       (condition.ignoreCase ? ' checked' : '') + '> 忽略大小写</label>' +
       '</div>' +
-      '<textarea id="ed-judge-raw" rows="3" spellcheck="false"' + rawHidden + '>' + esc(text(value)) +
+      '<textarea id="' + id + '-raw" rows="3" spellcheck="false"' + rawHidden + '>' + esc(text(value)) +
       '</textarea>' +
-      '<span class="muted" id="ed-judge-hint">' + esc(parts.note) + '</span>' +
+      '<span class="muted" id="' + id + '-hint">' + esc(parts.note) + '</span>' +
       '</div>';
   }
 
-  /** 读取判定形态（三个单选项之一）。 */
-  function judgeMode() {
-    var node = document.querySelector('input[name="ed-resultJudge-mode"]:checked');
+  function judgeAlwaysHint(spec) {
+    return spec && spec.branchOps ? '兜底：本条永远命中' : '{"op":"always"}';
+  }
+
+  /** 读取判定形态（三个单选项之一）；{@code base} 是编辑器 id 前缀（如 {@code ed-resultJudge}）。 */
+  function judgeMode(base) {
+    var node = document.querySelector('input[name="' + base + '-mode"]:checked');
     return node ? node.value : 'always';
   }
 
   /** 判定提示：按 op 说明 value 该填什么（表单不替人猜语义）。 */
-  function judgeHint() {
-    var mode = judgeMode();
+  function judgeHint(base) {
+    var mode = judgeMode(base);
     if (mode === 'always') {
       return '不判定：任何响应都按成功处理（只受通道 / HTTP 状态约束）';
     }
     if (mode === 'raw') {
       return '原始 JSON 直接提交，保存前由服务端校验（非法会 422）';
     }
-    var opNode = el('ed-judge-op');
+    var opNode = el(base + '-op');
     var op = opNode ? opNode.value : 'eq';
     if (JUDGE_NO_VALUE_OPS[op]) {
       return 'op=' + op + ' 不需要 value';
@@ -322,12 +344,15 @@
     return 'op=' + op + ' 需要一个非空 value';
   }
 
-  /** 切换形态 / 改 op 时同步可见区与提示。 */
-  function syncJudgeEditor() {
-    var mode = judgeMode();
-    var condition = el('ed-judge-condition');
-    var raw = el('ed-judge-raw');
-    var hint = el('ed-judge-hint');
+  /** 切换形态 / 改 op 时同步可见区与提示（两个编辑器各调各的：{@code ed-resultJudge} / {@code br-branchJudge}）。 */
+  function syncJudgeEditor(base) {
+    if (!base || !el(base + '-op')) {
+      return;
+    }
+    var mode = judgeMode(base);
+    var condition = el(base + '-condition');
+    var raw = el(base + '-raw');
+    var hint = el(base + '-hint');
     if (condition) {
       condition.style.display = mode === 'condition' ? '' : 'none';
     }
@@ -335,35 +360,61 @@
       raw.style.display = mode === 'raw' ? '' : 'none';
     }
     if (hint) {
-      hint.textContent = judgeHint();
+      hint.textContent = judgeHint(base);
     }
-    if (mode === 'condition' && el('ed-judge-op')) {
-      var op = el('ed-judge-op').value;
-      var value = el('ed-judge-value');
-      if (value) {
-        value.disabled = !!JUDGE_NO_VALUE_OPS[op];
-        if (value.disabled) {
-          value.value = '';
-        }
-        value.placeholder = JUDGE_LIST_OPS[op] ? '多个值用英文逗号分隔' : '值';
+    if (mode !== 'condition') {
+      return;
+    }
+    var op = el(base + '-op').value;
+    var path = el(base + '-path');
+    if (path) {
+      // strategy / judged 读的不是报文，带 path 后端直接判非法 ⇒ 这里禁用并清空
+      path.disabled = !!JUDGE_NO_PATH_OPS[op];
+      if (path.disabled) {
+        path.value = '';
       }
+    }
+    var value = el(base + '-value');
+    if (value) {
+      value.disabled = !!JUDGE_NO_VALUE_OPS[op];
+      if (value.disabled) {
+        value.value = '';
+      }
+      value.placeholder = JUDGE_LIST_OPS[op] ? '多个值用英文逗号分隔' : '值';
     }
   }
 
+  /** 从事件目标反推编辑器前缀（{@code <base>-mode} 单选项 / {@code <base>-op} 下拉）。 */
+  function judgeBaseOf(target) {
+    if (!target) {
+      return null;
+    }
+    if (target.name && /-mode$/.test(target.name)) {
+      return target.name.slice(0, -'-mode'.length);
+    }
+    if (target.id && /-op$/.test(target.id)) {
+      return target.id.slice(0, -'-op'.length);
+    }
+    return null;
+  }
+
   /** 收集判定规格文本（保存/校验前调用，覆盖 readFields 里的空位）。 */
-  function readJudgeSpec() {
-    var mode = judgeMode();
+  function readJudgeSpec(base) {
+    var mode = judgeMode(base);
     if (mode === 'always') {
       return JUDGE_ALWAYS;
     }
     if (mode === 'raw') {
-      return el('ed-judge-raw') ? el('ed-judge-raw').value.trim() : '';
+      return el(base + '-raw') ? el(base + '-raw').value.trim() : '';
     }
-    var path = el('ed-judge-path') ? el('ed-judge-path').value.trim() : '';
-    var op = el('ed-judge-op') ? el('ed-judge-op').value : 'eq';
-    var condition = { path: path, op: op };
+    var op = el(base + '-op') ? el(base + '-op').value : 'eq';
+    var condition = {};
+    if (!JUDGE_NO_PATH_OPS[op]) {
+      condition.path = el(base + '-path') ? el(base + '-path').value.trim() : '';
+    }
+    condition.op = op;
     if (!JUDGE_NO_VALUE_OPS[op]) {
-      var raw = el('ed-judge-value') ? el('ed-judge-value').value : '';
+      var raw = el(base + '-value') ? el(base + '-value').value : '';
       if (JUDGE_LIST_OPS[op]) {
         condition.value = raw.split(',').map(function (item) {
           return item.trim();
@@ -374,7 +425,7 @@
         condition.value = raw;
       }
     }
-    if (el('ed-judge-ignoreCase') && el('ed-judge-ignoreCase').checked) {
+    if (el(base + '-ignoreCase') && el(base + '-ignoreCase').checked) {
       condition.ignoreCase = true;
     }
     return json({ all: [condition] });
@@ -485,8 +536,12 @@
     { name: 'interfaceNo', label: '接口编号' },
     { name: 'methodFlag', label: '动作 method_flag', dict: '#actions', hint: '空 = 不执行动作' },
     { name: 'logicBranchName', label: '分支名称' },
-    { name: 'logicBranchFlag', label: '分支标识 logic_branch_flag', hint: '空 = 兜底分支' },
-    { name: 'logicBranchValue', label: '分支取值 logic_branch_value' },
+    // 与 result_judge 同一套规格 DSL：兜底分支必须显式写 {"op":"always"}，空 = 非法（运行期 fail-closed）
+    { name: 'branchJudge', label: '分支判定 branch_judge', type: 'judge', branchOps: true,
+      alwaysLabel: '兜底',
+      judgeNote: '与 result_judge 同一套规格：兜底分支必须显式选「兜底」（{\"op\":\"always\"}）；' +
+        '空 = 非法（运行期 fail-closed）；另支持 strategy / judged 两个算子',
+      emptyNote: '未配置 = 非法：兜底分支必须显式写 {"op":"always"}' },
     { name: 'logicBranchOrder', label: '分支顺序', type: 'number' },
     { name: 'remark', label: '备注' }
   ];
@@ -594,7 +649,7 @@
       var value = config ? config[spec.name] : NEW_CONFIG_DEFAULTS[spec.name];
       return fieldHtml('ed-', spec, value === undefined ? '' : value);
     }).join(''));
-    syncJudgeEditor();
+    syncJudgeEditor('ed-resultJudge');
     setHtml('editor-messages', '');
     setHtml('history-box', '');
     if (el('editor-reason')) {
@@ -605,7 +660,7 @@
   function currentConfigPayload() {
     var config = readFields('ed-', CONFIG_FIELDS);
     // resultJudge 由判定编辑器拼出来（readFields 读不到它：没有 ed-resultJudge 文本输入框）
-    config.resultJudge = readJudgeSpec();
+    config.resultJudge = readJudgeSpec('ed-resultJudge');
     if (state.current && state.current.keyId) {
       config.keyId = state.current.keyId;
     }
@@ -815,14 +870,13 @@
           '<td>' + esc(branch.interfaceNo) + '</td>' +
           '<td>' + esc(branch.methodFlag) + '</td>' +
           '<td>' + esc(branch.logicBranchName) + '</td>' +
-          '<td>' + (text(branch.logicBranchFlag) === '' ? '<span class="muted">(兜底)</span>' : esc(branch.logicBranchFlag)) + '</td>' +
-          '<td>' + esc(branch.logicBranchValue) + '</td>' +
+          '<td>' + (text(branch.branchJudge) === '' ? '<span class="muted">(未配置)</span>' : esc(branch.branchJudge)) + '</td>' +
           '<td>' + esc(branch.logicBranchOrder) + '</td>' +
           '<td><button type="button" class="mini danger" data-act="delete-branch" data-branch-id="' +
           esc(branch.keyId) + '">删除</button></td></tr>';
       });
       setHtml('branch-list', table(
-        ['keyId', '租户', '接口编号', '动作', '分支名称', '分支标识', '取值', '顺序', ''], rows));
+        ['keyId', '租户', '接口编号', '动作', '分支名称', '判定 branch_judge', '顺序', ''], rows));
       return list;
     }).catch(fail);
   }
@@ -841,6 +895,7 @@
       var value = branch ? branch[spec.name] : '';
       return fieldHtml('br-', spec, value === undefined ? '' : value);
     }).join(''));
+    syncJudgeEditor('br-branchJudge');
     setHtml('branch-messages', '');
     if (el('branch-reason')) {
       el('branch-reason').value = '';
@@ -849,6 +904,8 @@
 
   function saveBranch() {
     var branch = readFields('br-', BRANCH_FIELDS);
+    // branchJudge 由判定编辑器拼出来（readFields 读不到它：没有 br-branchJudge 文本输入框）
+    branch.branchJudge = readJudgeSpec('br-branchJudge');
     var body = { branch: branch, reason: el('branch-reason') ? el('branch-reason').value.trim() : '' };
     var promise;
     if (state.branchCurrent && state.branchCurrent.keyId) {
@@ -1065,8 +1122,9 @@
         if (!target) {
           return;
         }
-        if (target.name === 'ed-resultJudge-mode' || target.id === 'ed-judge-op') {
-          syncJudgeEditor();
+        var judgeBase = judgeBaseOf(target);
+        if (judgeBase) {
+          syncJudgeEditor(judgeBase);
         }
       });
     }

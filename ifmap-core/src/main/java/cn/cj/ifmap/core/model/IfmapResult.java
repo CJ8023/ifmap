@@ -86,7 +86,7 @@ public final class IfmapResult {
         return executedInterfaces;
     }
 
-    /** 命中的逻辑分支（{@code logic_branch_flag}），未命中为 null。 */
+    /** 命中的逻辑分支名（{@code logic_branch_name}），未命中为 null。 */
     public String getMatchedBranch() {
         return matchedBranch;
     }

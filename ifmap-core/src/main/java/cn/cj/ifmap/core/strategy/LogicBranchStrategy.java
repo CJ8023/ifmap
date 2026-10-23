@@ -18,7 +18,8 @@ package cn.cj.ifmap.core.strategy;
 /**
  * 逻辑分支判断策略（对应存量 12 个 {@code *LogicBranchStrategyImpl}）。
  *
- * <p>按 {@code @LogicBranch("值")} 注册，注解值对应 {@code ifmap_logic_branch_config.logic_branch_flag}。
+ * <p>按 {@code @LogicBranch("值")} 注册，注解值就是 {@code branch_judge} 里
+ * {@code {"op":"strategy","value":"值"}} 的取值（同一份规格里也能与 path 条件任意组合）。
  * 分支命中后<b>动作</b>由 {@link ActionRegistry} 按
  * {@code method_flag} → Action 映射执行（取代存量的"反射方法名"，见 TS-6）。</p>
  *

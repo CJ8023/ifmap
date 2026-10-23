@@ -16,6 +16,7 @@
 package cn.cj.ifmap.admin;
 
 import cn.cj.ifmap.core.strategy.ActionRegistry;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
@@ -59,7 +60,7 @@ class ConfigAuditorTest {
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction());
         ConfigValidator validator = new ConfigValidator(null, jsonOps, new StrategyHookRegistry(),
-                actions, repository);
+                actions, repository, new LogicBranchStrategyRegistry());
         auditor = new ConfigAuditor(repository, validator, 100);
     }
 
@@ -85,8 +86,10 @@ class ConfigAuditorTest {
         jdbc.update("UPDATE `" + configTable + "` SET `request_param_template` = ? WHERE `interface_no` = ?",
                 "{bad-json", "IF_BAD");
 
-        writer.insert(AdminTestSupport.branch("IF_BAD", "submit", "重复1", "f", "v", 1));
-        writer.insert(AdminTestSupport.branch("IF_BAD", "submit", "重复2", "f", "v", 1));
+        // 同顺序 + 同方法名 = 集合级冲突（两条都写进库，模拟历史脏数据）
+        String spec = "{\"all\":[{\"path\":\"$.code\",\"op\":\"eq\",\"value\":\"0000\"}]}";
+        writer.insert(AdminTestSupport.branch("IF_BAD", "submit", "重复1", spec, 1));
+        writer.insert(AdminTestSupport.branch("IF_BAD", "submit", "重复2", spec, 1));
 
         AuditReport report = auditor.audit(null, null);
         assertFalse(report.isClean());
@@ -105,7 +108,7 @@ class ConfigAuditorTest {
         writer.insert(AdminTestSupport.config("IF_2", "apply", 2));
         ConfigAuditor small = new ConfigAuditor(db.repository(),
                 new ConfigValidator(null, new JacksonJsonOps(), new StrategyHookRegistry(),
-                        new ActionRegistry(), db.repository()), 1);
+                        new ActionRegistry(), db.repository(), new LogicBranchStrategyRegistry()), 1);
         AuditReport report = small.audit(null, null);
         assertTrue(report.isTruncated());
         assertEquals(1, report.getConfigCount());

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -294,6 +295,25 @@ public final class ResultJudgeSpec {
     }
 
     /** 原始规格文本。 */
+    /**
+     * 规格里用到的策略键（{@code strategy} 算子的 value），用于保存期提示"策略未注册"。
+     *
+     * <p>走已编译的树，不重新解析文本 —— 否则就是第二个解析器，两套口径迟早分叉。
+     * 非分支规格（{@code result_judge}）恒为空集。</p>
+     */
+    public Set<String> strategyKeys() {
+        Set<String> keys = new LinkedHashSet<String>();
+        root.collectStrategyKeys(keys);
+        return keys;
+    }
+
+    /** 规格里用到的算子（含分支专用算子）；管理端据此判断"某条件是否永不成立"。 */
+    public Set<JudgeOp> ops() {
+        Set<JudgeOp> ops = EnumSet.noneOf(JudgeOp.class);
+        root.collectOps(ops);
+        return ops;
+    }
+
     public String getRaw() {
         return raw;
     }
@@ -357,8 +377,8 @@ public final class ResultJudgeSpec {
         /**
          * 记录一次条件求值。
          *
-         * <p><b>命中也要记</b>：判定成功时的 {@code actual_value} 是分支匹配
-         * （{@code logic_branch_value}）和日志的唯一依据，成功却不记就等于丢了这个值。</p>
+         * <p><b>命中也要记</b>：判定成功时的 {@code actual_value} 是分支规格里
+         * {@code judged} 算子和执行日志的唯一依据，成功却不记就等于丢了这个值。</p>
          */
         // 只记第一条失败信息（后面全失败也没意义）、第一条命中值（成功时它就是 actual_value）
         private void record(JudgeCondition condition, boolean present, String actualValue, boolean hit) {
@@ -380,6 +400,14 @@ public final class ResultJudgeSpec {
         abstract boolean matches(JsonReadContext ctx, BranchInputs inputs, Evaluation evaluation);
 
         abstract String describe();
+
+        /** 收集 {@code strategy} 算子的策略键（默认无）。 */
+        void collectStrategyKeys(Set<String> keys) {
+        }
+
+        /** 收集本子树用到的算子（默认无）。 */
+        void collectOps(Set<JudgeOp> ops) {
+        }
     }
 
     private static final class AlwaysNode extends Node {
@@ -416,6 +444,20 @@ public final class ResultJudgeSpec {
                 }
             }
             return !any;
+        }
+
+        @Override
+        void collectStrategyKeys(Set<String> keys) {
+            for (Node child : children) {
+                child.collectStrategyKeys(keys);
+            }
+        }
+
+        @Override
+        void collectOps(Set<JudgeOp> ops) {
+            for (Node child : children) {
+                child.collectOps(ops);
+            }
         }
 
         @Override
@@ -473,6 +515,18 @@ public final class ResultJudgeSpec {
         private boolean readWithoutLeafPadding(JsonReadContext ctx, String path) {
             Object value = ctx.read(path, false);
             return value != null;
+        }
+
+        @Override
+        void collectOps(Set<JudgeOp> ops) {
+            ops.add(condition.getOp());
+        }
+
+        @Override
+        void collectStrategyKeys(Set<String> keys) {
+            if (condition.getOp() == JudgeOp.STRATEGY && condition.getValue() != null) {
+                keys.add(condition.getValue());
+            }
         }
 
         @Override

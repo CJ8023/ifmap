@@ -191,7 +191,7 @@ class IfmapSchemaInitializerTest {
     }
 
     @Test
-    @DisplayName("四张表列数与 W2 口径一致（28 / 17 / 17 / 11）")
+    @DisplayName("四张表列数与 W2 口径一致（29 / 18 / 21 / 11）")
     void columnCountsMatch() {
         final String caseName = "ifmap_ddl_columns";
         javax.sql.DataSource dataSource = TestDatabases.fresh(caseName).dataSource();
@@ -202,7 +202,10 @@ class IfmapSchemaInitializerTest {
 
         // config：+result_judge/judge_name，−result_flag/success_value，再 +call_direction（007）
         assertEquals(29, columnsOf(jdbc, prefix + "config"));
-        assertEquals(17, columnsOf(jdbc, prefix + "logic_branch_config"));
+        // logic_branch_config：002 的 17 列 + 008 的 branch_judge = 18。010（删旧两列）刻意<b>不</b>进自动 DDL：
+        // 复用存量表（库里有 bankint_* 老表）时把旧列删掉不可回退，所以这一步留给迁移 kit 手工执行。
+        // 目标结构（16 列）由 ifmap-provider-jdbc 的 LogicBranchSchemaTest 按 PRODUCTION_DDL 校验。
+        assertEquals(18, columnsOf(jdbc, prefix + "logic_branch_config"));
         // execution_log 新增 4 列：http_status / fail_type / error_code / track_id
         assertEquals(21, columnsOf(jdbc, prefix + "execution_log"));
         assertEquals(11, columnsOf(jdbc, prefix + "config_history"));
@@ -224,6 +227,7 @@ class IfmapSchemaInitializerTest {
         assertFalse(columnNames(jdbc, prefix + "config").contains("success_value"), "005 未删掉旧列");
         assertTrue(columnNames(jdbc, prefix + "execution_log").containsAll(
                 java.util.Arrays.asList("http_status", "fail_type", "error_code", "track_id")), "006 未生效");
+        assertTrue(columnNames(jdbc, prefix + "logic_branch_config").contains("branch_judge"), "008 未生效");
     }
 
     @Test

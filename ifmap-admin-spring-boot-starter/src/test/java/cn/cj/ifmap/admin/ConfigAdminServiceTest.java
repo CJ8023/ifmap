@@ -29,6 +29,7 @@ import cn.cj.ifmap.core.model.IfmapResult;
 import cn.cj.ifmap.core.orchestrator.IfmapOrchestrator;
 import cn.cj.ifmap.core.spi.PartnerServiceGateway;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
@@ -95,7 +96,8 @@ class ConfigAdminServiceTest {
         actions.register(new SubmitAction());
         ConfigValidator validator = new ConfigValidator(
                 new ContractValidator(IfmapEngine.builder().jsonOps(jsonOps).build()),
-                jsonOps, new StrategyHookRegistry(), actions, repository);
+                jsonOps, new StrategyHookRegistry(), actions, repository,
+                new LogicBranchStrategyRegistry());
 
         IfmapAdminProperties properties = new IfmapAdminProperties();
         service = new ConfigAdminService(writer, repository, historyRepository, AdminTestSupport.snapshots(),
@@ -259,17 +261,18 @@ class ConfigAdminServiceTest {
     @DisplayName("分支：新增/修改/删除 + 唯一键冲突翻译成业务异常")
     void branchLifecycle() {
         service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
-        long branchId = service.createBranch(AdminTestSupport.branch("IF_A", "submit", "命中", "loanResult", "0000", 1),
-                OPERATOR);
+        long branchId = service.createBranch(AdminTestSupport.branch("IF_A", "submit", "命中",
+                judgedSpec("0000"), 1), OPERATOR);
         assertEquals(1, service.branches("1", "IF_A", false).size());
 
         LogicBranchConfig branch = service.branches("1", "IF_A", false).get(0);
-        branch.setLogicBranchValue("0001");
+        branch.setBranchJudge(judgedSpec("0001"));
         assertTrue(service.updateBranch(branch, OPERATOR));
-        assertEquals("0001", service.branches("1", "IF_A", false).get(0).getLogicBranchValue());
+        assertEquals(judgedSpec("0001"), service.branches("1", "IF_A", false).get(0).getBranchJudge());
 
         IfmapConfigException duplicate = assertThrows(IfmapConfigException.class,
-                () -> service.createBranch(AdminTestSupport.branch("IF_A", "submit", "命中", "f", "v", 1), OPERATOR));
+                () -> service.createBranch(AdminTestSupport.branch("IF_A", "submit", "命中",
+                        judgedSpec("0002"), 1), OPERATOR));
         assertTrue(duplicate.getMessage().contains("已存在"), duplicate.getMessage());
 
         assertTrue(service.deleteBranch(branchId, OPERATOR));
@@ -282,10 +285,21 @@ class ConfigAdminServiceTest {
     @DisplayName("分支集合问题：新增第二条默认兜底分支 → 校验拦住")
     void branchSetValidation() {
         service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
-        long first = service.createBranch(AdminTestSupport.branch("IF_A", "submit", "默认", "", "", 1), OPERATOR);
+        long first = service.createBranch(AdminTestSupport.branch("IF_A", "submit", "兜底",
+                "{\"op\":\"always\"}", 1), OPERATOR);
         assertTrue(first > 0, "新增分支应返回主键");
         assertThrows(IfmapValidationException.class,
-                () -> service.createBranch(AdminTestSupport.branch("IF_A", "submit", "默认2", "", "", 2), OPERATOR));
+                () -> service.createBranch(AdminTestSupport.branch("IF_A", "submit", "兜底2",
+                        "{\"op\":\"always\"}", 2), OPERATOR));
+    }
+
+    @Test
+    @DisplayName("空 branch_judge 保存被拒：空规格是 fail-closed，不是兜底")
+    void emptyBranchJudgeIsRejected() {
+        service.create(AdminTestSupport.config("IF_A", "apply", 1), null, OPERATOR, REQ);
+        IfmapValidationException error = assertThrows(IfmapValidationException.class,
+                () -> service.createBranch(AdminTestSupport.branch("IF_A", "submit", "空", "", 1), OPERATOR));
+        assertTrue(String.valueOf(error.getMessage()).contains("branch_judge"), error.getMessage());
     }
 
     @Test
@@ -322,7 +336,8 @@ class ConfigAdminServiceTest {
     void dryRunWithoutOrchestrator() {
         IfmapAdminProperties properties = new IfmapAdminProperties();
         ConfigValidator validator = new ConfigValidator(null, new JacksonJsonOps(),
-                new StrategyHookRegistry(), new ActionRegistry(), repository);
+                new StrategyHookRegistry(), new ActionRegistry(), repository,
+                new LogicBranchStrategyRegistry());
         ConfigAdminService noOrchestrator = new ConfigAdminService(writer, repository, historyRepository,
                 AdminTestSupport.snapshots(), validator, new ConfigAuditor(repository, validator, 100),
                 provider(null), provider(null), properties);
@@ -389,6 +404,11 @@ class ConfigAdminServiceTest {
                 return instance;
             }
         };
+    }
+
+    /** judged 规格：与 result_judge 的判定值做归属比对（旧 logic_branch_value 的确切语义）。 */
+    static String judgedSpec(String value) {
+        return "{\"all\":[{\"op\":\"judged\",\"value\":[\"" + value + "\"]}]}";
     }
 
     @IfmapAction("submit")

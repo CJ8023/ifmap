@@ -20,6 +20,8 @@ import cn.cj.ifmap.core.config.CallDirection;
 import cn.cj.ifmap.core.config.IfmapConfig;
 import cn.cj.ifmap.core.config.LogicBranchConfig;
 import cn.cj.ifmap.core.strategy.ActionRegistry;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategy;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
@@ -67,9 +69,13 @@ class ConfigValidatorTest {
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction());
 
+        LogicBranchStrategyRegistry logicBranches = new LogicBranchStrategyRegistry();
+        logicBranches.register("submit", new AlwaysMatchStrategy());
+
         JacksonJsonOps jsonOps = new JacksonJsonOps();
         IfmapEngine engine = IfmapEngine.builder().jsonOps(jsonOps).build();
-        validator = new ConfigValidator(new ContractValidator(engine), jsonOps, strategyHooks, actions, repository);
+        validator = new ConfigValidator(new ContractValidator(engine), jsonOps, strategyHooks, actions,
+                repository, logicBranches);
     }
 
     @Test
@@ -196,7 +202,8 @@ class ConfigValidatorTest {
         config.setPostStrategyName("demoStrategy");
 
         ConfigValidator emptyStrategies = new ConfigValidator(null, new JacksonJsonOps(),
-                new StrategyHookRegistry(), new ActionRegistry(), db.repository());
+                new StrategyHookRegistry(), new ActionRegistry(), db.repository(),
+                new LogicBranchStrategyRegistry());
         ValidationResult warning = emptyStrategies.validate(config, true);
         assertTrue(warning.isPassed(), warning.getErrors().toString());
         assertTrue(warning.getWarnings().toString().contains("尚未注册任何策略钩子"),
@@ -310,38 +317,79 @@ class ConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("分支集合：默认兜底 ≤1、order 不重复、value 不能脱离 flag、method_flag 必须已注册")
+    @DisplayName("分支集合：兜底（always）≤1、order 不重复、规格必须合法、method_flag 必须已注册")
     void branchSetIsChecked() {
-        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "默认1", "", "", 1)) > 0);
-        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "默认2", "", "", 2)) > 0);
-        assertTrue(writer.insert(
-                AdminTestSupport.branch("IF_A", "unknownAction", "顺序重复", "loanResult", "0000", 1)) > 0);
-        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "值无flag", "", "0001", 3)) > 0);
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "兜底1",
+                "{\"op\":\"always\"}", 1)) > 0);
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "兜底2",
+                "{\"op\":\"always\"}", 2)) > 0);
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "unknownAction", "顺序重复",
+                "{\"all\":[{\"path\":\"$.loanResult\",\"op\":\"eq\",\"value\":\"0000\"}]}", 1)) > 0);
+        // 空规格只能通过直接 UPDATE 造出来：JdbcConfigWriter 会拦空串（写入侧 fail-closed），
+        // 而 008 的 ADD COLUMN text NOT NULL 在老库上正好会产生一批 '' 的存量行
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "空规格",
+                "{\"op\":\"always\"}", 3)) > 0);
+        jdbc.update("UPDATE `" + db.logicBranchTable() + "` SET `branch_judge` = ''"
+                + " WHERE `logic_branch_name` = '空规格'");
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "坏规格",
+                "{\"all\":[{\"path\":\"$.x\",\"op\":\"gt\",\"value\":\"1\"}]}", 4)) > 0);
 
         ValidationResult result = validator.validateBranches("1", "IF_A");
         String errors = result.getErrors().toString();
         assertFalse(result.isPassed());
-        assertTrue(errors.contains("默认兜底分支最多 1 条"), errors);
+        assertTrue(errors.contains("兜底分支最多 1 条"), errors);
         assertTrue(errors.contains("分支顺序重复"), errors);
-        assertTrue(errors.contains("没有 logic_branch_flag"), errors);
+        // 空规格不是「没配判定」而是非法：存量数据要回填，运行期是 fail-closed
+        assertTrue(errors.contains("未配置 branch_judge") && errors.contains("回填"), errors);
+        assertTrue(errors.contains("branch_judge 非法"), errors);
         assertTrue(errors.contains("method_flag 未注册"), errors);
     }
 
     @Test
-    @DisplayName("单条分支校验：同名/同顺序会被拒")
+    @DisplayName("分支规格里的 strategy 键未注册 → warning（写错的键只会让分支永不命中）")
+    void unregisteredStrategyKeyIsWarned() {
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "策略分支",
+                "{\"all\":[{\"op\":\"strategy\",\"value\":\"nope\"}]}", 1)) > 0);
+
+        ValidationResult result = validator.validateBranches("1", "IF_A");
+        assertTrue(result.isPassed(), result.getErrors().toString());
+        assertTrue(result.getWarnings().toString().contains("未注册的策略键：nope"),
+                result.getWarnings().toString());
+    }
+
+    @Test
+    @DisplayName("judged 算子 + result_judge=always → error（判定值恒为 null，这条分支永不命中）")
+    void judgedWithAlwaysJudgeIsRejected() {
+        IfmapConfig config = AdminTestSupport.config("IF_A", "apply", 1);
+        config.setResultJudge("{\"op\":\"always\"}");
+        assertTrue(writer.insert(config) > 0);
+
+        ValidationResult result = validator.validateBranch(AdminTestSupport.branch("IF_A", "submit", "命中",
+                "{\"all\":[{\"op\":\"judged\",\"value\":[\"0000\"]}]}", 1), true);
+        assertFalse(result.isPassed());
+        assertTrue(result.getErrors().toString().contains("永不成立"), result.getErrors().toString());
+    }
+
+    @Test
+    @DisplayName("单条分支校验：同名/同顺序会被拒；兜底排在非兜底分支之后也照样能过")
     void branchRowIsChecked() {
-        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "命中", "loanResult", "0000", 1)) > 0);
+        String judged = "{\"all\":[{\"op\":\"judged\",\"value\":[\"0000\"]}]}";
+        assertTrue(writer.insert(AdminTestSupport.branch("IF_A", "submit", "命中", judged, 1)) > 0);
 
         ValidationResult duplicateName = validator.validateBranch(
-                AdminTestSupport.branch("IF_A", "submit", "命中", "loanResult", "0000", 5), true);
+                AdminTestSupport.branch("IF_A", "submit", "命中", judged, 5), true);
         assertFalse(duplicateName.isPassed());
         assertTrue(duplicateName.getErrors().toString().contains("已存在同名分支")
                         || duplicateName.getErrors().toString().contains("分支顺序已被占用"),
                 duplicateName.getErrors().toString());
 
         ValidationResult clean = validator.validateBranch(
-                AdminTestSupport.branch("IF_A", "submit", "新分支", "loanResult", "0000", 9), true);
+                AdminTestSupport.branch("IF_A", "submit", "新分支", judged, 9), true);
         assertTrue(clean.isPassed(), clean.getErrors().toString());
+
+        ValidationResult fallback = validator.validateBranch(
+                AdminTestSupport.branch("IF_A", "submit", "兜底", "{\"op\":\"always\"}", 10), true);
+        assertTrue(fallback.isPassed(), fallback.getErrors().toString());
     }
 
     @Test
@@ -467,6 +515,14 @@ class ConfigValidatorTest {
         @Override
         public void execute(StrategyContext context) {
             context.putParam("handled", Boolean.TRUE);
+        }
+    }
+
+    /** 分支策略桩：管理端只校验"键是否注册"，不看求值结果。 */
+    static class AlwaysMatchStrategy implements LogicBranchStrategy {
+        @Override
+        public boolean match(StrategyContext context) {
+            return true;
         }
     }
 

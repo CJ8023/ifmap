@@ -127,6 +127,14 @@ class ResultJudgeSpecTest {
     }
 
     @Test
+    void branchOnlyOpsAreRejectedInResultJudge() {
+        // strategy / judged 是分支专用：放进 result_judge 等于"判定引用自己的判定结果"
+        assertFalse(invalid("{\"any\":[{\"op\":\"strategy\",\"value\":\"PAY_SUCCESS\"}]}").isEmpty());
+        assertFalse(invalid("{\"any\":[{\"op\":\"judged\",\"value\":[\"SUCCESS\"]}]}").isEmpty());
+        assertTrue(invalid("{\"any\":[{\"op\":\"strategy\",\"value\":\"X\"}]}").get(0).contains("分支专用"));
+    }
+
+    @Test
     void describeIsHumanReadable() {
         ResultJudgeSpec spec = ResultJudgeSpec.parse(
                 "{\"all\":[{\"path\":\"$.code\",\"op\":\"in\",\"value\":[\"0000\",\"S\"]}]}", jsonOps);

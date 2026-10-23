@@ -27,7 +27,23 @@ import java.util.List;
  */
 public enum JudgeOp {
 
-    EQ, NE, IN, NOT_IN, EXISTS, NOT_BLANK, REGEX, ALWAYS;
+    EQ, NE, IN, NOT_IN, EXISTS, NOT_BLANK, REGEX, ALWAYS,
+
+    /**
+     * 分支专用：交 {@code @LogicBranch} 策略求值，{@code value} 是策略键（无 path）。
+     *
+     * @see #requiresPath()
+     */
+    STRATEGY,
+
+    /**
+     * 分支专用：与 {@code result_judge} 的 {@code actualValue} 做<b>归属</b>判定
+     * （{@code actualValue ∈ value}，无 path）—— 即旧 {@code logic_branch_value} 的确切语义。
+     *
+     * <p>刻意不做成 {@code eq} 的别名：{@code ne} 在"取不到值"时反而命中，会把旧版
+     * "没有判定值 ⇒ 不命中"翻成"命中"，分支就串了。</p>
+     */
+    JUDGED;
 
     /**
      * 词面 → 枚举（大小写不敏感、忽略下划线）；未知返回 null。
@@ -49,14 +65,25 @@ public enum JudgeOp {
         return null;
     }
 
-    /** 该算子是否必须带 value。 */
+    /**
+     * 该算子是否必须带 path。
+     *
+     * <p>分支专用算子读的是"别处的输入"（策略注册表 / 判定值），不是报文原文，
+     * 因此没有 path；带了 path 反而是歧义（到底读哪个？），解析期直接判非法。</p>
+     */
+    public boolean requiresPath() {
+        return this != STRATEGY && this != JUDGED;
+    }
+
+    /** 该算子是否必须带 value（标量）。 */
     public boolean requiresValue() {
-        return this == EQ || this == NE || this == IN || this == NOT_IN || this == REGEX;
+        return this == EQ || this == NE || this == IN || this == NOT_IN || this == REGEX
+                || this == STRATEGY;
     }
 
     /** 该算子是否要求 value 为数组。 */
     public boolean requiresValueList() {
-        return this == IN || this == NOT_IN;
+        return this == IN || this == NOT_IN || this == JUDGED;
     }
 
     /**
@@ -77,11 +104,16 @@ public enum JudgeOp {
                 // 取不到值也算"不等于"——规格要表达"必须没有这个字段"请用 EXISTS 取反
                 return actual == null || !equal(condition, actual, condition.getValue());
             case IN:
+            case JUDGED:
+                // 同一个"归属"语义：actual 是判定值（JUDGED 由调用方从 Judgement 取），取不到值即不命中
                 return actual != null && contains(condition.getValues(), condition, actual);
             case NOT_IN:
                 return actual == null || !contains(condition.getValues(), condition, actual);
             case REGEX:
                 return actual != null && condition.compiledPattern().matcher(actual).matches();
+            case STRATEGY:
+                // 策略算子由 BranchJudge 在调用 matches 之前分派；走到这里说明调用方用错了算子
+                return false;
             default:
                 return false;
         }

@@ -19,9 +19,12 @@ import cn.cj.ifmap.core.json.JsonOps;
 import cn.cj.ifmap.core.json.JsonReadContext;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -40,6 +43,21 @@ public final class ResultJudgeSpec {
     /** 嵌套深度上限（与模板 DSL 口径一致）。 */
     public static final int MAX_DEPTH = 3;
 
+    /** {@code result_judge} 允许的算子集：闭合 7 算子 + {@code always}。 */
+    public static final Set<JudgeOp> RESULT_OPS = Collections.unmodifiableSet(EnumSet.of(
+            JudgeOp.ALWAYS, JudgeOp.EQ, JudgeOp.NE, JudgeOp.IN, JudgeOp.NOT_IN,
+            JudgeOp.EXISTS, JudgeOp.NOT_BLANK, JudgeOp.REGEX));
+
+    /**
+     * {@code branch_judge} 允许的算子集：与 {@code result_judge} 同源，额外放开两个分支专用无 path 算子。
+     *
+     * <p>两个方向都是<b>子集关系</b>：分支能写的语法是结果判定的超集，不存在"分支能写、结果判定也能写"
+     * 的第三套规则。</p>
+     */
+    public static final Set<JudgeOp> BRANCH_OPS = Collections.unmodifiableSet(EnumSet.of(
+            JudgeOp.ALWAYS, JudgeOp.EQ, JudgeOp.NE, JudgeOp.IN, JudgeOp.NOT_IN,
+            JudgeOp.EXISTS, JudgeOp.NOT_BLANK, JudgeOp.REGEX, JudgeOp.STRATEGY, JudgeOp.JUDGED));
+
     private final Node root;
     private final String raw;
 
@@ -54,37 +72,58 @@ public final class ResultJudgeSpec {
      * 校验规格，返回违规清单（空 = 合法）。管理端 422 与契约自检共用本方法。
      */
     public static List<String> validate(String spec, JsonOps jsonOps) {
+        return validate(spec, jsonOps, RESULT_OPS);
+    }
+
+    /**
+     * 按指定算子集校验（分支判定复用同一套规则，只放开算子集）。
+     *
+     * @param allowedOps 允许出现的算子；算子不在此集合里即判非法（不静默忽略）
+     */
+    public static List<String> validate(String spec, JsonOps jsonOps, Set<JudgeOp> allowedOps) {
         List<String> errors = new ArrayList<String>();
+        String label = label(allowedOps);
         if (spec == null || spec.trim().isEmpty()) {
-            errors.add("result_judge 不能为空（不需要判定的接口请显式写 {\"op\":\"always\"}）");
+            errors.add(label + " 不能为空（不需要判定的接口请显式写 {\"op\":\"always\"}）");
             return errors;
         }
         Object parsed;
         if (jsonOps == null || !jsonOps.isJson(spec)) {
-            errors.add("result_judge 不是合法 JSON");
+            errors.add(label + " 不是合法 JSON");
             return errors;
         }
         try {
             parsed = jsonOps.parse(spec);
         } catch (RuntimeException e) {
-            errors.add("result_judge 解析失败：" + e.getMessage());
+            errors.add(label + " 解析失败：" + e.getMessage());
             return errors;
         }
         if (!(parsed instanceof Map)) {
-            errors.add("result_judge 必须是 JSON 对象");
+            errors.add(label + " 必须是 JSON 对象");
             return errors;
         }
-        parseNode(castMap(parsed), 1, errors, jsonOps, true);
+        parseNode(castMap(parsed), 1, errors, jsonOps, true, allowedOps);
         return errors;
     }
 
     /** 解析规格；校验不过抛 {@link IllegalArgumentException}（调用方要么已校验、要么按 SPEC_INVALID 兜底）。 */
     public static ResultJudgeSpec parse(String spec, JsonOps jsonOps) {
-        List<String> errors = validate(spec, jsonOps);
+        return parse(spec, jsonOps, RESULT_OPS);
+    }
+
+    /** 按指定算子集解析（校验不过抛 {@link IllegalArgumentException}）。 */
+    public static ResultJudgeSpec parse(String spec, JsonOps jsonOps, Set<JudgeOp> allowedOps) {
+        List<String> errors = validate(spec, jsonOps, allowedOps);
         if (!errors.isEmpty()) {
-            throw new IllegalArgumentException("result_judge 非法：" + errors.get(0));
+            throw new IllegalArgumentException(label(allowedOps) + " 非法：" + errors.get(0));
         }
-        return new ResultJudgeSpec(parseNode(castMap(jsonOps.parse(spec)), 1, null, jsonOps, true), spec);
+        return new ResultJudgeSpec(
+                parseNode(castMap(jsonOps.parse(spec)), 1, null, jsonOps, true, allowedOps), spec);
+    }
+
+    /** 报错文案里的列名：分支规格不该报「result_judge 非法」，否则运维会去改错的地方。 */
+    private static String label(Set<JudgeOp> allowedOps) {
+        return allowedOps != null && allowedOps.contains(JudgeOp.STRATEGY) ? "branch_judge" : "result_judge";
     }
 
     /**
@@ -92,15 +131,11 @@ public final class ResultJudgeSpec {
      * 其余当作单个条件。{@code collecting=true} 时把错误全收集起来（校验用），否则快速失败（解析用）。
      */
     private static Node parseNode(Map<String, Object> node, int depth, List<String> errors, JsonOps jsonOps,
-                                  boolean top) {
+                                  boolean top, Set<JudgeOp> allowedOps) {
         Object opValue = node.get("op");
-        if (opValue != null && !node.containsKey("path")) {
-            JudgeOp op = JudgeOp.fromName(String.valueOf(opValue));
-            if (op != JudgeOp.ALWAYS) {
-                add(errors, top ? "顶层 op 只支持 always（条件算子请写在 all/any 里）" : "条件缺少 path（JsonPath 字符串）",
-                        errors != null);
-                return null;
-            }
+        // always 只认"单独一个键"的形态；其余形态一律交给下面的分组/叶子处理（叶子那里会点名报错）。
+        // 注意：不能在这里对"没有 path 的 op"提前下结论 —— strategy/judged 本来就没有 path。
+        if (opValue != null && JudgeOp.fromName(String.valueOf(opValue)) == JudgeOp.ALWAYS) {
             if (node.size() != 1) {
                 add(errors, "always 不允许携带 path/value/ignoreCase 等其他键：" + node.keySet(), errors != null);
                 return null;
@@ -150,7 +185,7 @@ public final class ResultJudgeSpec {
                     add(errors, key + " 里不能再嵌套同名的 " + key + "（多余层级没有语义）", errors != null);
                     return null;
                 }
-                Node childNode = parseNode(child, depth + 1, errors, jsonOps, false);
+                Node childNode = parseNode(child, depth + 1, errors, jsonOps, false, allowedOps);
                 if (childNode == null) {
                     return null;
                 }
@@ -163,63 +198,84 @@ public final class ResultJudgeSpec {
             add(errors, "顶层必须是 {\"op\":\"always\"} 或 {\"all\":[...]}/{\"any\":[...]}", errors != null);
             return null;
         }
-        return parseCondition(node, errors, jsonOps);
+        return parseCondition(node, errors, jsonOps, allowedOps);
     }
 
     /** 解析单个条件：path 必填、op 必须可识别；报错时点名写错的那个词（管理端 422 只回第一条错误）。 */
-    private static Node parseCondition(Map<String, Object> node, List<String> errors, JsonOps jsonOps) {
+    private static Node parseCondition(Map<String, Object> node, List<String> errors, JsonOps jsonOps,
+                                       Set<JudgeOp> allowedOps) {
         Object pathValue = node.get("path");
-        if (!(pathValue instanceof String) || ((String) pathValue).trim().isEmpty()) {
-            add(errors, "条件缺少 path（JsonPath 字符串）", errors != null);
-            return null;
-        }
-        String path = ((String) pathValue).trim();
         JudgeOp op = JudgeOp.fromName(node.get("op") == null ? null : String.valueOf(node.get("op")));
+        boolean pathOk = pathValue instanceof String && !((String) pathValue).trim().isEmpty();
+        String path = pathOk ? ((String) pathValue).trim() : null;
+        // 报错文案的定位词：无 path 的算子（分支专用）统称"条件"，避免出现 "null 的 op 非法" 这种没法排查的文案
+        String where = path != null ? path : "条件";
         if (op == null || op == JudgeOp.ALWAYS) {
             // 带上写错的那个词：管理端 422 只回第一条错误，不点名的话用户得自己猜哪一行不对
             Object rawOp = node.get("op");
-            add(errors, path + " 的 op 非法：" + (rawOp == null ? "（缺失）" : rawOp)
-                    + "（支持 eq/ne/in/notIn/exists/notBlank/regex）", errors != null);
+            add(errors, where + " 的 op 非法：" + (rawOp == null ? "（缺失）" : rawOp)
+                    + "（支持 " + opNames(allowedOps) + "）", errors != null);
             return null;
         }
-        boolean ignoreCase = asBoolean(node.get("ignoreCase"), path, errors);
+        if (allowedOps != null && !allowedOps.contains(op)) {
+            // 分支专用算子写进 result_judge 会变成"判定引用自己的判定结果"，必须点名拒绝
+            add(errors, where + " 的 op 非法：" + wireName(op)
+                    + "（分支专用算子，result_judge 不支持）", errors != null);
+            return null;
+        }
+        if (op.requiresPath()) {
+            if (!pathOk) {
+                add(errors, where + " 的条件缺少 path（JsonPath 字符串）", errors != null);
+                return null;
+            }
+        } else if (path != null) {
+            // 分支专用算子读的是别处的输入，再带 path 就是"到底读哪个"的歧义
+            add(errors, where + " 的 op=" + wireName(op) + " 不接受 path", errors != null);
+            return null;
+        }
+        boolean ignoreCase = asBoolean(node.get("ignoreCase"), where, errors);
         Object rawValue = node.get("value");
         // value 的形态由 op 决定：in/notIn 要非空标量数组，其余要么要求非空 value、要么不接受 value
         List<String> values = null;
         String value = null;
         if (op.requiresValueList()) {
             if (!(rawValue instanceof List) || ((List<?>) rawValue).isEmpty()) {
-                add(errors, path + " 的 op=" + op.name().toLowerCase() + " 要求非空数组 value", errors != null);
+                add(errors, where + " 的 op=" + op.name().toLowerCase() + " 要求非空数组 value", errors != null);
                 return null;
             }
             values = new ArrayList<String>();
             for (Object item : (List<?>) rawValue) {
                 if (item instanceof Map || item instanceof List) {
-                    add(errors, path + " 的 value 只能是标量数组", errors != null);
+                    add(errors, where + " 的 value 只能是标量数组", errors != null);
                     return null;
                 }
                 values.add(item == null ? null : String.valueOf(item));
             }
         } else if (op.requiresValue()) {
             if (rawValue == null || String.valueOf(rawValue).isEmpty()) {
-                add(errors, path + " 的 op=" + op.name().toLowerCase() + " 要求非空 value", errors != null);
+                add(errors, where + " 的 op=" + op.name().toLowerCase() + " 要求非空 value", errors != null);
+                return null;
+            }
+            // 标量算子的 value 不能是数组/对象：{"op":"strategy","value":["X"]} 是写错了而不是"多值策略"
+            if (rawValue instanceof List || rawValue instanceof Map) {
+                add(errors, where + " 的 op=" + op.name().toLowerCase() + " 的 value 只能是标量", errors != null);
                 return null;
             }
             value = String.valueOf(rawValue);
         } else if (rawValue != null) {
-            add(errors, path + " 的 op=" + op.name().toLowerCase() + " 不接受 value", errors != null);
+            add(errors, where + " 的 op=" + op.name().toLowerCase() + " 不接受 value", errors != null);
             return null;
         }
         if (op == JudgeOp.REGEX) {
             try {
                 Pattern.compile(value);
             } catch (PatternSyntaxException e) {
-                add(errors, path + " 的 regex 非法：" + e.getDescription(), errors != null);
+                add(errors, where + " 的 regex 非法：" + e.getDescription(), errors != null);
                 return null;
             }
         }
         // 路径合法性交给当前 JsonOps 判断（Jackson/Fastjson 支持的 JsonPath 语法并不完全一致）
-        if (jsonOps != null && !jsonOps.isValidPath(path)) {
+        if (path != null && jsonOps != null && !jsonOps.isValidPath(path)) {
             add(errors, path + " 不是合法 JsonPath", errors != null);
             return null;
         }
@@ -244,9 +300,19 @@ public final class ResultJudgeSpec {
 
     /** 求值；{@code ctx} 由调用方在 try/catch 里建立（非 JSON 响应按 NOT_JSON 归类，不在这里抛）。 */
     public Evaluation evaluate(JsonReadContext ctx) {
+        return evaluate(ctx, null);
+    }
+
+    /**
+     * 求值（带分支专用算子的输入）。
+     *
+     * @param ctx    原文读取上下文；{@code null} 表示原文不是 JSON / 没有原文 —— 按"取不到值"求值
+     * @param inputs 分支专用算子入参；{@code result_judge} 传 {@code null}
+     */
+    public Evaluation evaluate(JsonReadContext ctx, BranchInputs inputs) {
         Evaluation evaluation = new Evaluation();
         // 求值本身不抛异常：非 JSON 响应由调用方（RuleSpecJudge）先挡掉，这里只处理结构
-        boolean matched = root.matches(ctx, evaluation);
+        boolean matched = root.matches(ctx, inputs, evaluation);
         evaluation.setMatched(matched);
         if (!matched && evaluation.getReason() == null) {
             evaluation.setReason("未命中判定条件：" + describe());
@@ -311,14 +377,14 @@ public final class ResultJudgeSpec {
     // ---------- 节点 ----------
 
     private abstract static class Node {
-        abstract boolean matches(JsonReadContext ctx, Evaluation evaluation);
+        abstract boolean matches(JsonReadContext ctx, BranchInputs inputs, Evaluation evaluation);
 
         abstract String describe();
     }
 
     private static final class AlwaysNode extends Node {
         @Override
-        boolean matches(JsonReadContext ctx, Evaluation evaluation) {
+        boolean matches(JsonReadContext ctx, BranchInputs inputs, Evaluation evaluation) {
             return true;
         }
 
@@ -338,10 +404,10 @@ public final class ResultJudgeSpec {
         }
 
         @Override
-        boolean matches(JsonReadContext ctx, Evaluation evaluation) {
+        boolean matches(JsonReadContext ctx, BranchInputs inputs, Evaluation evaluation) {
             boolean any = "any".equals(key);
             for (Node child : children) {
-                boolean hit = child.matches(ctx, evaluation);
+                boolean hit = child.matches(ctx, inputs, evaluation);
                 if (any && hit) {
                     return true;
                 }
@@ -370,8 +436,27 @@ public final class ResultJudgeSpec {
         }
 
         @Override
-        boolean matches(JsonReadContext ctx, Evaluation evaluation) {
+        boolean matches(JsonReadContext ctx, BranchInputs inputs, Evaluation evaluation) {
+            // 分支专用算子不读原文：策略交注册表、judged 比判定值
+            if (condition.getOp() == JudgeOp.STRATEGY) {
+                boolean hit = inputs != null && inputs.strategyMatched(condition.getValue());
+                evaluation.record(condition, hit, condition.getValue(), hit);
+                return hit;
+            }
+            if (condition.getOp() == JudgeOp.JUDGED) {
+                String judged = inputs == null ? null : inputs.judgedValue();
+                boolean present = judged != null;
+                boolean hit = condition.getOp().matches(condition, present, judged);
+                evaluation.record(condition, present, judged, hit);
+                return hit;
+            }
             Object raw;
+            if (ctx == null) {
+                // 原文不是 JSON（或没有原文）：按"取不到值"求值，语义与 JDK 侧 read 返回 null 一致
+                boolean hit = condition.getOp().matches(condition, false, null);
+                evaluation.record(condition, false, null, hit);
+                return hit;
+            }
             try {
                 raw = ctx.read(condition.getPath());
             } catch (RuntimeException e) {
@@ -419,6 +504,33 @@ public final class ResultJudgeSpec {
         }
         add(errors, path + " 的 ignoreCase 必须是布尔", errors != null);
         return false;
+    }
+
+    /** 允许算子集的文案形态（报错时列出"这里到底能写什么"）。 */
+    private static String opNames(Set<JudgeOp> allowedOps) {
+        if (allowedOps == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (JudgeOp op : allowedOps) {
+            if (op == JudgeOp.ALWAYS) {
+                continue;
+            }
+            sb.append(sb.length() == 0 ? "" : "/").append(wireName(op));
+        }
+        return sb.toString();
+    }
+
+    /** 枚举 → 文档/管理端用的词面（{@code NOT_IN} → {@code notIn}），报错文案不能被枚举名污染。 */
+    private static String wireName(JudgeOp op) {
+        switch (op) {
+            case NOT_IN:
+                return "notIn";
+            case NOT_BLANK:
+                return "notBlank";
+            default:
+                return op.name().toLowerCase();
+        }
     }
 
     /** 只在收集模式（且 errors 非 null）下追加错误；解析模式靠异常快速失败。 */

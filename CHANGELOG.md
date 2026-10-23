@@ -79,7 +79,7 @@
 
 ### Added（demo：前序 / 后序策略各一例，且都带断言）
 - **出网方向**：`DemoRunner` 挂 `post_strategy_name=demoPostStrategy` → 新类 `DemoPostStrategy` 在产物上回填
-  `settleRef` / `settleChannel`（原来只有 `pre_strategy_name=demoStrategy`，后序在 demo 里**完全没出现**）。
+  `settleRef` / `settleChannel`（原来只有 `pre_strategy_name=demoPreStrategy`，后序在 demo 里**完全没出现**）。
 - **被调方向**：`InboundNoticeDemo` 挂 `post_strategy_name=noticeAckStamp` → 新类 `NoticeAckStamp` 给应答产物
   补 `ackChannel` / `ackBizId`（被调方向没有请求报文，**后序是唯一能挂策略的位置**）。
 - **`DemoPartnerGateway.getLastRequest()`**：前序策略改的是报文，报文出网后引擎不再暴露它 ⇒ 网关留一份，

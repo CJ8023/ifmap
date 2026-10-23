@@ -59,21 +59,21 @@
 `:48` `getLastRequest()` 把**最后一次收到的请求报文**留一份：前序策略改的是报文，报文出网后引擎就不再暴露它，
 想看"策略到底把它改成了什么样"只能在网关这一侧取证（`IfmapDemoApplicationTest.preStrategyRewritesRequest` 就是这么断言的）。
 
-### 2.4 `DemoStrategy`（61 行）· 一个类实现两个策略接口
+### 2.4 `DemoPreStrategy`（61 行）· 一个类实现两个策略接口
 
 | 行 | 成员 | 关键点 |
 |---|---|---|
 | 43 | `@FullParam(partnerCode = "CMB", busiNode = "apply")` | 整包组包策略按 `(partnerCode, busiNode)` 注册 |
-| 48 | `apply(StrategyContext)` | `IfmapStrategyHook`：**按 bean 名注册**（类 `DemoStrategy` → bean 名 `demoStrategy`，配置里 `pre_strategy_name` 直接写它） |
+| 48 | `apply(StrategyContext)` | `IfmapStrategyHook`：**按 bean 名注册**（类 `DemoPreStrategy` → bean 名 `demoPreStrategy`，配置里 `pre_strategy_name` 直接写它） |
 | 56 | `assemble(StrategyContext)` | `FullParamStrategy`：（这里的实现与 `apply` 不同，正好演示两者语义差别） |
 
 > 一个 bean 同时实现多个策略接口是被允许的：`IfmapStrategyRegistrar` 按接口逐个注册。
 
 ### 2.5 `DemoPostStrategy`（59 行）· 出网方向的后序策略
 
-`@Component`，bean 名 `demoPostStrategy`，配置里 `post_strategy_name` 直接写它。与 `DemoStrategy` 正好是一对：
+`@Component`，bean 名 `demoPostStrategy`，配置里 `post_strategy_name` 直接写它。与 `DemoPreStrategy` 正好是一对：
 
-| | 前序（`DemoStrategy`） | 后序（`DemoPostStrategy`） |
+| | 前序（`DemoPreStrategy`） | 后序（`DemoPostStrategy`） |
 |---|---|---|
 | 时机 | 渲染请求后、出网前 | 响应模板渲染后、**判定前** |
 | 能改 | `params` → 请求报文**重渲染** | 产物 `data`（也入池） |
@@ -157,7 +157,7 @@
 
 `seedIfAbsent` 里几个值得抄的细节：
 - `:123` `resultJudge` 写成 `{"all":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`；
-- `:125` `setPreStrategyName("demoStrategy")` —— **bean 名首字母小写**，写类名会找不到；
+- `:125` `setPreStrategyName("demoPreStrategy")` —— **bean 名首字母小写**，写类名会找不到；
 - `:127` `setPostStrategyName("demoPostStrategy")` —— 前序改报文（补 `channelCode`），后序改产物（补 `settleRef`）；
 - `:132` 分支：`methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge`（`{"any":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`）——动作键、分支名、判定规格三者各自含义不同，见 03 篇。
 
@@ -336,7 +336,7 @@
 |---|---|---|
 | pure-java demo 的 `pretty()` | `IfmapQuickStart:79` | 整个 demo 的卖点是"依赖极少"，用 Jackson 美化就自打脸 |
 | demo 的 banner 4（故意写错规则名） | `IfmapQuickStart:59` | 这是产品对存量引擎的**核心差异演示**，删了 demo 就没论点了 |
-| `DemoStrategy` 同时实现两个接口 | `DemoStrategy:44` | 演示"一个 bean 可以承担多个策略角色"，且 `apply` 与 `assemble` 语义不同 |
+| `DemoPreStrategy` 同时实现两个接口 | `DemoPreStrategy:44` | 演示"一个 bean 可以承担多个策略角色"，且 `apply` 与 `assemble` 语义不同 |
 | `DemoRunner.seedIfAbsent` 的幂等 | `:108` | 不幂等的话重复启动就 1062；演示"配置写入要判重" |
 | `InboundNoticeDemo` 第三个场景（`PENDING`） | `InboundNoticeDemo:128` | 演示"判定失败时**没有**应答"，比只演成功路径更能说明"引擎不兜底错误码"的设计选择 |
 | `InboundNoticeDemo` 的 ACK 模板里 `$.['seqNo']` 与 `$.seqNo` 并列 | `InboundNoticeDemo:78` | 一个是"对方的字段"、一个是"我方生成的流水号"；这对写法是可运行的反例教材，别改成统一写法 |

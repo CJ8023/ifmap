@@ -30,8 +30,8 @@ import java.util.Map;
  * 演示三类策略：声明成 Spring bean 即自动注册（不需要工厂、不需要反射方法名）。
  *
  * <ul>
- *   <li>{@link IfmapStrategyHook}：按 <b>bean 名</b> 注册 —— 类名 {@code DemoStrategy} 的
- *       bean 名是 {@code demoStrategy}，配置里 {@code pre_strategy_name} 直接写它</li>
+ *   <li>{@link IfmapStrategyHook}：按 <b>bean 名</b> 注册 —— 类名 {@code DemoPreStrategy} 的
+ *       bean 名是 {@code demoPreStrategy}，配置里 {@code pre_strategy_name} 直接写它</li>
  *   <li>{@link FullParamStrategy}：按 {@link FullParam} 的 (partnerCode, busiNode) 注册</li>
  *   <li>{@link IfmapActionHandler}：见 {@code DemoSubmitAction}（按 {@code @IfmapAction} 的值注册，
  *       对应 {@code ifmap_logic_branch_config.method_flag}）</li>
@@ -41,7 +41,7 @@ import java.util.Map;
  */
 @Component
 @FullParam(partnerCode = "CMB", busiNode = "apply")
-public class DemoStrategy implements IfmapStrategyHook, FullParamStrategy {
+public class DemoPreStrategy implements IfmapStrategyHook, FullParamStrategy {
 
     /** 策略钩子：给请求报文补一段资方要求的公共字段。 */
     @Override

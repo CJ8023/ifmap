@@ -1232,7 +1232,7 @@ public interface LogMasker {
 | JDK 17 构建 | ✅ BUILD SUCCESS（7 模块 reactor） | `set JAVA_HOME=...jdk17...&& mvn.cmd -B -ntp clean verify` |
 | JDK 8 构建 | ✅ BUILD SUCCESS（**170 个**测试；SB3 模块由 `<jdk>[17,)</jdk>` 剖面自动剔除） | `set JAVA_HOME=...jdk1.8&& mvn.cmd -B -ntp clean test` |
 | 示例工程实跑（含编排） | ✅ exit 0；「仅渲染」得到 `{"orgNo":"000012","applyNo":"AP20250101001","applyDate":"20250308","acctName":"张*"}`；「编排结果」`success=true, data={applyNo=AP20250101001}, 命中分支=submit, 耗时=38ms` | `java -jar ifmap-demo-spring-boot3/target/ifmap-demo-spring-boot3-0.1.0-SNAPSHOT.jar` |
-| 策略自动收集 | ✅ 启动日志：`ifmap 已注册宿主机策略 bean：[demoStrategy]，类 [...]` 与 `[demoSubmitAction]` | 同上，或 `mvn -pl ifmap-spring-boot-starter test` |
+| 策略自动收集 | ✅ 启动日志：`ifmap 已注册宿主机策略 bean：[demoPreStrategy]，类 [...]` 与 `[demoSubmitAction]` | 同上，或 `mvn -pl ifmap-spring-boot-starter test` |
 | 契约自检 | ✅ `ContractValidatorTest`：全注册 → 零违规且 `toMarkdown()` 含「零违规」；错名规则检出 2 条（`farmatDate` / `cebFilePathJoin`）；非 JSON 模板报「模板非法」 | `mvn -pl ifmap-core test -Dtest=ContractValidatorTest` |
 | 脱敏 | ✅ 手机 `13812348888 → 138****8888`、证件 `110101********1234`、卡号 `622202******7890`、姓名 `张三 → 张*`、排除字段 → `***`；幂等 | `mvn -pl ifmap-core test -Dtest=LogMaskerTest` |
 

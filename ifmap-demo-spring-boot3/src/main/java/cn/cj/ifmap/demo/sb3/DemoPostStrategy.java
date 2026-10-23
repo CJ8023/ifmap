@@ -25,7 +25,7 @@ import java.util.Map;
 /**
  * 出网方向的<b>后序</b>策略演示（配置写 {@code post_strategy_name=demoPostStrategy}）。
  *
- * <p>与 {@link DemoStrategy}（前序，改请求报文）正好是一对：后序跑在
+ * <p>与 {@link DemoPreStrategy}（前序，改请求报文）正好是一对：后序跑在
  * 「响应模板渲染之后、结果判定之前」，<b>只能改产物，改不动成败</b> —— 判定读的是原始回参。</p>
  *
  * <p>三件事看清就够用了：</p>

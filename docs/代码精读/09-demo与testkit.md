@@ -5,7 +5,7 @@
 | 模块 | 文件（含 pom） | 行数 | 定位 |
 |---|---|---|---|
 | `ifmap-demo-pure-java` | 4 | 219 | **零 Spring** 的引擎用法演示（证 core 零依赖） |
-| `ifmap-demo-spring-boot3` | 13 | 1,064 | 引入 starter 的**完整编排**用法（出网 + 被调两个方向）+ 管理端宿主 |
+| `ifmap-demo-spring-boot3` | 15 | 1,170 | 引入 starter 的**完整编排**用法（出网 + 被调两个方向，前后序策略各一例）+ 管理端宿主 |
 | `ifmap-testkit` | 5 | 1,217 | 真库/内存库测试基座 + **自动清理** |
 
 ---
@@ -41,7 +41,7 @@
 
 ---
 
-## 2. `ifmap-demo-spring-boot3`（9 个 Java 主类 + 2 个 yml + 1 个测试）
+## 2. `ifmap-demo-spring-boot3`（11 个 Java 主类 + 2 个 yml + 1 个测试）
 
 ### 2.1 `IfmapDemoApplication`（35 行）
 
@@ -52,9 +52,12 @@
 `@Component` + `@IfmapRule(value="bankOrgNo", desc=..., example=...)`。
 **方法上不用手写 `registry.register(...)`** —— `IfmapRuleRegistrar` 扫 bean 自动收集（07 篇 §3.4）。
 
-### 2.3 `DemoPartnerGateway`（38 行）· 外呼网关
+### 2.3 `DemoPartnerGateway`（51 行）· 外呼网关
 
-只实现 `exchange(PartnerCall)`（`:34`），直接返回固定响应。演示"网关是最简单的一个 SPI"。
+只实现 `exchange(PartnerCall)`（`:41`），直接返回固定响应。演示"网关是最简单的一个 SPI"。
+
+`:48` `getLastRequest()` 把**最后一次收到的请求报文**留一份：前序策略改的是报文，报文出网后引擎就不再暴露它，
+想看"策略到底把它改成了什么样"只能在网关这一侧取证（`IfmapDemoApplicationTest.preStrategyRewritesRequest` 就是这么断言的）。
 
 ### 2.4 `DemoStrategy`（61 行）· 一个类实现两个策略接口
 
@@ -66,12 +69,25 @@
 
 > 一个 bean 同时实现多个策略接口是被允许的：`IfmapStrategyRegistrar` 按接口逐个注册。
 
-### 2.5 `DemoSubmitAction`（44 行）· 逻辑分支动作
+### 2.5 `DemoPostStrategy`（59 行）· 出网方向的后序策略
+
+`@Component`，bean 名 `demoPostStrategy`，配置里 `post_strategy_name` 直接写它。与 `DemoStrategy` 正好是一对：
+
+| | 前序（`DemoStrategy`） | 后序（`DemoPostStrategy`） |
+|---|---|---|
+| 时机 | 渲染请求后、出网前 | 响应模板渲染后、**判定前** |
+| 能改 | `params` → 请求报文**重渲染** | 产物 `data`（也入池） |
+| 改得动判定？ | 间接（换了报文就换了对方看到的东西） | **不能**（判定读原始回参） |
+
+实现里演示了「读当前产物再回填」：`getResponseData()` 拿 `applyNo` → 建成 `settleRef=STL-...`。
+注释还写明一个坑：要整体替换产物就 `setResponseData(newMap)`，引擎之后**只做合并、不保留原键**。
+
+### 2.6 `DemoSubmitAction`（44 行）· 逻辑分支动作
 
 `@IfmapAction("submit")` + `execute(StrategyContext)`。注解值是 `ifmap_logic_branch_config.method_flag`
 （**不再按方法名反射**，方法改名不会静默失效）。
 
-### 2.6 `InboundNoticeDemo`（213 行）· 被调方向演示例
+### 2.7 `InboundNoticeDemo`（220 行）· 被调方向演示例
 
 `@Component @Order(2) implements ApplicationRunner`，与 `DemoRunner`（`@Order` 更小，先跑）**互不干扰**：
 另一个业务节点（`notice`）、另一个接口编号（`BIZ_NOTICE`）、另一个租户内的一组表行。
@@ -85,8 +101,9 @@
 | 136 | `call(scene, rawBody)` | **唯一入口** `executeInbound(...)`；`ackOf` 取不到东西就说明被判失败了 |
 | 162 | `ackOf(result)` | 池里有没有本步产物 = 有没有应答（判失败的步骤不入池） |
 | 172 | `seedIfAbsent()` | 幂等：先查再插 |
-| 178 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
-| 200 | `insertBranch(...)` | 两条分支：`branch_judge` = `any[$.noticeStatus eq SUCCESS]` → `noticeAccepted`，`eq FAILED` → `noticeFailed`（`branch_judge` **必填**，兜底才写 `always`） |
+| 186 | `setCallDirection(CallDirection.INBOUND)` | + `interfaceOrder=1` + 请求模板/前序策略留空 |
+| 191 | `setPostStrategyName("noticeAckStamp")` | 被调方向唯一能挂策略的位置（加工应答产物） |
+| 202 | `insertBranch(...)` | 两条分支：`branch_judge` = `any[$.noticeStatus eq SUCCESS]` → `noticeAccepted`，`eq FAILED` → `noticeFailed`（`branch_judge` **必填**，兜底才写 `always`） |
 
 三个场景覆盖了被调方向的三个终态（`docs/12` §7）：
 
@@ -100,20 +117,32 @@
 > `$.seqNo` 是模板 DSL 的保留路径（生成我方流水号，不看源报文），取源报文同名字段必须写方括号形式
 > `$.['seqNo']`；少写那个点（`$['seqNo']`）会被当成**字面量**原样输出。这条坑已记进 `docs/12` §9 第 12 条。
 
-### 2.7 `NoticeAcceptedAction`（58 行）· 受理分支动作
+### 2.8 `NoticeAcceptedAction`（58 行）· 受理分支动作
 
 `@Component @IfmapAction("noticeAccepted")`。`execute` 里把 `context.getResponseData()` 强转成
 `Map<String,Object>` **原地 `put`** —— 这个 Map 与池里、返回值里、日志里的是**同一个对象**，
 所以 `approveNo` 补上去以后三处同时可见。重新赋值（`data = new HashMap<>()`）则完全无效（`docs/12` §6）。
 
-### 2.8 `NoticeFailedAction`（61 行）· 处理失败分支动作
+### 2.9 `NoticeAckStamp`（54 行）· 被调方向的后序策略
+
+`@Component`，bean 名 `noticeAckStamp`。被调方向没有请求报文 ⇒ `pre_strategy_name` 必须留空，
+**后序是这里唯一能挂策略的位置**；而它的产物就是回给三方的应答，所以补 ACK 字段可以不写 `@IfmapAction`。
+
+| 边界 | 说明 |
+|---|---|
+| 跑在判定**之前** | 报文不可受理（`PENDING` 场景）时它照样执行，但判定失败 ⇒ 应答不返回给三方（**加工了也白加工**） |
+| 改不动判定 | 判定读对方原文，这里改的是产物 |
+
+补的两个字段：`ackChannel=NOTICE`（常量）+ `ackBizId=context.getBizId()`（来自 `IfmapRequest`，与应答模板无关）。
+
+### 2.10 `NoticeFailedAction`（61 行）· 处理失败分支动作
 
 `@IfmapAction("noticeFailed")`。把模板里的 `code=0000` **覆盖成 `2001`**，并加 `retryable=true`。
 
 > 演示的重点是「**业务失败不要抛异常**」：动作在 `writeLog` 之前执行，抛出去会带走执行日志，
 > 而且宿主拿不到应答 Map（表现为对方超时 + 我方无日志）。见 `docs/12` §9 第 10 条。
 
-### 2.9 `DemoRunner`（141 行）· 完整链路演示例
+### 2.11 `DemoRunner`（143 行）· 完整链路演示例
 
 | 行 | 成员 | 说明 |
 |---|---|---|
@@ -129,9 +158,10 @@
 `seedIfAbsent` 里几个值得抄的细节：
 - `:123` `resultJudge` 写成 `{"all":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`；
 - `:125` `setPreStrategyName("demoStrategy")` —— **bean 名首字母小写**，写类名会找不到；
-- `:130-139` 分支：`methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge`（`{"any":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`）——动作键、分支名、判定规格三者各自含义不同，见 03 篇。
+- `:127` `setPostStrategyName("demoPostStrategy")` —— 前序改报文（补 `channelCode`），后序改产物（补 `settleRef`）；
+- `:132` 分支：`methodFlag="submit"` + `logicBranchName="成功分支"` + `branchJudge`（`{"any":[{"path":"$.resultCode","op":"eq","value":"0000"}]}`）——动作键、分支名、判定规格三者各自含义不同，见 03 篇。
 
-### 2.10 两个 yml
+### 2.12 两个 yml
 
 **`application.yml`（30 行）· 默认档（H2 内存库）**
 
@@ -160,17 +190,20 @@
 > 且 `+` 在 URL 里会被解码成空格 → 必须写 `%2B08:00`（两处）。
 > 这段注释就是 `CannotGetJdbcConnectionException` 那次的结案记录，**别删**。
 
-### 2.11 `IfmapDemoApplicationTest`（213 行，8 例）
+### 2.13 `IfmapDemoApplicationTest`（269 行，11 例）
 
-用 H2 起完整上下文。出网方向 4 例：建表、`DemoRunner` 幂等、规则收集与整链路渲染；
-被调方向 4 例：
+用 H2 起完整上下文。出网方向 6 例（建表、`DemoRunner` 幂等、规则收集、整链路渲染、**前序改报文**、**后序改产物**）；
+被调方向 5 例（含后序策略盖章）：
 
 | 行 | 用例 | 断言要点 |
 |---|---|---|
-| 135 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
-| 153 | `inboundAcceptedFillsAck` | 判定过 + `matchedBranch="受理分支"` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
-| 168 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，`matchedBranch="失败分支"`，`code=2001`、`retryable=true` |
-| 180 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
+| 139 | `preStrategyRewritesRequest` | 网关 `getLastRequest()` 里有 `"channelCode":"ECC"`（前序策略补的）且原字段 `applyNo` 仍在 |
+| 151 | `postStrategyAppendsToProduct` | `data.settleRef=STL-AP20250101001` / `settleChannel=CMB-SETTLE` / **原键 `applyNo` 保留**（合并不是替换） |
+| 162 | `inboundPostStrategyStampsAck` | 受理成功时应答里有后序补的 `ackChannel` / `ackBizId`；`PENDING` 时 `isSuccess()=false` 且池里无产物（后序跑了但没出口） |
+| 177 | `inboundDemoSeeded` | `CallDirection.INBOUND` / `interfaceOrder=1` / 请求模板 null / 前序策略空串 / 分支 2 条 |
+| 195 | `inboundAcceptedFillsAck` | 判定过 + `matchedBranch="受理分支"` + `partnerSeqNo=SEQ-9001`（方括号路径）+ `ourSeqNo` 20 位 + 动作补的 `approveNo` |
+| 210 | `inboundRejectedOverwritesAck` | 业务失败**仍然** `isSuccess()`，`matchedBranch="失败分支"`，`code=2001`、`retryable=true` |
+| 222 | `inboundUnknownStatusHasNoAck` | `VALUE_MISMATCH` + `matchedBranch=null` + 池里没有本步产物 |
 
 > 前序策略那一条断言写成"null 或空串"：列定义是 `NOT NULL DEFAULT ''`，写 `null` 会被库兜成空串，
 > 两者在引擎里等价（都表示"没配"）—— 不要用 `assertNull` 把它写死。
@@ -305,8 +338,11 @@
 | demo 的 banner 4（故意写错规则名） | `IfmapQuickStart:59` | 这是产品对存量引擎的**核心差异演示**，删了 demo 就没论点了 |
 | `DemoStrategy` 同时实现两个接口 | `DemoStrategy:44` | 演示"一个 bean 可以承担多个策略角色"，且 `apply` 与 `assemble` 语义不同 |
 | `DemoRunner.seedIfAbsent` 的幂等 | `:108` | 不幂等的话重复启动就 1062；演示"配置写入要判重" |
-| `InboundNoticeDemo` 第三个场景（`PENDING`） | `InboundNoticeDemo:125` | 演示"判定失败时**没有**应答"，比只演成功路径更能说明"引擎不兜底错误码"的设计选择 |
-| ACK 模板里 `$.['seqNo']` 与 `$.seqNo` 并列 | `InboundNoticeDemo:78` | 一个是"对方的字段"、一个是"我方生成的流水号"；这对写法是可运行的反例教材，别改成统一写法 |
+| `InboundNoticeDemo` 第三个场景（`PENDING`） | `InboundNoticeDemo:128` | 演示"判定失败时**没有**应答"，比只演成功路径更能说明"引擎不兜底错误码"的设计选择 |
+| `InboundNoticeDemo` 的 ACK 模板里 `$.['seqNo']` 与 `$.seqNo` 并列 | `InboundNoticeDemo:78` | 一个是"对方的字段"、一个是"我方生成的流水号"；这对写法是可运行的反例教材，别改成统一写法 |
+| `DemoPostStrategy` 的"读产物再回填" | `DemoPostStrategy:46` | 后序策略最小样例；javadoc 里「整体替换不保留原键」是唯一的就地说明 |
+| `NoticeAckStamp` | `NoticeAckStamp:47` | 被调方向后序策略的唯一演示（也证明它跑在判定之前，拒收时白加工） |
+| `DemoPartnerGateway.getLastRequest()` | `DemoPartnerGateway:48` | 前序策略效果的**唯一**可观测点（报文出网后引擎不再暴露） |
 | `application.yml` 的 `web-application-type: none` | `:8` | `docs/08` 与设计文档承诺「非 Web 应用可退出 / `java -jar` exit=0」—— 改回去就破坏契约 |
 | `application-mysql.yml` 头部 9–16 行注释 | `:9-16` | `CannotGetJdbcConnectionException` 的结案记录（成对时区 + `%2B`） |
 | `application-mysql.yml` 的 `ddl.auto: false` | `:38` | 生产由 DBA 执行 SQL（用户明确要求保留） |

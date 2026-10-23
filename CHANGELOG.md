@@ -77,6 +77,18 @@
   `NoticeAcceptedAction`（原地补应答字段）/ `NoticeFailedAction`（把 `0000` 覆盖成 `2001` + `retryable`）；
   配 4 个用例（H2 全上下文），`mvn -pl ifmap-demo-spring-boot3 -am test` 8 例全绿。
 
+### Added（demo：前序 / 后序策略各一例，且都带断言）
+- **出网方向**：`DemoRunner` 挂 `post_strategy_name=demoPostStrategy` → 新类 `DemoPostStrategy` 在产物上回填
+  `settleRef` / `settleChannel`（原来只有 `pre_strategy_name=demoStrategy`，后序在 demo 里**完全没出现**）。
+- **被调方向**：`InboundNoticeDemo` 挂 `post_strategy_name=noticeAckStamp` → 新类 `NoticeAckStamp` 给应答产物
+  补 `ackChannel` / `ackBizId`（被调方向没有请求报文，**后序是唯一能挂策略的位置**）。
+- **`DemoPartnerGateway.getLastRequest()`**：前序策略改的是报文，报文出网后引擎不再暴露它 ⇒ 网关留一份，
+  让"策略到底把报文改成了什么样"可观测（此前前序 demo 只在日志里能看，**没有任何断言**）。
+- `IfmapDemoApplicationTest` 8 → **11 例**：`preStrategyRewritesRequest`（报文里有 `channelCode=ECC`）/
+  `postStrategyAppendsToProduct`（产物有 `settleRef` 且**原键保留** = 合并而非替换）/
+  `inboundPostStrategyStampsAck`（应答被盖章；`PENDING` 时后序照跑但产物无出口）。
+- `docs/12` 新增 §6.1「给应答补字段的三条通道怎么选」（应答模板 / 后序策略 / 分支动作，含"后序兜不了拒收"）。
+
 ### Removed（回调通道 —— 破坏性）
 - **删除 `CallbackRegistry` / `IfmapCallback` / `IfmapCallbackHandler` / `IfmapOrchestrator.callback(...)`**
   （连带只被它使用的 8 参 `writeLog` 重载；`IfmapAutoConfiguration` 不再有 `ifmapCallbackRegistry` bean，

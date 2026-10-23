@@ -24,6 +24,8 @@ import cn.cj.ifmap.core.exception.IfmapConfigException;
 import cn.cj.ifmap.core.exception.IfmapRemoteException;
 import cn.cj.ifmap.core.exception.IfmapStrategyException;
 import cn.cj.ifmap.core.json.JsonOps;
+import cn.cj.ifmap.core.json.JsonReadContext;
+import cn.cj.ifmap.core.orchestrator.branch.BranchJudge;
 import cn.cj.ifmap.core.model.PartnerCall;
 import cn.cj.ifmap.core.orchestrator.judgement.JudgementPipeline;
 import cn.cj.ifmap.core.orchestrator.judgement.ResultJudgeRegistry;
@@ -64,8 +66,9 @@ import java.util.Map;
  *   → 出网调用 PartnerServiceGateway（宿主机实现；也可用 mockResponse 做 dry-run）
  *   → 被调方向（call_direction=INBOUND）跳过上面两步：回参就是对方原文，不出网
  * 
- *   → 响应模板解析 → 结果判定 result_flag + success_value
- *   → 逻辑分支（logic_branch_order 升序，首个命中；兜底分支最后）→ ActionRegistry 执行动作
+ *   → 响应模板解析 → 结果判定 result_judge
+ *   → 逻辑分支（branch_judge 规格，logic_branch_order 升序首个命中；{"op":"always"} 兜底最后）
+ *     → ActionRegistry 执行动作
  *   → 执行日志（脱敏 + 截断后落库）
  * </pre>
  *
@@ -92,6 +95,7 @@ public final class IfmapOrchestrator {
     private final StrategyHookRegistry strategyHooks;
     private final FullParamStrategyRegistry fullParams;
     private final LogicBranchStrategyRegistry logicBranches;
+    private final BranchJudge branchJudge;
     private final ActionRegistry actions;
     private final PartnerServiceGateway gateway;
     private final ExecutionLogSink logSink;
@@ -110,6 +114,8 @@ public final class IfmapOrchestrator {
         this.strategyHooks = builder.strategyHooks;
         this.fullParams = builder.fullParams;
         this.logicBranches = builder.logicBranches;
+        this.branchJudge = new BranchJudge(this.jsonOps,
+                this.logicBranches != null ? this.logicBranches : new LogicBranchStrategyRegistry());
         this.actions = builder.actions;
         this.gateway = builder.gateway;
         this.logSink = builder.logSink;
@@ -287,15 +293,25 @@ public final class IfmapOrchestrator {
         Map<String, Object> data = applyPostStrategy(context, renderResponse(config, response, ruleContext));
         // 判定读**原始回参**：后序策略只能加工产物，改不动成败
         Judgement judgement = pipeline.judge(config, response, outcome);
-        // 只有判定成功才入池：池的键集合 == 已成功步骤集合 == 断点续跑的进度
-        if (judgement.isSuccess()) {
-            pool.put(config.getInterfaceNo(), data);
-        }
         // 产物回填到 context：后序策略未配置时上面会早返回，这里不设的话动作里 getResponseData() 一直是 null，
         // 「在动作里回填应答字段（改这个 Map 的键）」这条通道就断了（池与返回值用的是同一个对象，改了都可见）
         context.setResponseData(data);
-        // 分支动作只在成功时执行：失败时调动作既没意义，还会掩盖真实失败原因
-        String matchedBranch = judgement.isSuccess() ? applyBranch(request, tenantId, config, context, response, judgement) : null;
+        // 分支只在结果判定成功时求值：失败时选分支既没意义，还会掩盖真实失败原因。
+        // 但分支**规格非法**照样能把这一步判失败（fail-closed）——此时结果判定已过，不能算成功。
+        String matchedBranch = null;
+        if (judgement.isSuccess()) {
+            BranchOutcome branch = applyBranch(tenantId, config, context, response, judgement);
+            if (branch.getInvalidSpec() != null) {
+                judgement = judgement.asBranchFailure("分支判定规格非法：" + branch.getInvalidSpec());
+            } else {
+                matchedBranch = branch.getMatchedName();
+            }
+        }
+        // 只有判定成功才入池：池的键集合 == 已成功步骤集合 == 断点续跑的进度
+        // （必须在分支结论之后：分支 fail-closed 的步骤不算成功，不能进池）
+        if (judgement.isSuccess()) {
+            pool.put(config.getInterfaceNo(), data);
+        }
         String errorMessage = judgement.isSuccess() ? null : failureMessage(judgement);
         long elapsed = clock.currentTimeMillis() - start;
         // 日志放在最终结论之后：记的是真实耗时与最终判定；writeLog 内部吞异常，落库失败不影响返回值。
@@ -514,72 +530,143 @@ public final class IfmapOrchestrator {
     /**
      * 逻辑分支：按 {@code logic_branch_order} 升序取首个命中者，执行其动作。
      *
-     * <p><b>兜底分支</b>（{@code logic_branch_flag} 为空，存量用"flag、value 皆空"表达）
-     * 不参与常规匹配，只有所有常规分支都未命中时才生效；即使它排在前面也不会抢常规
-     * 分支的命中。存量 ECC 的兜底分支正是这个语义（先正常匹配、失败再取 blank flag 的那条），
-     * 所以迁移过来的配置行为不变。</p>
+     * <p><b>兜底分支</b>（{@code branch_judge={"op":"always"}}）不参与常规匹配，只有所有常规分支
+     * 都未命中时才生效；即使它排在前面也不会抢常规分支的命中（存量 ECC 的兜底正是这个语义）。</p>
+     *
+     * <p><b>先全部校验、再匹配</b>：任何一条分支的规格非法，整个接口直接 fail-closed（{@code SPEC_INVALID}），
+     * 不取决于"这次回参恰好先命中了哪条"。否则坏配置只在特定报文下才暴露，属于最难查的一类问题。
+     * 校验走 {@link BranchJudge} 的进程内缓存，热路径仍是每个分支一次哈希查找。</p>
+     *
+     * <p>{@code branch_judge} 为空（存量未回填）同样算非法：静默当兜底会让所有流量走错分支。</p>
      */
-    private String applyBranch(IfmapRequest request, String tenantId, IfmapConfig config,
-                               StrategyContext context, String response, Judgement judgement) {
+    private BranchOutcome applyBranch(String tenantId, IfmapConfig config, StrategyContext context, String response,
+                                      Judgement judgement) {
         List<LogicBranchConfig> branches = repository.queryLogicBranches(tenantId, config.getInterfaceNo());
         if (branches == null || branches.isEmpty()) {
             LOG.debug("ifmap 接口 {} 无逻辑分支配置", config.getInterfaceNo());
-            return null;
+            return BranchOutcome.none();
         }
-        // 兜底分支（flag 为空）先存起来、最后才用：它不能抢常规分支的命中
+        // 一趟先校验：坏配置不因为"别的分支先命中"而被掩盖
+        for (LogicBranchConfig branch : branches) {
+            if (branch == null) {
+                continue;
+            }
+            String raw = trimToNull(branch.getBranchJudge());
+            if (raw == null) {
+                return BranchOutcome.invalid("分支 " + describeBranch(branch)
+                        + " 未配置 branch_judge；兜底分支请写 {\"op\":\"always\"}，"
+                        + "存量数据按 docs/10 §7 回填");
+            }
+            String error = branchJudge.errorOf(raw);
+            if (error != null) {
+                return BranchOutcome.invalid("分支 " + describeBranch(branch) + " 的规格非法：" + error);
+            }
+        }
+        JsonReadContext ctx = readContextQuietly(config, response);
+        // 兜底分支（always）先存起来、最后才用：它不能抢常规分支的命中；多余的兜底分支永不生效（保存期校验已拦）
         LogicBranchConfig catchAll = null;
         for (LogicBranchConfig branch : branches) {
             if (branch == null) {
                 continue;
             }
-            if (trimToNull(branch.getLogicBranchFlag()) == null) {
-                // 兜底分支：留到最后；多余的兜底分支永不生效（admin 侧校验会拦）
+            String raw = trimToNull(branch.getBranchJudge());
+            if (branchJudge.isAlways(raw)) {
                 if (catchAll == null) {
                     catchAll = branch;
                 }
                 continue;
             }
-            if (!matches(branch, context, judgement)) {
+            BranchJudge.Result result = branchJudge.evaluate(raw, ctx, judgement, context);
+            if (!result.isMatched()) {
                 continue;
             }
-            return executeBranch(context, branch);
+            return BranchOutcome.matched(executeBranch(context, branch));
         }
         if (catchAll != null) {
-            LOG.debug("ifmap 接口 {} 常规分支均未命中，走兜底分支（action={}）", config.getInterfaceNo(),
-                    catchAll.getMethodFlag());
-            return executeBranch(context, catchAll);
+            LOG.debug("ifmap 接口 {} 常规分支均未命中，走兜底分支（name={}）", config.getInterfaceNo(),
+                    catchAll.getLogicBranchName());
+            return BranchOutcome.matched(executeBranch(context, catchAll));
         }
-        LOG.warn("ifmap 接口 {} 有 {} 条逻辑分支但均未命中（result={}）", config.getInterfaceNo(),
+        LOG.warn("ifmap 接口 {} 有 {} 条逻辑分支但均未命中（actual={}）", config.getInterfaceNo(),
                 branches.size(), judgement.getActualValue());
-        return null;
+        return BranchOutcome.none();
     }
 
-    /** 执行分支对应的动作，返回分支标识（{@code logic_branch_flag}）。 */
+    /**
+     * 执行分支对应的动作，返回<b>分支名</b>（{@code logic_branch_name}）。
+     *
+     * <p>返回值是分支名而不是策略键/判定值：日志与 {@code IfmapResult.matchedBranch} 要回答的是
+     * "走了哪条业务分支"，而策略键只是实现细节（同一分支可能既用策略又用取值）。</p>
+     *
+     * <p>{@code method_flag} 为空 = 该分支不执行动作（命中即返回，不兜底拿别的字段当动作 key）。</p>
+     */
     private String executeBranch(StrategyContext context, LogicBranchConfig branch) {
-        String flag = trimToNull(branch.getLogicBranchFlag());
-        context.setMatchedBranch(flag);
+        String name = trimToNull(branch.getLogicBranchName());
+        context.setMatchedBranch(name);
         String actionKey = trimToNull(branch.getMethodFlag());
-        actions.execute(actionKey == null ? flag : actionKey, context);
-        return flag;
+        if (actionKey == null) {
+            LOG.debug("ifmap 分支 {} 未配置 method_flag，命中后不执行动作", name);
+            return name;
+        }
+        actions.execute(actionKey, context);
+        return name;
     }
 
-    /** 常规分支是否命中：{@code logic_branch_flag} 策略命中，或判定值在 {@code logic_branch_value} 列表内。 */
-    private boolean matches(LogicBranchConfig branch, StrategyContext context, Judgement judgement) {
-        String flag = trimToNull(branch.getLogicBranchFlag());
-        if (logicBranches.matches(flag, context)) {
-            return true;
+    /** 分支的日志标识：名称优先，没名字就退到主键（不打印规格原文，太吵）。 */
+    private static String describeBranch(LogicBranchConfig branch) {
+        String name = trimToNull(branch.getLogicBranchName());
+        return name != null ? name : ("#" + branch.getKeyId());
+    }
+
+    /**
+     * 建立原文读取上下文；对方回参不是 JSON 时返回 {@code null}（按"取不到值"求值）。
+     *
+     * <p>分支规格里的 {@code path} 读不到东西只意味着"这条分支不命中"，<b>不能</b>因为分支配置
+     * 或对方回参格式把一笔已成功的调用判失败。</p>
+     */
+    private JsonReadContext readContextQuietly(IfmapConfig config, String response) {
+        if (response == null || response.trim().isEmpty()) {
+            return null;
         }
-        String value = trimToNull(branch.getLogicBranchValue());
-        if (value == null || judgement.getActualValue() == null) {
-            return false;
+        try {
+            return jsonOps.readContext(response);
+        } catch (RuntimeException e) {
+            LOG.warn("ifmap 接口 {} 的分支判定拿不到 JSON 原文（{}），按取不到值处理", config.getInterfaceNo(),
+                    e.getMessage());
+            return null;
         }
-        // logic_branch_value 支持分号/逗号枚举且大小写不敏感（对齐存量 ECC 口径）
-        for (String candidate : value.split("[;,]")) {
-            if (candidate.trim().equalsIgnoreCase(judgement.getActualValue().trim())) {
-                return true;
-            }
+    }
+
+    /** 分支结论：命中（带分支名）/ 无命中 / 规格非法（fail-closed）。 */
+    private static final class BranchOutcome {
+
+        private final String matchedName;
+        private final String invalidSpec;
+
+        private BranchOutcome(String matchedName, String invalidSpec) {
+            this.matchedName = matchedName;
+            this.invalidSpec = invalidSpec;
         }
-        return false;
+
+        static BranchOutcome matched(String name) {
+            return new BranchOutcome(name, null);
+        }
+
+        static BranchOutcome none() {
+            return new BranchOutcome(null, null);
+        }
+
+        static BranchOutcome invalid(String reason) {
+            return new BranchOutcome(null, reason);
+        }
+
+        String getMatchedName() {
+            return matchedName;
+        }
+
+        String getInvalidSpec() {
+            return invalidSpec;
+        }
     }
 
     /** 模板为空 → 原样返回 source：把「没配模板」当成「不做变换」，而不是渲染出 "null"。 */

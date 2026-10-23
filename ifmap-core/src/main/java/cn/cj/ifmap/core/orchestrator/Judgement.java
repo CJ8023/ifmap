@@ -29,9 +29,14 @@ import cn.cj.ifmap.core.orchestrator.judgement.JudgeFailType;
  */
 public final class Judgement {
 
-    /** 判定所处的段（设计 §3.3）：传输 / 业务规格 / 抽取；成功时为 {@code null}。 */
+    /**
+     * 判定所处的段（设计 §3.3）：传输 / 业务规格 / 抽取 / 分支选择；成功时为 {@code null}。
+     *
+     * <p>{@link #BRANCH} 只在<b>分支判定规格非法</b>时出现：结果判定已成功、但拿不出合法的分支规格，
+     * 这一步按 fail-closed 判失败（{@code SPEC_INVALID}），不落到兜底分支。</p>
+     */
     public enum Stage {
-        TRANSPORT, BUSINESS, EXTRACT, NONE
+        TRANSPORT, BUSINESS, EXTRACT, BRANCH, NONE
     }
 
     private final boolean success;
@@ -150,6 +155,17 @@ public final class Judgement {
     public Judgement withErrorCode(String newErrorCode) {
         return new Judgement(success, stage, failType, actualValue, expectedValue, newErrorCode, httpStatus,
                 trackId, message, reason);
+    }
+
+    /**
+     * 分支判定规格非法：把"结果判定成功"翻成失败（fail-closed）。
+     *
+     * <p>保留原 {@code actualValue} / 失败上下文，只改结论：日志里既能看到对方回参判过的值，
+     * 也能看到失败原因是分支规格。</p>
+     */
+    public Judgement asBranchFailure(String branchReason) {
+        return new Judgement(false, Stage.BRANCH, JudgeFailType.SPEC_INVALID.name(), actualValue, expectedValue,
+                errorCode, httpStatus, trackId, message, branchReason);
     }
 
     /** ③ 段抽取结果：只补信息，不改 {@code success} 与 {@code failType}。 */

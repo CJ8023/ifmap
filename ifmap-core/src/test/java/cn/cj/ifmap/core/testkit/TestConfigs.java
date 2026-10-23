@@ -51,18 +51,51 @@ public final class TestConfigs {
         return config;
     }
 
-    /** 造一条逻辑分支配置。 */
-    public static LogicBranchConfig branch(long keyId, String interfaceNo, int order, String flag, String value,
-                                           String methodFlag) {
+    /** 造一条逻辑分支配置。branchJudge 必填，兜底分支写 always 规格。 */
+    public static LogicBranchConfig branch(long keyId, String interfaceNo, int order, String name,
+                                           String branchJudge, String methodFlag) {
         LogicBranchConfig branch = new LogicBranchConfig();
         branch.setKeyId(Long.valueOf(keyId));
         branch.setTenantId(Long.valueOf(-1L));
         branch.setInterfaceNo(interfaceNo);
         branch.setLogicBranchOrder(Integer.valueOf(order));
-        branch.setLogicBranchFlag(flag);
-        branch.setLogicBranchValue(value);
+        branch.setLogicBranchName(name);
+        branch.setBranchJudge(branchJudge);
         branch.setMethodFlag(methodFlag);
         return branch;
+    }
+
+    /** 兜底分支（规格恒真）。 */
+    public static LogicBranchConfig fallbackBranch(long keyId, String interfaceNo, int order, String name,
+                                                   String methodFlag) {
+        return branch(keyId, interfaceNo, order, name, "{\"op\":\"always\"}", methodFlag);
+    }
+
+    /** 按结果判定值分流（旧 {@code logic_branch_value} 的等价形态）。 */
+    public static LogicBranchConfig judgedBranch(long keyId, String interfaceNo, int order, String name,
+                                                String methodFlag, String... values) {
+        StringBuilder sb = new StringBuilder("{\"any\":[{\"op\":\"judged\",\"ignoreCase\":true,\"value\":[");
+        for (int i = 0; i < values.length; i++) {
+            sb.append(i == 0 ? "" : ",").append('"').append(values[i]).append('"');
+        }
+        return branch(keyId, interfaceNo, order, name, sb.append("]}]}").toString(), methodFlag);
+    }
+
+    /** 按原文 JsonPath 分流。 */
+    public static LogicBranchConfig pathBranch(long keyId, String interfaceNo, int order, String name,
+                                              String methodFlag, String path, String op, String... values) {
+        StringBuilder sb = new StringBuilder("{\"any\":[{\"path\":\"").append(path)
+                .append("\",\"op\":\"").append(op).append('"');
+        // 单值算子（eq/ne/regex）写标量；in/notIn 写数组 —— 写错了就是非法规格，夹具不该替使用者兜底
+        boolean list = "in".equalsIgnoreCase(op) || "notIn".equalsIgnoreCase(op);
+        if (values.length > 0) {
+            sb.append(",\"value\":").append(list ? "[" : "");
+            for (int i = 0; i < values.length; i++) {
+                sb.append(i == 0 ? "" : ",").append('"').append(values[i]).append('"');
+            }
+            sb.append(list ? "]" : "");
+        }
+        return branch(keyId, interfaceNo, order, name, sb.append("}]}").toString(), methodFlag);
     }
 
     /** 记录调用顺序的内存仓储。 */

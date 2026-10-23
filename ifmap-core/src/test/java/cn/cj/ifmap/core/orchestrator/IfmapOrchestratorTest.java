@@ -38,6 +38,9 @@ import cn.cj.ifmap.core.strategy.FullParamStrategyRegistry;
 import cn.cj.ifmap.core.strategy.IfmapAction;
 import cn.cj.ifmap.core.strategy.IfmapActionHandler;
 import cn.cj.ifmap.core.strategy.IfmapStrategyHook;
+import cn.cj.ifmap.core.strategy.LogicBranch;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategy;
+import cn.cj.ifmap.core.strategy.LogicBranchStrategyRegistry;
 import cn.cj.ifmap.core.strategy.StrategyHookRegistry;
 import cn.cj.ifmap.core.strategy.StrategyContext;
 import cn.cj.ifmap.core.testkit.TestConfigs;
@@ -124,6 +127,15 @@ class IfmapOrchestratorTest {
         @Override
         public void execute(StrategyContext context) {
             context.putParam("submitted", Boolean.TRUE);
+        }
+    }
+
+    /** 策略通道：{@code branch_judge} 里的 {@code strategy} 算子按这个 key 找实现。 */
+    @LogicBranch("submit")
+    public static class SubmitStrategy implements LogicBranchStrategy {
+        @Override
+        public boolean match(StrategyContext context) {
+            return true;
         }
     }
 
@@ -247,6 +259,12 @@ class IfmapOrchestratorTest {
 
     private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions,
                                            StrategyHookRegistry strategyHooks) {
+        return orchestrator(gateway, actions, strategyHooks, null);
+    }
+
+    private IfmapOrchestrator orchestrator(PartnerServiceGateway gateway, ActionRegistry actions,
+                                           StrategyHookRegistry strategyHooks,
+                                           LogicBranchStrategyRegistry logicBranches) {
         FullParamStrategyRegistry fullParams = new FullParamStrategyRegistry();
         fullParams.register(new CmbFullParam());
         return IfmapOrchestrator.builder()
@@ -256,6 +274,7 @@ class IfmapOrchestratorTest {
                 .tenantResolver(new HeaderTenantResolver())
                 .strategyHooks(strategyHooks)
                 .fullParams(fullParams)
+                .logicBranches(logicBranches)
                 .actions(actions)
                 .gateway(gateway)
                 .logSink(new RepositoryExecutionLogSink(repository))
@@ -551,7 +570,7 @@ class IfmapOrchestratorTest {
     @Test
     void branchMatchesByValueAndExecutesAction() {
         repository.add(mainConfig("IF_D", 1, 1L));
-        repository.add(TestConfigs.branch(10L, "IF_D", 1, "submit", "0000", "doSubmit"));
+        repository.add(TestConfigs.judgedBranch(10L, "IF_D", 1, "SUCCESS_BRANCH", "doSubmit", "0000"));
 
         ActionRegistry actions = new ActionRegistry();
         actions.register(new SubmitAction());
@@ -559,8 +578,8 @@ class IfmapOrchestratorTest {
         IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions)
                 .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_D", "GP81");
 
-        assertTrue(result.isSuccess());
-        assertEquals("submit", result.getMatchedBranch());
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals("SUCCESS_BRANCH", result.getMatchedBranch(), "matchedBranch 是分支名，不再是策略键");
         assertTrue(actions.contains("doSubmit"));
     }
 
@@ -570,8 +589,8 @@ class IfmapOrchestratorTest {
         // 迁移来自 ECC 的兜底分支（flag/value 皆空）如果在 ifmap 里静默不生效，
         // 表现就是"迁移后某些银行的业务回调不执行"——最难查的一类问题，所以单独锁死。
         repository.add(mainConfig("IF_I", 1, 1L));
-        repository.add(TestConfigs.branch(20L, "IF_I", 1, "submit", "1111", "recSubmit"));
-        repository.add(TestConfigs.branch(21L, "IF_I", 9, null, null, "recFallback"));
+        repository.add(TestConfigs.judgedBranch(20L, "IF_I", 1, "SUBMIT_BRANCH", "recSubmit", "1111"));
+        repository.add(TestConfigs.fallbackBranch(21L, "IF_I", 9, "FALLBACK", "recFallback"));
 
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
@@ -590,8 +609,8 @@ class IfmapOrchestratorTest {
     void defaultBranchDoesNotShadowMatchedBranch() {
         // 兜底分支即使排在前面（order 更小）也不能抢常规分支的命中
         repository.add(mainConfig("IF_J", 1, 1L));
-        repository.add(TestConfigs.branch(30L, "IF_J", 1, null, null, "recFallback"));
-        repository.add(TestConfigs.branch(31L, "IF_J", 2, "submit", "0000", "recSubmit"));
+        repository.add(TestConfigs.fallbackBranch(30L, "IF_J", 1, "FALLBACK", "recFallback"));
+        repository.add(TestConfigs.judgedBranch(31L, "IF_J", 2, "SUBMIT_BRANCH", "recSubmit", "0000"));
 
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
@@ -604,18 +623,108 @@ class IfmapOrchestratorTest {
         assertTrue(result.isSuccess());
         assertEquals(Collections.singletonList("submit"), recorder.executed,
                 "兜底分支排在前面也不能覆盖常规分支的命中");
-        assertEquals("submit", result.getMatchedBranch());
+        assertEquals("SUBMIT_BRANCH", result.getMatchedBranch());
     }
 
     @Test
     void missingActionFailsLoudly() {
         repository.add(mainConfig("IF_E", 1, 1L));
-        repository.add(TestConfigs.branch(11L, "IF_E", 1, "submit", "0000", "notRegisteredAction"));
+        repository.add(TestConfigs.judgedBranch(11L, "IF_E", 1, "SUBMIT_BRANCH", "notRegisteredAction", "0000"));
 
         IfmapOrchestrator orchestrator = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), new ActionRegistry());
         IfmapStrategyException e = assertThrows(IfmapStrategyException.class,
                 () -> orchestrator.execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_E", "GP81"));
         assertTrue(e.getMessage().contains("notRegisteredAction"));
+    }
+
+    @Test
+    @DisplayName("分支规格非法 → fail-closed：该步判失败（SPEC_INVALID），一条动作都不执行，也不落到兜底")
+    void invalidBranchSpecFailsClosed() {
+        repository.add(mainConfig("IF_K", 1, 1L));
+        repository.add(TestConfigs.fallbackBranch(50L, "IF_K", 9, "FALLBACK", "recFallback"));
+        // 顺序故意让合法分支排在坏分支前面：坏配置不能因为"别的分支先命中"就被掩盖
+        repository.add(TestConfigs.judgedBranch(51L, "IF_K", 1, "SUBMIT_BRANCH", "recSubmit", "0000"));
+        repository.add(TestConfigs.branch(52L, "IF_K", 2, "BAD_BRANCH", "{\"all\":[]}", "recSubmit"));
+
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+        actions.register(new RecFallbackAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_K", "GP81");
+
+        assertFalse(result.isSuccess(), "坏规格不能静默当兜底放过");
+        assertEquals("SPEC_INVALID", result.getFailType());
+        assertNull(result.getMatchedBranch());
+        assertTrue(recorder.executed.isEmpty(), "任一分支规格非法则一条动作都不执行：" + recorder.executed);
+        ExecutionLog log = repository.getLogs().get(0);
+        assertEquals("FAIL", log.getExecutionResult());
+        assertEquals("SPEC_INVALID", log.getFailType());
+        assertTrue(log.getErrorMsg().contains("BAD_BRANCH"), log.getErrorMsg());
+        assertTrue(log.getErrorMsg().contains("分支判定规格非法"), log.getErrorMsg());
+    }
+
+    @Test
+    @DisplayName("branch_judge 为空（存量未回填）→ fail-closed，错误信息指向回填")
+    void emptyBranchJudgeFailsClosed() {
+        repository.add(mainConfig("IF_K2", 1, 1L));
+        repository.add(TestConfigs.branch(53L, "IF_K2", 1, "LEGACY_BRANCH", "", "recSubmit"));
+
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_K2", "GP81");
+
+        assertFalse(result.isSuccess(), "空规格不是兜底，而是非法配置");
+        assertEquals("SPEC_INVALID", result.getFailType());
+        assertTrue(recorder.executed.isEmpty());
+        assertTrue(repository.getLogs().get(0).getErrorMsg().contains("回填"),
+                repository.getLogs().get(0).getErrorMsg());
+    }
+
+    @Test
+    @DisplayName("strategy 通道：branch_judge 写策略键，交 @LogicBranch 注册表求值")
+    void strategyBranchMatchesThroughRegistry() {
+        repository.add(mainConfig("IF_L", 1, 1L));
+        repository.add(TestConfigs.branch(60L, "IF_L", 1, "STRATEGY_BRANCH",
+                "{\"any\":[{\"op\":\"strategy\",\"value\":\"submit\"}]}", "recSubmit"));
+
+        LogicBranchStrategyRegistry logicBranches = new LogicBranchStrategyRegistry();
+        logicBranches.register(new SubmitStrategy());
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("{\"code\":\"0000\"}"), actions,
+                new StrategyHookRegistry(), logicBranches)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_L", "GP81");
+
+        assertTrue(result.isSuccess(), result.getErrorMessage());
+        assertEquals("STRATEGY_BRANCH", result.getMatchedBranch());
+        assertEquals(Collections.singletonList("submit"), recorder.executed);
+    }
+
+    @Test
+    @DisplayName("非 JSON 回参 + path 规格 → 按取不到值处理：调用仍成功，只是不命中分支")
+    void nonJsonResponseWithPathSpecDoesNotFail() {
+        // 判定是 always（不看回参），分支却写了 path：规格本身合法，只是这次读不到东西
+        repository.add(TestConfigs.config("IF_M", "GP81", 1, 1L));
+        repository.add(TestConfigs.pathBranch(70L, "IF_M", 1, "OK_BRANCH", "recSubmit",
+                "$.noticeStatus", "eq", "SUCCESS"));
+
+        Recorder recorder = new Recorder();
+        ActionRegistry actions = new ActionRegistry();
+        actions.register(new RecSubmitAction(recorder));
+
+        IfmapResult result = orchestrator(new CapturingGateway("not-json-at-all"), actions)
+                .execute(IfmapRequest.builder().put("orgCode", "1").build(), "IF_M", "GP81");
+
+        assertTrue(result.isSuccess(), "分支配置不能把成功的调用判失败：" + result.getErrorMessage());
+        assertNull(result.getMatchedBranch());
+        assertTrue(recorder.executed.isEmpty());
     }
 
     @Test
@@ -762,7 +871,8 @@ class IfmapOrchestratorTest {
     @DisplayName("被调方向：分支命中后动作原地改产物，返回值与日志都能看到回填字段")
     void inboundBranchFillsAckThroughResponseData() {
         repository.add(inboundConfig("IF_N2", 2L));
-        repository.add(TestConfigs.branch(40L, "IF_N2", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        repository.add(TestConfigs.pathBranch(40L, "IF_N2", 1, "PAY_SUCCESS", "noticeHandled",
+                "$.noticeStatus", "eq", "SUCCESS"));
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
         actions.register(new NoticeAction(recorder));
@@ -783,8 +893,10 @@ class IfmapOrchestratorTest {
     @DisplayName("被调方向：成功/失败通知都算「可受理」，各自走自己的分支（判定不能判业务成败）")
     void inboundBothStatesAreAcceptedAndRouted() {
         repository.add(inboundConfig("IF_N3", 3L));
-        repository.add(TestConfigs.branch(41L, "IF_N3", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
-        repository.add(TestConfigs.branch(42L, "IF_N3", 2, "PAY_FAILED", "FAILED", "noticeHandled"));
+        repository.add(TestConfigs.pathBranch(41L, "IF_N3", 1, "PAY_SUCCESS", "noticeHandled",
+                "$.noticeStatus", "eq", "SUCCESS"));
+        repository.add(TestConfigs.pathBranch(42L, "IF_N3", 2, "PAY_FAILED", "noticeHandled",
+                "$.noticeStatus", "eq", "FAILED"));
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
         actions.register(new NoticeAction(recorder));
@@ -805,7 +917,8 @@ class IfmapOrchestratorTest {
     @DisplayName("被调方向：状态不在白名单 → 判定失败，分支动作不执行（照旧落 FAIL 日志）")
     void inboundUnknownStatusFailsWithoutBranch() {
         repository.add(inboundConfig("IF_N4", 4L));
-        repository.add(TestConfigs.branch(43L, "IF_N4", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
+        repository.add(TestConfigs.pathBranch(43L, "IF_N4", 1, "PAY_SUCCESS", "noticeHandled",
+                "$.noticeStatus", "eq", "SUCCESS"));
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
         actions.register(new NoticeAction(recorder));
@@ -824,8 +937,8 @@ class IfmapOrchestratorTest {
     @DisplayName("被调方向：判定读原文、入参读 payload —— 两者不一致时各走各的（不能互相顶掉）")
     void inboundPayloadWinsOverRawBodyForParamsOnly() {
         repository.add(inboundConfig("IF_N5", 5L));
-        repository.add(TestConfigs.branch(44L, "IF_N5", 1, "PAY_SUCCESS", "SUCCESS", "noticeHandled"));
-        repository.add(TestConfigs.branch(45L, "IF_N5", 2, "PAY_FAILED", "FAILED", "noticeHandled"));
+        repository.add(TestConfigs.judgedBranch(44L, "IF_N5", 1, "PAY_SUCCESS", "noticeHandled", "SUCCESS"));
+        repository.add(TestConfigs.judgedBranch(45L, "IF_N5", 2, "PAY_FAILED", "noticeHandled", "FAILED"));
         Recorder recorder = new Recorder();
         ActionRegistry actions = new ActionRegistry();
         actions.register(new NoticeAction(recorder));
